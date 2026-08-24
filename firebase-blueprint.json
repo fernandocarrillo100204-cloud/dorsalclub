@@ -1,0 +1,119 @@
+{
+  "entities": {
+    "Almacen": {
+      "title": "Almacen",
+      "description": "Almacén físico o sucursal donde se almacena mercancía",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nombre": { "type": "string", "maxLength": 100 },
+        "ubicacion": { "type": "string", "maxLength": 200 }
+      },
+      "required": ["id", "nombre", "ubicacion"]
+    },
+    "Producto": {
+      "title": "Producto",
+      "description": "Artículo o variante de inventario registrado",
+      "type": "object",
+      "properties": {
+        "producto_base_id": { "type": "string", "maxLength": 100 },
+        "sku": { "type": "string", "maxLength": 80 },
+        "nombre": { "type": "string", "maxLength": 150 },
+        "marca": { "type": "string", "maxLength": 80 },
+        "categoria": { "type": "string", "maxLength": 100 },
+        "color": { "type": "string", "maxLength": 50 },
+        "talla": { "type": "string", "maxLength": 30 },
+        "tipo_talla": { "type": "string", "enum": ["ropa", "calzado", "unica"] },
+        "codigo_barras": { "type": "string", "maxLength": 100 },
+        "precio_venta_sugerido": { "type": "number" },
+        "stock_minimo": { "type": "number" },
+        "unidad": { "type": "string", "maxLength": 30 },
+        "activo": { "type": "boolean" }
+      },
+      "required": ["sku", "nombre", "categoria", "stock_minimo"]
+    },
+    "StockItem": {
+      "title": "StockItem",
+      "description": "Nivel de existencia actual por producto y almacén",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sku": { "type": "string" },
+        "almacen_id": { "type": "string" },
+        "cantidad": { "type": "number" }
+      },
+      "required": ["id", "sku", "almacen_id", "cantidad"]
+    },
+    "Movimiento": {
+      "title": "Movimiento",
+      "description": "Registro de transacción de inventario (Entrada, Salida o Transferencia)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "folio": { "type": "string" },
+        "tipo": { "type": "string", "enum": ["Entrada", "Salida", "Transferencia"] },
+        "sku": { "type": "string" },
+        "cantidad": { "type": "number" },
+        "almacen_id": { "type": "string" },
+        "origen_id": { "type": "string" },
+        "destino_id": { "type": "string" },
+        "referencia": { "type": "string" },
+        "anulado": { "type": "boolean" },
+        "anulado_at": { "type": "string" },
+        "anulado_by": { "type": "string" },
+        "anulado_motivo": { "type": "string" }
+      },
+      "required": ["tipo", "sku", "cantidad"]
+    },
+    "ResumenVentaDiaria": {
+      "title": "ResumenVentaDiaria",
+      "description": "Resumen acumulativo incremental de ventas por fecha, producto y almacén",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fecha_str": { "type": "string" },
+        "sku": { "type": "string" },
+        "almacen_id": { "type": "string" },
+        "cantidad": { "type": "number" },
+        "total_transacciones": { "type": "number" }
+      },
+      "required": ["id", "fecha_str", "sku", "almacen_id", "cantidad"]
+    },
+    "ContadorFolio": {
+      "title": "ContadorFolio",
+      "description": "Contador atómico de folios por tipo de movimiento",
+      "type": "object",
+      "properties": {
+        "current": { "type": "number" },
+        "tipo": { "type": "string" }
+      },
+      "required": ["current"]
+    }
+  },
+  "firestore": {
+    "/almacenes/{almacenId}": {
+      "schema": { "$ref": "#/entities/Almacen" },
+      "description": "Colección de almacenes y sucursales físicas"
+    },
+    "/productos/{sku}": {
+      "schema": { "$ref": "#/entities/Producto" },
+      "description": "Catálogo maestro de productos y SKUs"
+    },
+    "/stock/{stockId}": {
+      "schema": { "$ref": "#/entities/StockItem" },
+      "description": "Existencias atómicas en tiempo real"
+    },
+    "/movimientos/{movimientoId}": {
+      "schema": { "$ref": "#/entities/Movimiento" },
+      "description": "Bitácora histórica de transacciones de inventario"
+    },
+    "/resumen_ventas/{resumenId}": {
+      "schema": { "$ref": "#/entities/ResumenVentaDiaria" },
+      "description": "Resúmenes diarios incrementales de salidas de venta"
+    },
+    "/contadores/{contadorId}": {
+      "schema": { "$ref": "#/entities/ContadorFolio" },
+      "description": "Contadores atómicos de secuencias de folios"
+    }
+  }
+}

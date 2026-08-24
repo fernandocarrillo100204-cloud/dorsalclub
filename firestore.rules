@@ -1,0 +1,131 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    // Almacenes Collection
+    match /almacenes/{almacenId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() 
+        && isValidId(almacenId)
+        && incoming().nombre is string && incoming().nombre.size() > 0 && incoming().nombre.size() <= 100
+        && incoming().ubicacion is string && incoming().ubicacion.size() <= 200;
+      allow delete: if isSignedIn();
+    }
+
+    // Productos Collection
+    match /productos/{sku} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(sku)
+        && incoming().nombre is string && incoming().nombre.size() > 0 && incoming().nombre.size() <= 120
+        && incoming().stock_minimo is number && incoming().stock_minimo >= 0;
+      allow delete: if isSignedIn();
+    }
+
+    // Stock Collection
+    match /stock/{stockId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(stockId)
+        && incoming().sku is string && incoming().sku.size() > 0
+        && incoming().almacen_id is string && incoming().almacen_id.size() > 0
+        && incoming().cantidad is number && incoming().cantidad >= 0;
+      allow delete: if isSignedIn();
+    }
+
+    // Movimientos Collection
+    match /movimientos/{movimientoId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && isValidId(movimientoId)
+        && incoming().sku is string
+        && incoming().tipo in ['entrada', 'salida', 'transferencia', 'ajuste']
+        && incoming().cantidad is number && incoming().cantidad > 0;
+      allow update: if isSignedIn()
+        && (!('estado' in existing()) || existing().estado != 'anulado')
+        && incoming().estado == 'anulado'
+        && incoming().diff(existing()).affectedKeys().hasOnly(['estado', 'anulado_at', 'anulado_por', 'motivo_anulacion'])
+        && incoming().anulado_at is timestamp
+        && incoming().anulado_por is string && incoming().anulado_por.size() > 0 && incoming().anulado_por.size() <= 200
+        && incoming().motivo_anulacion is string && incoming().motivo_anulacion.size() > 0 && incoming().motivo_anulacion.size() <= 500;
+      allow delete: if false;
+    }
+
+    // Migraciones Collection (one-time migration trackers)
+    match /migraciones/{migracionId} {
+      allow read, create, update: if isSignedIn();
+      allow delete: if false;
+    }
+
+    // Contadores Collection (used for atomic folio generation)
+    match /contadores/{contadorId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(contadorId);
+      allow delete: if false;
+    }
+
+    // Resumen de Ventas Collection (incremental daily sales aggregations)
+    match /resumen_ventas/{resumenId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(resumenId)
+        && incoming().sku is string
+        && incoming().almacen_id is string
+        && incoming().fecha_str is string
+        && incoming().cantidad is number;
+      allow delete: if false;
+    }
+
+    // Catalogs & System Configuration
+    match /catalogo_categorias/{catId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /catalogo_marcas/{marcaId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /catalogo_colores/{colorId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /catalogo_tallas_ropa/{tallaId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /catalogo_tallas_calzado/{tallaId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /catalogo_unidades/{unitId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /configuracion/{configId} {
+      allow read, write: if isSignedIn();
+    }
+  }
+}

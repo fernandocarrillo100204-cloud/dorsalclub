@@ -1,0 +1,10 @@
+{
+  "name": "dorsalclub",
+  "description": "Inventario de streetwear y sneakers",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
