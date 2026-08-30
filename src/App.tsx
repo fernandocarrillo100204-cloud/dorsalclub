@@ -3,20 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense, lazy } from "react";
 import { authService, firestoreService } from "./lib/firebase";
 import { Usuario, Almacen, Producto, StockItem, NavigationTab } from "./types";
 import Sidebar from "./components/Sidebar";
 import Login from "./components/Login";
-import Dashboard from "./components/Dashboard";
-import Compras from "./components/Compras";
-import Ventas from "./components/Ventas";
-import Transferencias from "./components/Transferencias";
-import Historial from "./components/Historial";
-import GestionAlmacenes from "./components/GestionAlmacenes";
-import GestionProductos from "./components/GestionProductos";
-import AnalisisVentas from "./components/AnalisisVentas";
 import { motion, AnimatePresence } from "motion/react";
+
+const Dashboard = lazy(() => import("./components/Dashboard"));
+const Compras = lazy(() => import("./components/Compras"));
+const Ventas = lazy(() => import("./components/Ventas"));
+const Transferencias = lazy(() => import("./components/Transferencias"));
+const Historial = lazy(() => import("./components/Historial"));
+const GestionAlmacenes = lazy(() => import("./components/GestionAlmacenes"));
+const GestionProductos = lazy(() => import("./components/GestionProductos"));
+const AnalisisVentas = lazy(() => import("./components/AnalisisVentas"));
 
 const getTabFromPath = (path: string): NavigationTab => {
   const normalized = path.toLowerCase().replace(/\/$/, "");
@@ -100,6 +101,9 @@ export default function App() {
   const [almacenes, setAlmacenes] = useState<Almacen[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
   const [stockList, setStockList] = useState<StockItem[]>([]);
+  const [almacenesLoaded, setAlmacenesLoaded] = useState(false);
+  const [productosLoaded, setProductosLoaded] = useState(false);
+  const [stockLoaded, setStockLoaded] = useState(false);
 
   // Navigation helper that updates browser history and URL
   const navigateTo = (tab: NavigationTab, params?: { sku?: string; almacenId?: string }) => {
@@ -147,22 +151,51 @@ export default function App() {
   // Subscribe to real-time warehouses, products, and stock updates globally
   useEffect(() => {
     const uid = user?.uid;
-    if (!uid) return;
+    if (!uid) {
+      setAlmacenes([]);
+      setProductos([]);
+      setStockList([]);
+      setAlmacenesLoaded(false);
+      setProductosLoaded(false);
+      setStockLoaded(false);
+      return;
+    }
 
     // Subscribe to warehouses
-    const unsubscribeAlmacenes = firestoreService.getAlmacenesRealtime((almList) => {
-      setAlmacenes(almList);
-    });
+    const unsubscribeAlmacenes = firestoreService.getAlmacenesRealtime(
+      (almList) => {
+        setAlmacenes(almList);
+        setAlmacenesLoaded(true);
+      },
+      (error) => {
+        console.error("Error en listener de almacenes:", error);
+        setAlmacenesLoaded(true);
+      }
+    );
 
     // Subscribe to products
-    const unsubscribeProductos = firestoreService.getProductosRealtime((prodList) => {
-      setProductos(prodList);
-    });
+    const unsubscribeProductos = firestoreService.getProductosRealtime(
+      (prodList) => {
+        setProductos(prodList);
+        setProductosLoaded(true);
+      },
+      (error) => {
+        console.error("Error en listener de productos:", error);
+        setProductosLoaded(true);
+      }
+    );
 
     // Subscribe to stock
-    const unsubscribeStock = firestoreService.getStockRealtime((stkList) => {
-      setStockList(stkList);
-    });
+    const unsubscribeStock = firestoreService.getStockRealtime(
+      (stkList) => {
+        setStockList(stkList);
+        setStockLoaded(true);
+      },
+      (error) => {
+        console.error("Error en listener de stock:", error);
+        setStockLoaded(true);
+      }
+    );
 
     return () => {
       unsubscribeAlmacenes();
@@ -219,157 +252,168 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0 md:pl-[224px]">
         <main className="flex-1 w-full relative min-h-screen overflow-x-hidden">
           <div className="w-full">
-            <AnimatePresence mode="wait">
-              {/* Compras: Historial y Formulario Lote */}
-              {(activeTab === "compras" || activeTab === "compras_nueva" || activeTab === "movimientos") && (
-                <motion.div
-                  key="compras"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25, ease: "easeInOut" }}
-                >
-                  <Compras
-                    almacenes={almacenes}
-                    productos={productos}
-                    isNewView={activeTab === "compras_nueva" || activeTab === "movimientos"}
-                    onNavigate={(tab) => navigateTo(tab)}
-                    onNavigateToNew={() => navigateTo("compras_nueva")}
-                    onNavigateToHistory={() => navigateTo("compras")}
-                  />
-                </motion.div>
-              )}
+            <Suspense
+              fallback={
+                <div className="min-h-[50vh] flex flex-col items-center justify-center text-zinc-400">
+                  <span className="h-7 w-7 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin mb-2" />
+                  <p className="text-xs">Cargando módulo...</p>
+                </div>
+              }
+            >
+              <AnimatePresence mode="wait">
+                {/* Compras: Historial y Formulario Lote */}
+                {(activeTab === "compras" || activeTab === "compras_nueva" || activeTab === "movimientos") && (
+                  <motion.div
+                    key="compras"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                  >
+                    <Compras
+                      almacenes={almacenes}
+                      productos={productos}
+                      isNewView={activeTab === "compras_nueva" || activeTab === "movimientos"}
+                      onNavigate={(tab) => navigateTo(tab)}
+                      onNavigateToNew={() => navigateTo("compras_nueva")}
+                      onNavigateToHistory={() => navigateTo("compras")}
+                    />
+                  </motion.div>
+                )}
 
-              {/* Ventas: Registro de Salida Comercial */}
-              {activeTab === "ventas_nueva" && (
-                <motion.div
-                  key="ventas_nueva"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25, ease: "easeInOut" }}
-                >
-                  <Ventas
-                    almacenes={almacenes}
-                    productos={productos}
-                    preselectedSku={preselectedSku}
-                    preselectedAlmacenId={preselectedAlmacenId}
-                    onSuccess={() => navigateTo("dashboard")}
-                    onCancel={() => navigateTo("dashboard")}
-                  />
-                </motion.div>
-              )}
+                {/* Ventas: Registro de Salida Comercial */}
+                {activeTab === "ventas_nueva" && (
+                  <motion.div
+                    key="ventas_nueva"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                  >
+                    <Ventas
+                      almacenes={almacenes}
+                      productos={productos}
+                      preselectedSku={preselectedSku}
+                      preselectedAlmacenId={preselectedAlmacenId}
+                      onSuccess={() => navigateTo("dashboard")}
+                      onCancel={() => navigateTo("dashboard")}
+                    />
+                  </motion.div>
+                )}
 
-              {/* Transferencias entre Almacenes */}
-              {activeTab === "transferencias_nueva" && (
-                <motion.div
-                  key="transferencias_nueva"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25, ease: "easeInOut" }}
-                >
-                  <Transferencias
-                    almacenes={almacenes}
-                    productos={productos}
-                    preselectedSku={preselectedSku}
-                    preselectedAlmacenId={preselectedAlmacenId}
-                    onSuccess={() => navigateTo("dashboard")}
-                    onCancel={() => navigateTo("dashboard")}
-                  />
-                </motion.div>
-              )}
+                {/* Transferencias entre Almacenes */}
+                {activeTab === "transferencias_nueva" && (
+                  <motion.div
+                    key="transferencias_nueva"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                  >
+                    <Transferencias
+                      almacenes={almacenes}
+                      productos={productos}
+                      preselectedSku={preselectedSku}
+                      preselectedAlmacenId={preselectedAlmacenId}
+                      onSuccess={() => navigateTo("dashboard")}
+                      onCancel={() => navigateTo("dashboard")}
+                    />
+                  </motion.div>
+                )}
 
-              {/* Dashboard */}
-              {activeTab === "dashboard" && (
-                <motion.div
-                  key="dashboard"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25, ease: "easeInOut" }}
-                >
-                  <Dashboard 
-                    almacenes={almacenes} 
-                    productos={productos} 
-                    onNavigateToCompra={(sku, almId) => navigateTo("compras_nueva", { sku, almacenId: almId })}
-                    onNavigateToVenta={(sku, almId) => navigateTo("ventas_nueva", { sku, almacenId: almId })}
-                    onNavigateToTransferencia={(sku, almId) => navigateTo("transferencias_nueva", { sku, almacenId: almId })}
-                    onNavigateToHistory={(sku) => navigateTo("historial", { sku })}
-                  />
-                </motion.div>
-              )}
+                {/* Dashboard */}
+                {activeTab === "dashboard" && (
+                  <motion.div
+                    key="dashboard"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                  >
+                    <Dashboard 
+                      almacenes={almacenes} 
+                      productos={productos} 
+                      stockList={stockList}
+                      loadingStock={!stockLoaded}
+                      onNavigateToCompra={(sku, almId) => navigateTo("compras_nueva", { sku, almacenId: almId })}
+                      onNavigateToVenta={(sku, almId) => navigateTo("ventas_nueva", { sku, almacenId: almId })}
+                      onNavigateToTransferencia={(sku, almId) => navigateTo("transferencias_nueva", { sku, almacenId: almId })}
+                      onNavigateToHistory={(sku) => navigateTo("historial", { sku })}
+                    />
+                  </motion.div>
+                )}
 
-              {/* Análisis de Ventas */}
-              {(activeTab === "analisis_ventas" || activeTab === "ventas") && (
-                <motion.div
-                  key="analisis_ventas"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25, ease: "easeInOut" }}
-                >
-                  <AnalisisVentas 
-                    almacenes={almacenes} 
-                    productos={productos} 
-                    onNavigateToHistory={(sku) => navigateTo("historial", { sku })}
-                  />
-                </motion.div>
-              )}
+                {/* Análisis de Ventas */}
+                {(activeTab === "analisis_ventas" || activeTab === "ventas") && (
+                  <motion.div
+                    key="analisis_ventas"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                  >
+                    <AnalisisVentas 
+                      almacenes={almacenes} 
+                      productos={productos} 
+                      onNavigateToHistory={(sku) => navigateTo("historial", { sku })}
+                    />
+                  </motion.div>
+                )}
 
-              {/* Almacenes */}
-              {activeTab === "almacenes" && (
-                <motion.div
-                  key="almacenes"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25, ease: "easeInOut" }}
-                >
-                  <GestionAlmacenes 
-                    almacenes={almacenes}
-                    productos={productos} 
-                    stockList={stockList}
-                  />
-                </motion.div>
-              )}
+                {/* Almacenes */}
+                {activeTab === "almacenes" && (
+                  <motion.div
+                    key="almacenes"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                  >
+                    <GestionAlmacenes 
+                      almacenes={almacenes}
+                      productos={productos} 
+                      stockList={stockList}
+                    />
+                  </motion.div>
+                )}
 
-              {/* Catálogo de Productos */}
-              {activeTab === "catalogo" && (
-                <motion.div
-                  key="catalogo"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25, ease: "easeInOut" }}
-                >
-                  <GestionProductos 
-                    almacenes={almacenes}
-                    productos={productos}
-                    stockList={stockList}
-                    onNavigateToMovimiento={(sku) => navigateTo("compras_nueva", { sku })}
-                  />
-                </motion.div>
-              )}
+                {/* Catálogo de Productos */}
+                {activeTab === "catalogo" && (
+                  <motion.div
+                    key="catalogo"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                  >
+                    <GestionProductos 
+                      almacenes={almacenes}
+                      productos={productos} 
+                      stockList={stockList}
+                      onNavigateToMovimiento={(sku) => navigateTo("compras_nueva", { sku })}
+                    />
+                  </motion.div>
+                )}
 
-              {/* Historial de Movimientos */}
-              {activeTab === "historial" && (
-                <motion.div
-                  key="historial"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ duration: 0.25, ease: "easeInOut" }}
-                >
-                  <Historial 
-                    almacenes={almacenes} 
-                    productos={productos} 
-                    preselectedSku={preselectedSku}
-                    onClearPreselectedSku={() => setPreselectedSku("")}
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
+                {/* Historial de Movimientos */}
+                {activeTab === "historial" && (
+                  <motion.div
+                    key="historial"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                  >
+                    <Historial 
+                      almacenes={almacenes} 
+                      productos={productos} 
+                      preselectedSku={preselectedSku}
+                      onClearPreselectedSku={() => setPreselectedSku("")}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </Suspense>
           </div>
         </main>
       </div>

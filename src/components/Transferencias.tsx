@@ -17,7 +17,6 @@ import {
   Barcode,
   ArrowRight
 } from "lucide-react";
-import { Html5Qrcode } from "html5-qrcode";
 
 interface TransferenciasProps {
   almacenes: Almacen[];
@@ -50,7 +49,7 @@ export default function Transferencias({
   // QR / Barcode scanner
   const [showScanner, setShowScanner] = useState(false);
   const [scannerError, setScannerError] = useState<string | null>(null);
-  const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
+  const html5QrcodeRef = useRef<any>(null);
 
   // Sync initial props
   useEffect(() => {
@@ -109,6 +108,7 @@ export default function Transferencias({
     setShowScanner(true);
     setTimeout(async () => {
       try {
+        const { Html5Qrcode } = await import("html5-qrcode");
         const qrCode = new Html5Qrcode("transf-barcode-reader");
         html5QrcodeRef.current = qrCode;
         await qrCode.start(

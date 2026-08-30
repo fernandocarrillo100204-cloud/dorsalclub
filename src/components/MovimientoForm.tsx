@@ -21,7 +21,6 @@ import {
   Layers,
   Search
 } from "lucide-react";
-import { Html5Qrcode } from "html5-qrcode";
 import { motion, AnimatePresence } from "motion/react";
 
 interface MovimientoFormProps {
@@ -80,7 +79,7 @@ export default function MovimientoForm({
   // QR/Barcode Scanner state
   const [showScanner, setShowScanner] = useState(false);
   const [scannerError, setScannerError] = useState<string | null>(null);
-  const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
+  const html5QrcodeRef = useRef<any>(null);
 
   // Sync props changes if preselectedSku / preselectedAlmacenId change
   useEffect(() => {
@@ -209,6 +208,7 @@ export default function MovimientoForm({
     
     setTimeout(async () => {
       try {
+        const { Html5Qrcode } = await import("html5-qrcode");
         const qrInstance = new Html5Qrcode("qr-scanner-view");
         html5QrcodeRef.current = qrInstance;
 

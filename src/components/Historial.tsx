@@ -51,6 +51,7 @@ export default function Historial({
   const [loadingMore, setLoadingMore] = useState(false);
   const [lastDocCursor, setLastDocCursor] = useState<any>(null);
   const [hasMore, setHasMore] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   
   const [movToAnular, setMovToAnular] = useState<Movimiento | null>(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
@@ -67,6 +68,7 @@ export default function Historial({
   const loadFirstPage = useCallback(async () => {
     setLoading(true);
     setAnularError(null);
+    setFetchError(null);
     try {
       const res = await firestoreService.getMovimientosPaginated({
         pageSize: 50,
@@ -80,6 +82,7 @@ export default function Historial({
       setHasMore(res.hasMore);
     } catch (error) {
       console.error("Error al cargar historial de auditoría:", error);
+      setFetchError("No se pudieron cargar los registros de auditoría.");
     } finally {
       setLoading(false);
     }
@@ -216,6 +219,20 @@ export default function Historial({
         <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 rounded-xl text-xs flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span className="font-semibold">{anularError}</span>
+        </div>
+      )}
+      {fetchError && (
+        <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 rounded-xl text-xs flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span className="font-semibold">{fetchError}</span>
+          </div>
+          <button
+            onClick={loadFirstPage}
+            className="font-semibold underline text-amber-800 dark:text-amber-200 hover:opacity-80"
+          >
+            Reintentar
+          </button>
         </div>
       )}
 

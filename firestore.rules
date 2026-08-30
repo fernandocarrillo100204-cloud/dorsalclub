@@ -73,6 +73,13 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Compras Collection
+    match /compras/{compraId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidId(compraId);
+      allow delete: if false;
+    }
+
     // Migraciones Collection (one-time migration trackers)
     match /migraciones/{migracionId} {
       allow read, create, update: if isSignedIn();

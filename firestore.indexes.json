@@ -25,6 +25,13 @@
       ]
     },
     {
+      "collectionGroup": "compras",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "fecha", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "resumen_ventas",
       "queryScope": "COLLECTION",
       "fields": [

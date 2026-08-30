@@ -909,7 +909,7 @@ export default function Compras({
 
       {/* Compras Table */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-xs">
-        {loadingList ? (
+        {initialLoading ? (
           <div className="py-14 text-center text-zinc-400">
             <span className="h-6 w-6 border-2 border-zinc-900 dark:border-white border-t-transparent rounded-full animate-spin inline-block mb-2" />
             <p className="text-xs">Cargando historial de compras...</p>

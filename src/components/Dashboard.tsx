@@ -27,6 +27,8 @@ import {
 interface DashboardProps {
   almacenes: Almacen[];
   productos: Producto[];
+  stockList?: StockItem[];
+  loadingStock?: boolean;
   onNavigateToCompra?: (sku?: string, almacenId?: string) => void;
   onNavigateToVenta?: (sku?: string, almacenId?: string) => void;
   onNavigateToTransferencia?: (sku?: string, almacenId?: string) => void;
@@ -37,29 +39,21 @@ interface DashboardProps {
 export default function Dashboard({ 
   almacenes, 
   productos, 
+  stockList: propStockList,
+  loadingStock = false,
   onNavigateToCompra,
   onNavigateToVenta,
   onNavigateToTransferencia,
   onNavigateToMovements, 
   onNavigateToHistory 
 }: DashboardProps) {
-  const [stockList, setStockList] = useState<StockItem[]>([]);
+  const stockList = propStockList || [];
+  const loading = loadingStock;
   const [search, setSearch] = useState("");
   const [selectedAlmacen, setSelectedAlmacen] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [brandFilter, setBrandFilter] = useState<string>("all");
   const [stockStatusFilter, setStockStatusFilter] = useState<string>("all"); // 'all' | 'low' | 'out' | 'ok'
-  const [loading, setLoading] = useState(true);
-
-  // Load real-time stock
-  useEffect(() => {
-    setLoading(true);
-    const unsubscribe = firestoreService.getStockRealtime((data) => {
-      setStockList(data);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
 
   // Helper to get stock of a SKU in a specific warehouse
   const getStockQty = (sku: string, almacenId: string): number => {

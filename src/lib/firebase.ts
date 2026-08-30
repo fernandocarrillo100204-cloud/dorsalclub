@@ -306,20 +306,20 @@ export const authService = {
               setLocalStorageItem("currentUser", userObj);
               callback(userObj);
             } else {
-              const localUser = getLocalStorageItem<Usuario | null>("currentUser", null);
-              callback(localUser);
+              localStorage.removeItem(STORAGE_PREFIX + "currentUser");
+              callback(null);
             }
           },
           (error) => {
             console.warn("Observador onAuthStateChanged con error:", error);
-            const localUser = getLocalStorageItem<Usuario | null>("currentUser", null);
-            callback(localUser);
+            localStorage.removeItem(STORAGE_PREFIX + "currentUser");
+            callback(null);
           }
         );
       } catch (e) {
         console.warn("No se pudo iniciar onAuthStateChanged:", e);
-        const localUser = getLocalStorageItem<Usuario | null>("currentUser", null);
-        callback(localUser);
+        localStorage.removeItem(STORAGE_PREFIX + "currentUser");
+        callback(null);
       }
 
       const update = (newUser: Usuario | null) => {
@@ -383,7 +383,7 @@ export const firestoreService = {
     return getLocalStorageItem<Almacen[]>("almacenes", []);
   },
 
-  getAlmacenesRealtime: (onUpdate: (almacenes: Almacen[]) => void): (() => void) => {
+  getAlmacenesRealtime: (onUpdate: (almacenes: Almacen[]) => void, onError?: (error: any) => void): (() => void) => {
     if (isConfigured && realDb) {
       return onSnapshot(
         collection(realDb, "almacenes"),
@@ -396,6 +396,8 @@ export const firestoreService = {
         },
         (error) => {
           console.error("Error en listener de almacenes:", error);
+          onUpdate([]);
+          if (onError) onError(error);
         }
       );
     }
@@ -475,7 +477,7 @@ export const firestoreService = {
     return getLocalStorageItem<Producto[]>("productos", []);
   },
 
-  getProductosRealtime: (onUpdate: (productos: Producto[]) => void): (() => void) => {
+  getProductosRealtime: (onUpdate: (productos: Producto[]) => void, onError?: (error: any) => void): (() => void) => {
     if (isConfigured && realDb) {
       return onSnapshot(
         collection(realDb, "productos"),
@@ -488,6 +490,8 @@ export const firestoreService = {
         },
         (error) => {
           console.error("Error en listener de productos:", error);
+          onUpdate([]);
+          if (onError) onError(error);
         }
       );
     }
@@ -719,7 +723,7 @@ export const firestoreService = {
   },
 
   // --- ATOMIC REAL-TIME STOCK ---
-  getStockRealtime: (onUpdate: (stock: StockItem[]) => void): (() => void) => {
+  getStockRealtime: (onUpdate: (stock: StockItem[]) => void, onError?: (error: any) => void): (() => void) => {
     if (isConfigured && realDb) {
       return onSnapshot(
         collection(realDb, "stock"),
@@ -739,6 +743,8 @@ export const firestoreService = {
         },
         (error) => {
           console.error("Error en listener de stock:", error);
+          onUpdate([]);
+          if (onError) onError(error);
         }
       );
     }
@@ -1278,62 +1284,112 @@ export const firestoreService = {
     const pageSize = options.pageSize || 50;
 
     if (isConfigured && realDb) {
-      let qConstraints: any[] = [orderBy("fecha", "desc"), limit(pageSize + 1)];
+      try {
+        let qConstraints: any[] = [orderBy("fecha", "desc"), limit(pageSize + 1)];
 
-      if (options.skuFilter) {
-        qConstraints.unshift(where("sku", "==", options.skuFilter.trim().toUpperCase()));
-      }
-      if (options.warehouseFilter && options.warehouseFilter !== "all") {
-        qConstraints.unshift(where("almacen_id", "==", options.warehouseFilter));
-      }
-      if (options.tipoFilter && options.tipoFilter !== "all") {
-        qConstraints.unshift(where("tipo", "==", options.tipoFilter));
-      }
-      if (options.estadoFilter && options.estadoFilter !== "all") {
-        qConstraints.unshift(where("estado", "==", options.estadoFilter));
-      }
+        if (options.skuFilter) {
+          qConstraints.unshift(where("sku", "==", options.skuFilter.trim().toUpperCase()));
+        }
+        if (options.warehouseFilter && options.warehouseFilter !== "all") {
+          qConstraints.unshift(where("almacen_id", "==", options.warehouseFilter));
+        }
+        if (options.tipoFilter && options.tipoFilter !== "all") {
+          qConstraints.unshift(where("tipo", "==", options.tipoFilter));
+        }
+        if (options.estadoFilter && options.estadoFilter !== "all") {
+          qConstraints.unshift(where("estado", "==", options.estadoFilter));
+        }
 
-      if (options.lastDoc) {
-        qConstraints.push(startAfter(options.lastDoc));
-      }
+        if (options.lastDoc) {
+          qConstraints.push(startAfter(options.lastDoc));
+        }
 
-      const q = query(collection(realDb, "movimientos"), ...qConstraints);
-      const snap = await getDocs(q);
+        const q = query(collection(realDb, "movimientos"), ...qConstraints);
+        const snap = await getDocs(q);
 
-      const docs = snap.docs;
-      const hasMore = docs.length > pageSize;
-      const itemsToProcess = hasMore ? docs.slice(0, pageSize) : docs;
-      const nextLastDoc = itemsToProcess.length > 0 ? itemsToProcess[itemsToProcess.length - 1] : null;
+        const docs = snap.docs;
+        const hasMore = docs.length > pageSize;
+        const itemsToProcess = hasMore ? docs.slice(0, pageSize) : docs;
+        const nextLastDoc = itemsToProcess.length > 0 ? itemsToProcess[itemsToProcess.length - 1] : null;
 
-      const list: Movimiento[] = itemsToProcess.map(d => {
-        const data = d.data();
+        const list: Movimiento[] = itemsToProcess.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            folio: data.folio,
+            sku: data.sku,
+            almacen_id: data.almacen_id,
+            tipo: data.tipo,
+            cantidad: data.cantidad,
+            referencia: data.referencia,
+            usuario: data.usuario,
+            fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
+            almacen_destino_id: data.almacen_destino_id,
+            compra_id: data.compra_id,
+            lote_id: data.lote_id,
+            costo_unitario: typeof data.costo_unitario === "number" ? data.costo_unitario : undefined,
+            estado: data.estado || "activo",
+            anulado_at: data.anulado_at ? (data.anulado_at as Timestamp).toDate() : undefined,
+            anulado_por: data.anulado_por,
+            motivo_anulacion: data.motivo_anulacion
+          };
+        });
+
         return {
-          id: d.id,
-          folio: data.folio,
-          sku: data.sku,
-          almacen_id: data.almacen_id,
-          tipo: data.tipo,
-          cantidad: data.cantidad,
-          referencia: data.referencia,
-          usuario: data.usuario,
-          fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
-          almacen_destino_id: data.almacen_destino_id,
-          compra_id: data.compra_id,
-          lote_id: data.lote_id,
-          costo_unitario: typeof data.costo_unitario === "number" ? data.costo_unitario : undefined,
-          estado: data.estado || "activo",
-          anulado_at: data.anulado_at ? (data.anulado_at as Timestamp).toDate() : undefined,
-          anulado_por: data.anulado_por,
-          motivo_anulacion: data.motivo_anulacion
+          items: list,
+          lastDoc: nextLastDoc,
+          hasMore,
+          totalLoaded: list.length
         };
-      });
-
-      return {
-        items: list,
-        lastDoc: nextLastDoc,
-        hasMore,
-        totalLoaded: list.length
-      };
+      } catch (err: any) {
+        console.warn("Error en query indexado de movimientos, ejecutando consulta fallback:", err);
+        if (err?.code === "failed-precondition" || (err?.message && err.message.includes("index"))) {
+          const qFallback = query(collection(realDb, "movimientos"), limit(pageSize * 2));
+          const snap = await getDocs(qFallback);
+          let list: Movimiento[] = snap.docs.map(d => {
+            const data = d.data();
+            return {
+              id: d.id,
+              folio: data.folio,
+              sku: data.sku,
+              almacen_id: data.almacen_id,
+              tipo: data.tipo,
+              cantidad: data.cantidad,
+              referencia: data.referencia,
+              usuario: data.usuario,
+              fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
+              almacen_destino_id: data.almacen_destino_id,
+              compra_id: data.compra_id,
+              lote_id: data.lote_id,
+              costo_unitario: typeof data.costo_unitario === "number" ? data.costo_unitario : undefined,
+              estado: data.estado || "activo",
+              anulado_at: data.anulado_at ? (data.anulado_at as Timestamp).toDate() : undefined,
+              anulado_por: data.anulado_por,
+              motivo_anulacion: data.motivo_anulacion
+            };
+          });
+          list.sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
+          if (options.skuFilter) {
+            list = list.filter(m => m.sku?.trim().toUpperCase() === options.skuFilter?.trim().toUpperCase());
+          }
+          if (options.warehouseFilter && options.warehouseFilter !== "all") {
+            list = list.filter(m => m.almacen_id === options.warehouseFilter || m.almacen_destino_id === options.warehouseFilter);
+          }
+          if (options.tipoFilter && options.tipoFilter !== "all") {
+            list = list.filter(m => m.tipo === options.tipoFilter);
+          }
+          if (options.estadoFilter && options.estadoFilter !== "all") {
+            list = list.filter(m => (m.estado || "activo") === options.estadoFilter);
+          }
+          return {
+            items: list.slice(0, pageSize),
+            lastDoc: null,
+            hasMore: list.length > pageSize,
+            totalLoaded: list.slice(0, pageSize).length
+          };
+        }
+        throw err;
+      }
     }
 
     // Modo local
@@ -1756,7 +1812,7 @@ export const firestoreService = {
     };
   },
 
-  getComprasRealtime: (onUpdate: (compras: Compra[]) => void): (() => void) => {
+  getComprasRealtime: (onUpdate: (compras: Compra[]) => void, onError?: (error: any) => void): (() => void) => {
     if (isConfigured && realDb) {
       const q = query(collection(realDb, "compras"), orderBy("fecha", "desc"), limit(100));
       return onSnapshot(
@@ -1790,6 +1846,8 @@ export const firestoreService = {
         },
         (error) => {
           console.error("Error en listener de compras:", error);
+          onUpdate([]);
+          if (onError) onError(error);
         }
       );
     }
