@@ -1851,6 +1851,144 @@ export const firestoreService = {
     })).sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
   },
 
+  getComprasPaginated: async (options: {
+    pageSize?: number;
+    lastDoc?: any;
+    warehouseFilter?: string;
+    searchTerm?: string;
+  } = {}): Promise<{
+    items: Compra[];
+    lastDoc: any;
+    hasMore: boolean;
+    totalLoaded: number;
+  }> => {
+    const pageSize = options.pageSize || 50;
+
+    if (isConfigured && realDb) {
+      try {
+        let qConstraints: any[] = [orderBy("fecha", "desc"), limit(pageSize + 1)];
+
+        if (options.warehouseFilter && options.warehouseFilter !== "all") {
+          qConstraints.unshift(where("almacen_id", "==", options.warehouseFilter));
+        }
+
+        if (options.lastDoc) {
+          qConstraints.push(startAfter(options.lastDoc));
+        }
+
+        const q = query(collection(realDb, "compras"), ...qConstraints);
+        const snap = await getDocs(q);
+
+        const docs = snap.docs;
+        const hasMore = docs.length > pageSize;
+        const itemsToProcess = hasMore ? docs.slice(0, pageSize) : docs;
+        const nextLastDoc = itemsToProcess.length > 0 ? itemsToProcess[itemsToProcess.length - 1] : null;
+
+        const list: Compra[] = itemsToProcess.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            folio: data.folio,
+            proveedor: data.proveedor,
+            fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
+            fecha_str: data.fecha_str,
+            almacen_id: data.almacen_id,
+            items: data.items || [],
+            total_unidades: Number(data.total_unidades) || 0,
+            subtotal: Number(data.subtotal) || 0,
+            costo_envio: Number(data.costo_envio) || 0,
+            comisiones: Number(data.comisiones) || 0,
+            descuentos: Number(data.descuentos) || 0,
+            total: Number(data.total) || 0,
+            referencia: data.referencia || "",
+            notas: data.notas || "",
+            creado_por: data.creado_por || "",
+            creado_at: data.creado_at ? (data.creado_at as Timestamp).toDate() : new Date(),
+            estado: data.estado || "completada"
+          };
+        });
+
+        return {
+          items: list,
+          lastDoc: nextLastDoc,
+          hasMore,
+          totalLoaded: list.length
+        };
+      } catch (err) {
+        console.warn("Error en query indexado de compras, ejecutando consulta fallback:", err);
+        const qFallback = query(collection(realDb, "compras"), limit(pageSize * 2));
+        const snap = await getDocs(qFallback);
+        let list: Compra[] = snap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            folio: data.folio,
+            proveedor: data.proveedor,
+            fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
+            fecha_str: data.fecha_str,
+            almacen_id: data.almacen_id,
+            items: data.items || [],
+            total_unidades: Number(data.total_unidades) || 0,
+            subtotal: Number(data.subtotal) || 0,
+            costo_envio: Number(data.costo_envio) || 0,
+            comisiones: Number(data.comisiones) || 0,
+            descuentos: Number(data.descuentos) || 0,
+            total: Number(data.total) || 0,
+            referencia: data.referencia || "",
+            notas: data.notas || "",
+            creado_por: data.creado_por || "",
+            creado_at: data.creado_at ? (data.creado_at as Timestamp).toDate() : new Date(),
+            estado: data.estado || "completada"
+          };
+        });
+        list.sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
+        if (options.warehouseFilter && options.warehouseFilter !== "all") {
+          list = list.filter(c => c.almacen_id === options.warehouseFilter);
+        }
+        return {
+          items: list.slice(0, pageSize),
+          lastDoc: null,
+          hasMore: list.length > pageSize,
+          totalLoaded: list.slice(0, pageSize).length
+        };
+      }
+    }
+
+    // Modo emulador LocalStorage
+    let list = getLocalStorageItem<Compra[]>("compras", []);
+    let parsed = list.map(c => ({
+      ...c,
+      fecha: c.fecha instanceof Date ? c.fecha : new Date(typeof c.fecha === "string" ? c.fecha : (c.fecha as any).seconds * 1000),
+      creado_at: c.creado_at instanceof Date ? c.creado_at : new Date(typeof c.creado_at === "string" ? c.creado_at : (c.creado_at as any).seconds * 1000)
+    }));
+    parsed.sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
+
+    if (options.warehouseFilter && options.warehouseFilter !== "all") {
+      parsed = parsed.filter(c => c.almacen_id === options.warehouseFilter);
+    }
+    if (options.searchTerm) {
+      const term = options.searchTerm.toLowerCase().trim();
+      parsed = parsed.filter(c => 
+        (c.folio && c.folio.toLowerCase().includes(term)) ||
+        (c.proveedor && c.proveedor.toLowerCase().includes(term)) ||
+        (c.referencia && c.referencia.toLowerCase().includes(term)) ||
+        c.items?.some(it => it.sku.toLowerCase().includes(term) || it.nombre_producto?.toLowerCase().includes(term))
+      );
+    }
+
+    const startIndex = typeof options.lastDoc === "number" ? options.lastDoc : 0;
+    const pageItems = parsed.slice(startIndex, startIndex + pageSize);
+    const nextIndex = startIndex + pageItems.length;
+    const hasMore = nextIndex < parsed.length;
+
+    return {
+      items: pageItems,
+      lastDoc: nextIndex,
+      hasMore,
+      totalLoaded: pageItems.length
+    };
+  },
+
   // --- CATÁLOGOS DINÁMICOS DE STREETWEAR & SNEAKERS ---
   seedAndImportCatalogos: async (): Promise<{
     categorias: CategoriaCatalogo[];

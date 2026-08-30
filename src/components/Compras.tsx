@@ -68,9 +68,32 @@ export default function Compras({
     else if (onNavigate) onNavigate("compras_nueva");
   };
 
-  // Compras list state
+  // In-memory catalog lookup maps for fast O(1) resolution without Firestore queries
+  const productosMap = useMemo(() => {
+    const map = new Map<string, Producto>();
+    for (let i = 0; i < productos.length; i++) {
+      map.set(productos[i].sku.toLowerCase(), productos[i]);
+    }
+    return map;
+  }, [productos]);
+
+  const almacenesMap = useMemo(() => {
+    const map = new Map<string, Almacen>();
+    for (let i = 0; i < almacenes.length; i++) {
+      map.set(almacenes[i].id, almacenes[i]);
+    }
+    return map;
+  }, [almacenes]);
+
+  // Compras list state with pagination
   const [compras, setCompras] = useState<Compra[]>([]);
-  const [loadingList, setLoadingList] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [lastDocCursor, setLastDocCursor] = useState<any>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedWarehouseFilter, setSelectedWarehouseFilter] = useState("all");
   const [selectedCompraDetail, setSelectedCompraDetail] = useState<Compra | null>(null);
@@ -108,23 +131,67 @@ export default function Compras({
     }
   }, [almacenes, almacenId]);
 
-  // Realtime subscription for purchases list
-  useEffect(() => {
-    setLoadingList(true);
-    const unsubscribe = firestoreService.getComprasRealtime((data) => {
-      setCompras(data);
-      setLoadingList(false);
-    });
-    return () => unsubscribe();
-  }, []);
+  // Fetch first 50 compras records
+  const loadFirstPage = async (isFirstMount = false) => {
+    if (isFirstMount) {
+      setInitialLoading(true);
+    } else {
+      setRefreshing(true);
+    }
+    setFetchError(null);
 
-  // Helper product details
+    try {
+      const res = await firestoreService.getComprasPaginated({
+        pageSize: 50,
+        warehouseFilter: selectedWarehouseFilter,
+        searchTerm: searchTerm.trim() || undefined
+      });
+      setCompras(res.items);
+      setLastDocCursor(res.lastDoc);
+      setHasMore(res.hasMore);
+    } catch (err: any) {
+      console.error("Error al cargar compras:", err);
+      setFetchError("No se pudieron cargar las compras. Por favor intenta de nuevo.");
+    } finally {
+      setInitialLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // Initial load & filter change
+  useEffect(() => {
+    loadFirstPage(compras.length === 0);
+  }, [selectedWarehouseFilter]);
+
+  // Load next 50 compras
+  const loadNextPage = async () => {
+    if (!hasMore || loadingMore || !lastDocCursor) return;
+    setLoadingMore(true);
+
+    try {
+      const res = await firestoreService.getComprasPaginated({
+        pageSize: 50,
+        lastDoc: lastDocCursor,
+        warehouseFilter: selectedWarehouseFilter,
+        searchTerm: searchTerm.trim() || undefined
+      });
+      setCompras((prev) => [...prev, ...res.items]);
+      setLastDocCursor(res.lastDoc);
+      setHasMore(res.hasMore);
+    } catch (err) {
+      console.error("Error al cargar más compras:", err);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // Helper product details using O(1) map
   const getProductBySku = (sku: string) => {
-    return productos.find((p) => p.sku.toLowerCase() === sku.toLowerCase());
+    return productosMap.get(sku.toLowerCase());
   };
 
   const getWarehouseName = (id: string) => {
-    const alm = almacenes.find((a) => a.id === id);
+    const alm = almacenesMap.get(id);
     return alm ? `${alm.nombre} (${alm.ubicacion})` : id || "Almacén principal";
   };
 
@@ -275,26 +342,25 @@ export default function Compras({
 
       setFormSuccess(`¡Compra registrada con éxito! Folio generado: ${res.folio}. El inventario ha sido actualizado.`);
 
-      // Reset form
-      setTimeout(() => {
-        setProveedor("");
-        setReferencia("");
-        setNotas("");
-        setCostoEnvio("");
-        setComisiones("");
-        setDescuentos("");
-        const firstProd = productos[0];
-        setItems([
-          {
-            sku: firstProd?.sku || "",
-            nombre_producto: firstProd?.nombre || "",
-            variante_label: firstProd ? `${firstProd.color || ""} - Talla ${firstProd.talla || "U"}` : "",
-            cantidad: 1,
-            costo_unitario: firstProd?.precio_costo || 0
-          }
-        ]);
-        goToHistory();
-      }, 1800);
+      // Reset form immediately without artificial delay
+      setProveedor("");
+      setReferencia("");
+      setNotas("");
+      setCostoEnvio("");
+      setComisiones("");
+      setDescuentos("");
+      const firstProd = productos[0];
+      setItems([
+        {
+          sku: firstProd?.sku || "",
+          nombre_producto: firstProd?.nombre || "",
+          variante_label: firstProd ? `${firstProd.color || ""} - Talla ${firstProd.talla || "U"}` : "",
+          cantidad: 1,
+          costo_unitario: firstProd?.precio_costo || 0
+        }
+      ]);
+      loadFirstPage(false);
+      goToHistory();
     } catch (err: any) {
       console.error("Error al registrar compra:", err);
       setFormError(err.message || "No se pudo registrar la compra. Intente nuevamente.");
