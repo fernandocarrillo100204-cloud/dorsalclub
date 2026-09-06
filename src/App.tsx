@@ -18,9 +18,13 @@ const Historial = lazy(() => import("./components/Historial"));
 const GestionAlmacenes = lazy(() => import("./components/GestionAlmacenes"));
 const GestionProductos = lazy(() => import("./components/GestionProductos"));
 const AnalisisVentas = lazy(() => import("./components/AnalisisVentas"));
+const Clientes = lazy(() => import("./components/Clientes"));
 
 const getTabFromPath = (path: string): NavigationTab => {
   const normalized = path.toLowerCase().replace(/\/$/, "");
+  if (normalized === "/clientes") {
+    return "clientes";
+  }
   if (normalized === "/compras/nueva") {
     return "compras_nueva";
   }
@@ -73,6 +77,8 @@ const getPathFromTab = (tab: NavigationTab): string => {
       return "/almacenes";
     case "catalogo":
       return "/productos";
+    case "clientes":
+      return "/clientes";
     case "movimientos":
       return "/compras/nueva";
     case "dashboard":
@@ -97,6 +103,10 @@ export default function App() {
     const searchParams = new URLSearchParams(window.location.search);
     return searchParams.get("almacenId") || "";
   });
+  const [preselectedClienteId, setPreselectedClienteId] = useState(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    return searchParams.get("clienteId") || "";
+  });
 
   const [almacenes, setAlmacenes] = useState<Almacen[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -106,14 +116,14 @@ export default function App() {
   const [stockLoaded, setStockLoaded] = useState(false);
 
   // Navigation helper that updates browser history and URL
-  const navigateTo = (tab: NavigationTab, params?: { sku?: string; almacenId?: string }) => {
+  const navigateTo = (tab: NavigationTab, params?: { sku?: string; almacenId?: string; clienteId?: string }) => {
     let targetPath = getPathFromTab(tab);
-    if (params?.sku) {
-      const sp = new URLSearchParams();
-      sp.set("sku", params.sku);
-      if (params.almacenId) sp.set("almacenId", params.almacenId);
-      targetPath += `?${sp.toString()}`;
-    }
+    const sp = new URLSearchParams();
+    if (params?.sku) sp.set("sku", params.sku);
+    if (params?.almacenId) sp.set("almacenId", params.almacenId);
+    if (params?.clienteId) sp.set("clienteId", params.clienteId);
+    const qs = sp.toString();
+    if (qs) targetPath += `?${qs}`;
 
     const currentFull = window.location.pathname + window.location.search;
     if (currentFull !== targetPath) {
@@ -122,6 +132,7 @@ export default function App() {
 
     setPreselectedSku(params?.sku || "");
     setPreselectedAlmacenId(params?.almacenId || "");
+    setPreselectedClienteId(params?.clienteId || "");
     setActiveTab(tab);
   };
 
@@ -132,6 +143,7 @@ export default function App() {
       const searchParams = new URLSearchParams(window.location.search);
       setPreselectedSku(searchParams.get("sku") || "");
       setPreselectedAlmacenId(searchParams.get("almacenId") || "");
+      setPreselectedClienteId(searchParams.get("clienteId") || "");
       setActiveTab(tab);
     };
 
@@ -295,8 +307,25 @@ export default function App() {
                       productos={productos}
                       preselectedSku={preselectedSku}
                       preselectedAlmacenId={preselectedAlmacenId}
+                      preselectedClienteId={preselectedClienteId}
                       onSuccess={() => navigateTo("dashboard")}
                       onCancel={() => navigateTo("dashboard")}
+                    />
+                  </motion.div>
+                )}
+
+                {/* Clientes: Catálogo y Fichas Comerciales */}
+                {activeTab === "clientes" && (
+                  <motion.div
+                    key="clientes"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                  >
+                    <Clientes
+                      onNavigateToVenta={(clienteId) => navigateTo("ventas_nueva", { clienteId })}
+                      onNavigateToHistory={(clienteId) => navigateTo("historial", { clienteId })}
                     />
                   </motion.div>
                 )}
@@ -408,7 +437,9 @@ export default function App() {
                       almacenes={almacenes} 
                       productos={productos} 
                       preselectedSku={preselectedSku}
+                      preselectedClienteId={preselectedClienteId}
                       onClearPreselectedSku={() => setPreselectedSku("")}
+                      onNavigateToCliente={(clienteId) => navigateTo("clientes", { clienteId })}
                     />
                   </motion.div>
                 )}

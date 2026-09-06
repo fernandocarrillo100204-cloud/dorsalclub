@@ -88,6 +88,32 @@
         "tipo": { "type": "string" }
       },
       "required": ["current"]
+    },
+    "Cliente": {
+      "title": "Cliente",
+      "description": "Ficha comercial de cliente para registro de ventas y seguimiento",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nombre_completo": { "type": "string", "maxLength": 150 },
+        "nombre_normalizado": { "type": "string" },
+        "tipo_cliente": { "type": "string", "enum": ["minorista", "mayorista", "emprendedor"] },
+        "instagram": { "type": "string" },
+        "instagram_normalizado": { "type": "string" },
+        "telefono": { "type": "string" },
+        "email": { "type": "string" },
+        "ciudad": { "type": "string" },
+        "canal_preferido": { "type": "string" },
+        "intereses": { "type": "string" },
+        "origen": { "type": "string" },
+        "notas": { "type": "string" },
+        "proximo_seguimiento": { "type": "string" },
+        "estado": { "type": "string", "enum": ["activo", "inactivo"] },
+        "creado_at": { "type": "string" },
+        "actualizado_at": { "type": "string" },
+        "creado_por": { "type": "string" }
+      },
+      "required": ["nombre_completo", "tipo_cliente", "estado"]
     }
   },
   "firestore": {
@@ -114,6 +140,10 @@
     "/contadores/{contadorId}": {
       "schema": { "$ref": "#/entities/ContadorFolio" },
       "description": "Contadores atómicos de secuencias de folios"
+    },
+    "/clientes/{clienteId}": {
+      "schema": { "$ref": "#/entities/Cliente" },
+      "description": "Directorio de clientes para vinculación de ventas y seguimiento comercial"
     }
   }
 }

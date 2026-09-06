@@ -65,6 +65,11 @@ export interface Movimiento {
   compra_id?: string; // Trazabilidad con lote de compra
   lote_id?: string; // Identificador de lote
   costo_unitario?: number; // Costo unitario al registrar compra
+  cliente_id?: string; // ID opcional del cliente en salidas/ventas
+  cliente_nombre?: string; // Snapshot del nombre del cliente o "Venta sin cliente / Mostrador"
+  cliente_tipo?: TipoCliente | string; // Snapshot del tipo de cliente
+  precio_unitario_venta?: number; // Snapshot del precio unitario al momento de la venta
+  total_venta?: number; // Snapshot: precio_unitario_venta * cantidad
   estado?: "activo" | "anulado"; // Estado del movimiento (por defecto activo)
   anulado_at?: {
     seconds: number;
@@ -72,6 +77,41 @@ export interface Movimiento {
   } | Date;
   anulado_por?: string; // Usuario / Email que realizó la anulación
   motivo_anulacion?: string; // Motivo opcional de la anulación
+}
+
+export type TipoCliente = "minorista" | "mayorista" | "emprendedor";
+export type CanalPreferido = "WhatsApp" | "Instagram" | "llamada" | "correo" | "otro";
+export type OrigenCliente = "Instagram" | "recomendación" | "tienda física" | "evento" | "otro";
+export type EstadoCliente = "activo" | "inactivo";
+
+export interface Cliente {
+  id?: string;
+  nombre_completo: string; // obligatorio
+  nombre_normalizado: string; // automático, en minúsculas y sin espacios sobrantes
+  tipo_cliente: TipoCliente; // obligatorio; solo minorista, mayorista o emprendedor
+  instagram?: string; // opcional
+  instagram_normalizado?: string; // automático, sin @ y en minúsculas
+  telefono?: string; // opcional y siempre como string
+  email?: string; // opcional
+  ciudad?: string; // opcional
+  canal_preferido?: CanalPreferido | string; // WhatsApp, Instagram, llamada, correo u otro
+  intereses?: string; // opcional
+  origen?: OrigenCliente | string; // Instagram, recomendación, tienda física, evento u otro
+  notas?: string; // opcional
+  proximo_seguimiento?: {
+    seconds: number;
+    nanoseconds: number;
+  } | Date | string | null; // fecha opcional
+  estado: EstadoCliente; // 'activo' | 'inactivo'
+  creado_at: {
+    seconds: number;
+    nanoseconds: number;
+  } | Date;
+  actualizado_at: {
+    seconds: number;
+    nanoseconds: number;
+  } | Date;
+  creado_por: string;
 }
 
 export interface Usuario {
@@ -85,6 +125,7 @@ export type NavigationTab =
   | "compras" 
   | "compras_nueva"
   | "ventas_nueva"
+  | "clientes"
   | "transferencias_nueva"
   | "historial" 
   | "analisis_ventas" 

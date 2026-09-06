@@ -80,6 +80,16 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Clientes Collection
+    match /clientes/{clienteId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(clienteId)
+        && incoming().nombre_completo is string && incoming().nombre_completo.size() > 0
+        && incoming().tipo_cliente in ['minorista', 'mayorista', 'emprendedor'];
+      allow delete: if false;
+    }
+
     // Migraciones Collection (one-time migration trackers)
     match /migraciones/{migracionId} {
       allow read, create, update: if isSignedIn();

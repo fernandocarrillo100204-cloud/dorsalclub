@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
-import { Movimiento, Almacen, Producto } from "../types";
+import { Movimiento, Almacen, Producto, Cliente } from "../types";
 import { 
   History, 
   Search, 
@@ -16,6 +16,7 @@ import {
   FileSpreadsheet,
   Layers,
   User,
+  Users,
   Calendar,
   X,
   Ban,
@@ -25,28 +26,36 @@ import {
   Loader2,
   ShieldCheck,
   ChevronDown,
-  Shirt
+  Shirt,
+  Tag,
+  Filter
 } from "lucide-react";
 
 interface HistorialProps {
   almacenes: Almacen[];
   productos: Producto[];
   preselectedSku?: string;
+  preselectedClienteId?: string;
   onClearPreselectedSku?: () => void;
+  onNavigateToCliente?: (clienteId: string) => void;
 }
 
 export default function Historial({ 
   almacenes, 
   productos, 
   preselectedSku = "", 
-  onClearPreselectedSku 
+  preselectedClienteId = "",
+  onClearPreselectedSku,
+  onNavigateToCliente
 }: HistorialProps) {
   const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
   const [skuFilter, setSkuFilter] = useState(preselectedSku);
   const [warehouseFilter, setWarehouseFilter] = useState("all");
   const [tipoFilter, setTipoFilter] = useState("all");
   const [estadoFilter, setEstadoFilter] = useState("all"); // "all" | "activo" | "anulado"
+  const [clienteFilter, setClienteFilter] = useState(preselectedClienteId || "all");
   
+  const [clientesList, setClientesList] = useState<Cliente[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [lastDocCursor, setLastDocCursor] = useState<any>(null);
@@ -63,6 +72,20 @@ export default function Historial({
   useEffect(() => {
     setSkuFilter(preselectedSku);
   }, [preselectedSku]);
+
+  useEffect(() => {
+    if (preselectedClienteId) {
+      setClienteFilter(preselectedClienteId);
+    }
+  }, [preselectedClienteId]);
+
+  // Load clients for filter options
+  useEffect(() => {
+    const unsub = firestoreService.getClientesRealtime((items) => {
+      setClientesList(items);
+    });
+    return () => unsub();
+  }, []);
 
   // Load first page of movements (50 items)
   const loadFirstPage = useCallback(async () => {
@@ -105,7 +128,7 @@ export default function Historial({
       setLastDocCursor(res.lastDoc);
       setHasMore(res.hasMore);
     } catch (error) {
-      console.error("Error al cargar más registros:", error);
+      console.error("Error cargando más movimientos:", error);
     } finally {
       setLoadingMore(false);
     }
@@ -115,16 +138,42 @@ export default function Historial({
     loadFirstPage();
   }, [loadFirstPage]);
 
-  // Execute Anulación
+  // Client filtering
+  const displayedMovimientos = useMemo(() => {
+    if (clienteFilter === "all") return movimientos;
+
+    if (clienteFilter === "mostrador") {
+      return movimientos.filter(
+        (m) => m.tipo === "salida" && (!m.cliente_id || m.cliente_nombre?.toLowerCase().includes("mostrador") || !m.cliente_nombre)
+      );
+    }
+
+    return movimientos.filter((m) => {
+      if (m.tipo !== "salida") return false;
+      return m.cliente_id === clienteFilter || m.cliente_nombre === clienteFilter;
+    });
+  }, [movimientos, clienteFilter]);
+
+  const activeClienteObj = useMemo(() => {
+    if (!clienteFilter || clienteFilter === "all" || clienteFilter === "mostrador") return null;
+    return clientesList.find((c) => c.id === clienteFilter || c.nombre_completo === clienteFilter) || null;
+  }, [clienteFilter, clientesList]);
+
+  // Execute Anulación atomic transaction
   const handleConfirmAnulacion = async () => {
-    if (!movToAnular || !movToAnular.id) return;
+    if (!movToAnular) return;
+    const reason = motivoAnulacion.trim();
+    if (!reason) {
+      setAnularError("Debes especificar el motivo de la anulación para auditoría.");
+      return;
+    }
+
     setIsAnulando(true);
     setAnularError(null);
     try {
-      const reason = motivoAnulacion.trim() || "Anulación solicitada por el usuario";
       await firestoreService.anularMovimiento(movToAnular.id, reason);
       
-      // Update local state without losing pagination position
+      // Update local state item immediately
       setMovimientos(prev => prev.map(m => {
         if (m.id === movToAnular.id) {
           return {
@@ -166,11 +215,12 @@ export default function Historial({
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight leading-tight">
-            Historial de Auditoría
+          <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight leading-tight flex items-center gap-2.5">
+            <History className="h-6 w-6 text-zinc-800 dark:text-zinc-200" />
+            Historial de Auditoría y Movimientos
           </h1>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Registro transaccional paginado. Anula movimientos con reversión atómica de stock y trazabilidad completa.
+            Registro transaccional paginado. Consulta salidas vinculadas a clientes, tickets de mostrador y trazabilidad de inventario.
           </p>
         </div>
         <div className="shrink-0 flex items-center space-x-2">
@@ -200,11 +250,36 @@ export default function Historial({
                 onClearPreselectedSku();
                 setSkuFilter("");
               }}
-              className="text-xs font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+              className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white flex items-center gap-1"
             >
-              Ver todos
+              <X className="w-3.5 h-3.5" />
+              <span>Quitar filtro</span>
             </button>
           )}
+        </div>
+      )}
+
+      {/* Active Client Filter Banner */}
+      {clienteFilter !== "all" && (
+        <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl flex items-center justify-between text-xs text-rose-800 dark:text-rose-300">
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+            <span>
+              Filtrando ventas asociadas a:{" "}
+              <strong>
+                {clienteFilter === "mostrador" 
+                  ? "🏪 Venta sin cliente / Mostrador" 
+                  : activeClienteObj?.nombre_completo || clienteFilter}
+              </strong>
+            </span>
+          </div>
+          <button
+            onClick={() => setClienteFilter("all")}
+            className="text-rose-700 dark:text-rose-300 hover:underline font-bold flex items-center gap-1"
+          >
+            <X className="w-3.5 h-3.5" />
+            <span>Mostrar todos</span>
+          </button>
         </div>
       )}
 
@@ -238,7 +313,7 @@ export default function Historial({
 
       {/* Filters Toolbar */}
       <div className="bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 shadow-xs">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {/* SKU filter */}
           <div className="relative flex items-center">
             <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-zinc-400">
@@ -246,7 +321,7 @@ export default function Historial({
             </span>
             <input
               type="text"
-              placeholder="Filtrar por SKU exacto..."
+              placeholder="Filtrar por SKU..."
               value={skuFilter}
               onChange={(e) => setSkuFilter(e.target.value)}
               className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white rounded-xl py-2 pl-9 pr-3 text-xs focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white transition-colors"
@@ -263,7 +338,7 @@ export default function Historial({
               <option value="all">Todos los almacenes</option>
               {almacenes.map(alm => (
                 <option key={alm.id} value={alm.id}>
-                  {alm.nombre} ({alm.ubicacion})
+                  {alm.nombre}
                 </option>
               ))}
             </select>
@@ -278,9 +353,26 @@ export default function Historial({
             >
               <option value="all">Todas las operaciones</option>
               <option value="entrada">Compras y Entradas</option>
-              <option value="salida">Ventas</option>
+              <option value="salida">Ventas (Salidas)</option>
               <option value="transferencia">Transferencias</option>
               <option value="ajuste">Ajustes</option>
+            </select>
+          </div>
+
+          {/* Cliente Filter */}
+          <div className="relative flex items-center">
+            <select
+              value={clienteFilter}
+              onChange={(e) => setClienteFilter(e.target.value)}
+              className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white rounded-xl py-2 px-3 text-xs focus:outline-none font-medium"
+            >
+              <option value="all">Todos los clientes</option>
+              <option value="mostrador">🏪 Venta sin cliente / Mostrador</option>
+              {clientesList.map(c => (
+                <option key={c.id} value={c.id}>
+                  👤 {c.nombre_completo} ({c.tipo_cliente})
+                </option>
+              ))}
             </select>
           </div>
 
@@ -306,11 +398,11 @@ export default function Historial({
             <span className="h-6 w-6 border-2 border-zinc-900 dark:border-white border-t-transparent rounded-full animate-spin inline-block mb-2" />
             <p className="text-xs">Cargando registros de auditoría...</p>
           </div>
-        ) : movimientos.length === 0 ? (
+        ) : displayedMovimientos.length === 0 ? (
           <div className="py-12 text-center text-zinc-400 space-y-2">
             <History className="h-10 w-10 mx-auto text-zinc-300 dark:text-zinc-600" />
-            <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">No hay movimientos registrados</p>
-            <p className="text-xs">Los movimientos registrados aparecerán aquí con su folio y trazabilidad.</p>
+            <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">No hay movimientos coincidentes</p>
+            <p className="text-xs">Prueba ajustando los filtros de búsqueda o cliente.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -321,17 +413,18 @@ export default function Historial({
                   <th className="py-3 px-3">Estado</th>
                   <th className="py-3 px-3">Fecha</th>
                   <th className="py-3 px-3">Prenda & SKU</th>
-                  <th className="py-3 px-3">Color / Talla</th>
                   <th className="py-3 px-3">Almacén</th>
-                  <th className="py-3 px-3">Tipo</th>
+                  <th className="py-3 px-3">Operación</th>
+                  <th className="py-3 px-3">Cliente / Destino</th>
                   <th className="py-3 px-3 text-center">Cant.</th>
+                  <th className="py-3 px-3">Total Venta</th>
                   <th className="py-3 px-3">Referencia</th>
                   <th className="py-3 px-3">Usuario</th>
                   <th className="py-3 px-3 text-right">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800 text-zinc-900 dark:text-zinc-100 text-xs">
-                {movimientos.map((mov) => {
+                {displayedMovimientos.map((mov) => {
                   const isAnulado = mov.estado === "anulado";
                   const prod = getProductDetails(mov.sku);
 
@@ -339,7 +432,7 @@ export default function Historial({
                   const rawDate = mov.fecha || mov.creado_at;
                   if (rawDate) {
                     const d = rawDate instanceof Date ? rawDate : (rawDate as any).toDate ? (rawDate as any).toDate() : new Date(rawDate);
-                    dateStr = d.toLocaleString("es-ES", {
+                    dateStr = d.toLocaleString("es-MX", {
                       day: "2-digit",
                       month: "2-digit",
                       year: "numeric",
@@ -348,26 +441,19 @@ export default function Historial({
                     });
                   }
 
-                  let badgeColorClass = "";
-                  let typeLabel = "";
+                  let badgeColorClass = "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300";
+                  let typeLabel = mov.tipo;
                   let qtyPrefix = "";
-                  let qtyColorClass = "";
+                  let qtyColorClass = "text-zinc-900 dark:text-white font-bold";
 
                   switch (mov.tipo) {
                     case "entrada":
-                      if (mov.compra_id || (mov.referencia && mov.referencia.startsWith("Compra COMP-"))) {
-                        badgeColorClass = isAnulado 
-                          ? "bg-zinc-100 text-zinc-400" 
-                          : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800";
-                        typeLabel = "Compra";
-                      } else {
-                        badgeColorClass = isAnulado 
-                          ? "bg-zinc-100 text-zinc-400" 
-                          : "bg-teal-50 text-teal-700 dark:bg-teal-950/50 dark:text-teal-400 border border-teal-200 dark:border-teal-800";
-                        typeLabel = "Entrada manual";
-                      }
+                      badgeColorClass = isAnulado 
+                        ? "bg-zinc-100 text-zinc-400" 
+                        : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800";
+                      typeLabel = "Compra / Entrada";
                       qtyPrefix = "+";
-                      qtyColorClass = isAnulado ? "text-zinc-400 line-through" : "text-emerald-600 dark:text-emerald-400 font-bold";
+                      qtyColorClass = isAnulado ? "text-zinc-400 line-through" : "text-emerald-600 dark:text-emerald-400 font-semibold";
                       break;
                     case "salida":
                       badgeColorClass = isAnulado 
@@ -375,7 +461,7 @@ export default function Historial({
                         : "bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-400 border border-rose-200 dark:border-rose-800";
                       typeLabel = "Venta";
                       qtyPrefix = "-";
-                      qtyColorClass = isAnulado ? "text-zinc-400 line-through" : "text-rose-600 dark:text-rose-400 font-bold";
+                      qtyColorClass = isAnulado ? "text-zinc-400 line-through" : "text-rose-600 dark:text-rose-400 font-semibold";
                       break;
                     case "transferencia":
                       badgeColorClass = isAnulado 
@@ -394,6 +480,10 @@ export default function Historial({
                       qtyColorClass = isAnulado ? "text-zinc-400 line-through" : "text-amber-600 dark:text-amber-400 font-semibold";
                       break;
                   }
+
+                  const totalVentaVal = typeof mov.total_venta === "number"
+                    ? mov.total_venta
+                    : (typeof mov.precio_unitario_venta === "number" ? mov.precio_unitario_venta * mov.cantidad : null);
 
                   return (
                     <tr 
@@ -446,24 +536,10 @@ export default function Historial({
                         <div className={`font-bold text-zinc-900 dark:text-white leading-tight ${isAnulado ? "line-through text-zinc-400" : ""}`}>
                           {prod ? prod.nombre : mov.sku}
                         </div>
-                        <div className="font-mono text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
-                          {mov.sku}
+                        <div className="font-mono text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 flex items-center gap-1.5">
+                          <span>{mov.sku}</span>
+                          {prod?.talla && <span className="text-zinc-400">• Talla: {prod.talla}</span>}
                         </div>
-                      </td>
-
-                      {/* Color / Talla */}
-                      <td className="py-3 px-3 whitespace-nowrap">
-                        {prod ? (
-                          <div className="flex items-center gap-1.5 text-xs">
-                            <span className="text-zinc-700 dark:text-zinc-300 font-medium">{prod.color || "—"}</span>
-                            <span className="text-zinc-400">•</span>
-                            <span className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 font-bold text-[11px]">
-                              {prod.talla || "U"}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-zinc-400 text-xs">—</span>
-                        )}
                       </td>
 
                       {/* Origin warehouse */}
@@ -485,13 +561,71 @@ export default function Historial({
                         </span>
                       </td>
 
+                      {/* Cliente / Destino */}
+                      <td className="py-3 px-3">
+                        {mov.tipo === "salida" ? (
+                          mov.cliente_nombre && !mov.cliente_nombre.toLowerCase().includes("mostrador") ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (mov.cliente_id) {
+                                  setClienteFilter(mov.cliente_id);
+                                } else if (mov.cliente_nombre) {
+                                  setClienteFilter(mov.cliente_nombre);
+                                }
+                              }}
+                              className="text-left group flex items-center gap-1 text-xs"
+                              title="Filtrar movimientos de este cliente"
+                            >
+                              <User className="w-3 h-3 text-rose-500 shrink-0" />
+                              <span className="font-semibold text-zinc-900 dark:text-white group-hover:underline group-hover:text-rose-600 dark:group-hover:text-rose-400">
+                                {mov.cliente_nombre}
+                              </span>
+                              {mov.cliente_tipo && (
+                                <span className="text-[10px] px-1 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 capitalize">
+                                  {mov.cliente_tipo}
+                                </span>
+                              )}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setClienteFilter("mostrador")}
+                              className="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 text-xs flex items-center gap-1"
+                              title="Filtrar ventas de mostrador"
+                            >
+                              <span>🏪</span>
+                              <span className="italic">Venta sin cliente / Mostrador</span>
+                            </button>
+                          )
+                        ) : (
+                          <span className="text-zinc-400 text-xs">—</span>
+                        )}
+                      </td>
+
                       {/* Amount */}
                       <td className={`py-3 px-3 text-center font-mono ${qtyColorClass}`}>
                         {qtyPrefix} {mov.cantidad}
                       </td>
 
+                      {/* Total Venta */}
+                      <td className="py-3 px-3 font-mono text-zinc-900 dark:text-white">
+                        {totalVentaVal !== null ? (
+                          <div>
+                            <span className="font-bold">${totalVentaVal.toFixed(2)}</span>
+                            {mov.precio_unitario_venta && (
+                              <span className="text-[10px] text-zinc-400 block">
+                                (${mov.precio_unitario_venta.toFixed(2)} c/u)
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-zinc-400 text-xs">—</span>
+                        )}
+                      </td>
+
                       {/* Reference string */}
-                      <td className="py-3 px-3 text-zinc-500 italic text-xs max-w-xs truncate" title={mov.referencia}>
+                      <td className="py-3 px-3 text-zinc-500 text-xs max-w-xs truncate" title={mov.referencia}>
                         {mov.referencia || "—"}
                         {isAnulado && mov.motivo_anulacion && (
                           <span className="block not-italic text-[10px] text-rose-600 dark:text-rose-400 mt-0.5 truncate font-normal">
@@ -530,7 +664,7 @@ export default function Historial({
                               setAnularError(null);
                             }}
                             title="Anular movimiento y revertir stock atómicamente"
-                            className="p-1.5 text-zinc-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg transition-colors border border-transparent hover:border-amber-200 dark:hover:border-amber-800/80 inline-flex items-center gap-1 text-[11px] font-medium"
+                            className="p-1.5 text-zinc-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg transition-colors border border-transparent hover:border-amber-200 dark:border-amber-800/80 inline-flex items-center gap-1 text-[11px] font-medium"
                           >
                             <Ban className="h-3.5 w-3.5 text-amber-600" />
                             <span className="hidden sm:inline">Anular</span>
@@ -548,7 +682,7 @@ export default function Historial({
         {/* Pagination Footer */}
         <div className="p-4 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-zinc-500">
           <div>
-            Mostrando <span className="font-semibold text-zinc-900 dark:text-white">{movimientos.length}</span> registros de auditoría.
+            Mostrando <span className="font-semibold text-zinc-900 dark:text-white">{displayedMovimientos.length}</span> registros.
           </div>
           {hasMore && (
             <button
@@ -565,7 +699,7 @@ export default function Historial({
 
       {/* Modal Confirm Anulación */}
       {movToAnular && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 flex items-center justify-center">

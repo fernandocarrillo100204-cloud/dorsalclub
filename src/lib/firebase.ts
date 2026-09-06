@@ -48,7 +48,12 @@ import {
   UnidadMedidaCatalogo,
   ResumenVentaDiaria,
   Compra,
-  CompraItem
+  CompraItem,
+  Cliente,
+  TipoCliente,
+  CanalPreferido,
+  OrigenCliente,
+  EstadoCliente
 } from "../types";
 
 // Silence non-critical network retry noise from Firestore client
@@ -164,6 +169,7 @@ const listeners = {
   tallas_ropa: [] as ((data: TallaRopaCatalogo[]) => void)[],
   tallas_calzado: [] as ((data: TallaCalzadoCatalogo[]) => void)[],
   unidades: [] as ((data: UnidadMedidaCatalogo[]) => void)[],
+  clientes: [] as ((data: Cliente[]) => void)[],
   auth: [] as ((user: Usuario | null) => void)[]
 };
 
@@ -213,6 +219,9 @@ const initializeLocalEmulator = () => {
   }
   if (localStorage.getItem(STORAGE_PREFIX + "unidades") === null) {
     setLocalStorageItem("unidades", []);
+  }
+  if (localStorage.getItem(STORAGE_PREFIX + "clientes") === null) {
+    setLocalStorageItem("clientes", []);
   }
 };
 
@@ -462,6 +471,373 @@ export const firestoreService = {
     const matchName = almacenesList.find(a => a.nombre.toLowerCase().trim() === clean.toLowerCase().trim());
     if (matchName) return matchName.id;
     return clean;
+  },
+
+  // --- CLIENTES ---
+  getClientes: async (): Promise<Cliente[]> => {
+    if (isConfigured && realDb) {
+      try {
+        const snap = await getDocs(collection(realDb, "clientes"));
+        const list: Cliente[] = [];
+        snap.forEach(d => {
+          const data = d.data();
+          list.push({
+            id: d.id,
+            nombre_completo: data.nombre_completo || "",
+            nombre_normalizado: data.nombre_normalizado || (data.nombre_completo || "").trim().toLowerCase().replace(/\s+/g, " "),
+            tipo_cliente: data.tipo_cliente || "minorista",
+            instagram: data.instagram || "",
+            instagram_normalizado: data.instagram_normalizado || (data.instagram ? data.instagram.trim().toLowerCase().replace(/^@+/, "") : ""),
+            telefono: data.telefono !== undefined && data.telefono !== null ? String(data.telefono) : "",
+            email: data.email || "",
+            ciudad: data.ciudad || "",
+            canal_preferido: data.canal_preferido || "WhatsApp",
+            intereses: data.intereses || "",
+            origen: data.origen || "Instagram",
+            notas: data.notas || "",
+            proximo_seguimiento: data.proximo_seguimiento ? (data.proximo_seguimiento.toDate ? data.proximo_seguimiento.toDate() : data.proximo_seguimiento) : null,
+            estado: data.estado || "activo",
+            creado_at: data.creado_at ? (data.creado_at.toDate ? data.creado_at.toDate() : data.creado_at) : new Date(),
+            actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date(),
+            creado_por: data.creado_por || "sistema"
+          });
+        });
+        list.sort((a, b) => {
+          const tA = a.creado_at instanceof Date ? a.creado_at.getTime() : (a.creado_at as any)?.seconds ? (a.creado_at as any).seconds * 1000 : 0;
+          const tB = b.creado_at instanceof Date ? b.creado_at.getTime() : (b.creado_at as any)?.seconds ? (b.creado_at as any).seconds * 1000 : 0;
+          return tB - tA;
+        });
+        setLocalStorageItem("clientes", list);
+        return list;
+      } catch (err: any) {
+        console.warn("Consulta Firestore clientes no disponible (reglas o permisos de colección), recurriendo a almacenamiento local:", err?.message || err);
+        return getLocalStorageItem<Cliente[]>("clientes", []);
+      }
+    }
+    return getLocalStorageItem<Cliente[]>("clientes", []);
+  },
+
+  getClientesRealtime: (onUpdate: (clientes: Cliente[]) => void, onError?: (error: any) => void): (() => void) => {
+    // Deliver local cache immediately so UI doesn't stall in loading
+    const localCached = getLocalStorageItem<Cliente[]>("clientes", []);
+    onUpdate(localCached);
+
+    if (isConfigured && realDb) {
+      let isUnsubscribed = false;
+      let unsubscribeSnapshot: () => void = () => {};
+
+      // Register local change listener to reflect modifications in real time
+      const updateFromLocal = () => {
+        const list = getLocalStorageItem<Cliente[]>("clientes", []);
+        onUpdate(list);
+      };
+      listeners.clientes.push(updateFromLocal);
+
+      try {
+        unsubscribeSnapshot = onSnapshot(
+          collection(realDb, "clientes"),
+          (snap) => {
+            if (isUnsubscribed) return;
+            const list: Cliente[] = [];
+            snap.forEach(d => {
+              const data = d.data();
+              list.push({
+                id: d.id,
+                nombre_completo: data.nombre_completo || "",
+                nombre_normalizado: data.nombre_normalizado || (data.nombre_completo || "").trim().toLowerCase().replace(/\s+/g, " "),
+                tipo_cliente: data.tipo_cliente || "minorista",
+                instagram: data.instagram || "",
+                instagram_normalizado: data.instagram_normalizado || (data.instagram ? data.instagram.trim().toLowerCase().replace(/^@+/, "") : ""),
+                telefono: data.telefono !== undefined && data.telefono !== null ? String(data.telefono) : "",
+                email: data.email || "",
+                ciudad: data.ciudad || "",
+                canal_preferido: data.canal_preferido || "WhatsApp",
+                intereses: data.intereses || "",
+                origen: data.origen || "Instagram",
+                notas: data.notas || "",
+                proximo_seguimiento: data.proximo_seguimiento ? (data.proximo_seguimiento.toDate ? data.proximo_seguimiento.toDate() : data.proximo_seguimiento) : null,
+                estado: data.estado || "activo",
+                creado_at: data.creado_at ? (data.creado_at.toDate ? data.creado_at.toDate() : data.creado_at) : new Date(),
+                actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date(),
+                creado_por: data.creado_por || "sistema"
+              });
+            });
+            list.sort((a, b) => {
+              const tA = a.creado_at instanceof Date ? a.creado_at.getTime() : (a.creado_at as any)?.seconds ? (a.creado_at as any).seconds * 1000 : 0;
+              const tB = b.creado_at instanceof Date ? b.creado_at.getTime() : (b.creado_at as any)?.seconds ? (b.creado_at as any).seconds * 1000 : 0;
+              return tB - tA;
+            });
+            setLocalStorageItem("clientes", list);
+            onUpdate(list);
+          },
+          (error: any) => {
+            if (isUnsubscribed) return;
+            const isPermission = error?.code === "permission-denied" || (error?.message && error.message.includes("permission"));
+            if (isPermission) {
+              console.warn("Firestore clientes: Reglas de seguridad pendientes en Firebase Console para /clientes. Operando en sincronización local persistente:", error.message);
+            } else {
+              console.warn("Aviso en listener de clientes de Firestore:", error);
+            }
+            const fallbackList = getLocalStorageItem<Cliente[]>("clientes", []);
+            onUpdate(fallbackList);
+            if (onError) onError(error);
+          }
+        );
+      } catch (err) {
+        console.warn("Excepción al suscribir listener de clientes:", err);
+        const fallbackList = getLocalStorageItem<Cliente[]>("clientes", []);
+        onUpdate(fallbackList);
+        if (onError) onError(err);
+      }
+
+      return () => {
+        isUnsubscribed = true;
+        try {
+          unsubscribeSnapshot();
+        } catch {
+          // ignore
+        }
+        listeners.clientes = listeners.clientes.filter(cb => cb !== updateFromLocal);
+      };
+    }
+
+    const update = () => {
+      const list = getLocalStorageItem<Cliente[]>("clientes", []);
+      onUpdate(list);
+    };
+    update();
+    listeners.clientes.push(update);
+    return () => {
+      listeners.clientes = listeners.clientes.filter(cb => cb !== update);
+    };
+  },
+
+  addCliente: async (clienteData: {
+    nombre_completo: string;
+    tipo_cliente: TipoCliente;
+    instagram?: string;
+    telefono?: string;
+    email?: string;
+    ciudad?: string;
+    canal_preferido?: CanalPreferido | string;
+    intereses?: string;
+    origen?: OrigenCliente | string;
+    notas?: string;
+    proximo_seguimiento?: Date | string | null;
+    estado?: EstadoCliente;
+  }): Promise<Cliente> => {
+    const user = authService.getCurrentUser();
+    const cleanNombre = (clienteData.nombre_completo || "").trim();
+    if (!cleanNombre) {
+      throw new Error("El nombre completo del cliente es obligatorio.");
+    }
+    if (!clienteData.tipo_cliente || !["minorista", "mayorista", "emprendedor"].includes(clienteData.tipo_cliente)) {
+      throw new Error("El tipo de cliente debe ser 'minorista', 'mayorista' o 'emprendedor'.");
+    }
+
+    const nombre_normalizado = cleanNombre.toLowerCase().replace(/\s+/g, " ");
+    const rawIg = (clienteData.instagram || "").trim();
+    const instagram_normalizado = rawIg ? rawIg.toLowerCase().replace(/^@+/, "") : "";
+    const cleanTel = clienteData.telefono !== undefined && clienteData.telefono !== null && String(clienteData.telefono).trim() !== ""
+      ? String(clienteData.telefono).trim()
+      : "";
+
+    const estado: EstadoCliente = clienteData.estado || "activo";
+    const userEmail = user?.email || "sistema@dorsalclub.com";
+
+    if (isConfigured && realDb) {
+      try {
+        const docRef = doc(collection(realDb, "clientes"));
+        const newClienteData: any = {
+          nombre_completo: cleanNombre,
+          nombre_normalizado,
+          tipo_cliente: clienteData.tipo_cliente,
+          instagram: rawIg,
+          instagram_normalizado,
+          telefono: cleanTel,
+          email: (clienteData.email || "").trim(),
+          ciudad: (clienteData.ciudad || "").trim(),
+          canal_preferido: clienteData.canal_preferido || "WhatsApp",
+          intereses: (clienteData.intereses || "").trim(),
+          origen: clienteData.origen || "Instagram",
+          notas: (clienteData.notas || "").trim(),
+          estado,
+          creado_at: Timestamp.now(),
+          actualizado_at: Timestamp.now(),
+          creado_por: userEmail
+        };
+
+        if (clienteData.proximo_seguimiento) {
+          newClienteData.proximo_seguimiento = clienteData.proximo_seguimiento instanceof Date 
+            ? Timestamp.fromDate(clienteData.proximo_seguimiento)
+            : clienteData.proximo_seguimiento;
+        } else {
+          newClienteData.proximo_seguimiento = null;
+        }
+
+        await setDoc(docRef, newClienteData);
+
+        const createdItem: Cliente = {
+          id: docRef.id,
+          ...newClienteData,
+          creado_at: new Date(),
+          actualizado_at: new Date()
+        };
+
+        const list = getLocalStorageItem<Cliente[]>("clientes", []);
+        list.unshift(createdItem);
+        setLocalStorageItem("clientes", list);
+        notifyListeners("clientes", list);
+
+        return createdItem;
+      } catch (err: any) {
+        const isPermission = err?.code === "permission-denied" || (err?.message && err.message.includes("permission"));
+        if (isPermission) {
+          console.warn("Escritura Firestore rechazada por reglas. Guardando cliente localmente:", err);
+          const list = getLocalStorageItem<Cliente[]>("clientes", []);
+          const newId = "cli_" + Math.random().toString(36).substr(2, 9);
+          const newLocal: Cliente = {
+            id: newId,
+            nombre_completo: cleanNombre,
+            nombre_normalizado,
+            tipo_cliente: clienteData.tipo_cliente,
+            instagram: rawIg,
+            instagram_normalizado,
+            telefono: cleanTel,
+            email: (clienteData.email || "").trim(),
+            ciudad: (clienteData.ciudad || "").trim(),
+            canal_preferido: clienteData.canal_preferido || "WhatsApp",
+            intereses: (clienteData.intereses || "").trim(),
+            origen: clienteData.origen || "Instagram",
+            notas: (clienteData.notas || "").trim(),
+            proximo_seguimiento: clienteData.proximo_seguimiento || null,
+            estado,
+            creado_at: new Date(),
+            actualizado_at: new Date(),
+            creado_por: userEmail
+          };
+          list.unshift(newLocal);
+          setLocalStorageItem("clientes", list);
+          notifyListeners("clientes", list);
+          return newLocal;
+        }
+        throw err;
+      }
+    }
+
+    const list = getLocalStorageItem<Cliente[]>("clientes", []);
+    const newId = "cli_" + Math.random().toString(36).substr(2, 9);
+    const newLocal: Cliente = {
+      id: newId,
+      nombre_completo: cleanNombre,
+      nombre_normalizado,
+      tipo_cliente: clienteData.tipo_cliente,
+      instagram: rawIg,
+      instagram_normalizado,
+      telefono: cleanTel,
+      email: (clienteData.email || "").trim(),
+      ciudad: (clienteData.ciudad || "").trim(),
+      canal_preferido: clienteData.canal_preferido || "WhatsApp",
+      intereses: (clienteData.intereses || "").trim(),
+      origen: clienteData.origen || "Instagram",
+      notas: (clienteData.notas || "").trim(),
+      proximo_seguimiento: clienteData.proximo_seguimiento || null,
+      estado,
+      creado_at: new Date(),
+      actualizado_at: new Date(),
+      creado_por: userEmail
+    };
+    list.unshift(newLocal);
+    setLocalStorageItem("clientes", list);
+    notifyListeners("clientes", list);
+    return newLocal;
+  },
+
+  updateCliente: async (id: string, updates: Partial<Cliente>): Promise<void> => {
+    if (!id) throw new Error("ID de cliente no proporcionado.");
+    
+    const patch: any = {
+      actualizado_at: isConfigured && realDb ? Timestamp.now() : new Date()
+    };
+
+    if (updates.nombre_completo !== undefined) {
+      const clean = updates.nombre_completo.trim();
+      if (!clean) throw new Error("El nombre completo no puede estar vacío.");
+      patch.nombre_completo = clean;
+      patch.nombre_normalizado = clean.toLowerCase().replace(/\s+/g, " ");
+    }
+    if (updates.tipo_cliente !== undefined) {
+      if (!["minorista", "mayorista", "emprendedor"].includes(updates.tipo_cliente)) {
+        throw new Error("Tipo de cliente no válido.");
+      }
+      patch.tipo_cliente = updates.tipo_cliente;
+    }
+    if (updates.instagram !== undefined) {
+      const rawIg = (updates.instagram || "").trim();
+      patch.instagram = rawIg;
+      patch.instagram_normalizado = rawIg ? rawIg.toLowerCase().replace(/^@+/, "") : "";
+    }
+    if (updates.telefono !== undefined) {
+      patch.telefono = updates.telefono !== null && updates.telefono !== undefined ? String(updates.telefono).trim() : "";
+    }
+    if (updates.email !== undefined) patch.email = (updates.email || "").trim();
+    if (updates.ciudad !== undefined) patch.ciudad = (updates.ciudad || "").trim();
+    if (updates.canal_preferido !== undefined) patch.canal_preferido = updates.canal_preferido;
+    if (updates.intereses !== undefined) patch.intereses = (updates.intereses || "").trim();
+    if (updates.origen !== undefined) patch.origen = updates.origen;
+    if (updates.notas !== undefined) patch.notas = (updates.notas || "").trim();
+    if (updates.proximo_seguimiento !== undefined) {
+      if (updates.proximo_seguimiento instanceof Date && isConfigured && realDb) {
+        patch.proximo_seguimiento = Timestamp.fromDate(updates.proximo_seguimiento);
+      } else {
+        patch.proximo_seguimiento = updates.proximo_seguimiento;
+      }
+    }
+    if (updates.estado !== undefined) {
+      patch.estado = updates.estado;
+    }
+
+    if (isConfigured && realDb) {
+      try {
+        const docRef = doc(realDb, "clientes", id);
+        await setDoc(docRef, patch, { merge: true });
+
+        const list = getLocalStorageItem<Cliente[]>("clientes", []);
+        const idx = list.findIndex(c => c.id === id);
+        if (idx !== -1) {
+          list[idx] = { ...list[idx], ...updates, actualizado_at: new Date() };
+          setLocalStorageItem("clientes", list);
+          notifyListeners("clientes", list);
+        }
+        return;
+      } catch (err: any) {
+        const isPermission = err?.code === "permission-denied" || (err?.message && err.message.includes("permission"));
+        if (isPermission) {
+          console.warn("Actualización Firestore rechazada por reglas. Aplicando cambio localmente:", err);
+          const list = getLocalStorageItem<Cliente[]>("clientes", []);
+          const idx = list.findIndex(c => c.id === id);
+          if (idx !== -1) {
+            list[idx] = { ...list[idx], ...updates, actualizado_at: new Date() };
+            setLocalStorageItem("clientes", list);
+            notifyListeners("clientes", list);
+          }
+          return;
+        }
+        throw err;
+      }
+    }
+
+    const list = getLocalStorageItem<Cliente[]>("clientes", []);
+    const idx = list.findIndex(c => c.id === id);
+    if (idx !== -1) {
+      list[idx] = { ...list[idx], ...patch };
+      setLocalStorageItem("clientes", list);
+      notifyListeners("clientes", list);
+    }
+  },
+
+  toggleClienteEstado: async (id: string, nuevoEstado: EstadoCliente): Promise<void> => {
+    await firestoreService.updateCliente(id, { estado: nuevoEstado });
   },
 
   // --- PRODUCTOS ---
@@ -940,6 +1316,11 @@ export const firestoreService = {
           ...(mov.compra_id ? { compra_id: mov.compra_id } : {}),
           ...(mov.lote_id ? { lote_id: mov.lote_id } : {}),
           ...(typeof mov.costo_unitario === "number" ? { costo_unitario: mov.costo_unitario } : {}),
+          ...(mov.cliente_id ? { cliente_id: mov.cliente_id } : {}),
+          ...(mov.cliente_nombre ? { cliente_nombre: mov.cliente_nombre } : {}),
+          ...(mov.cliente_tipo ? { cliente_tipo: mov.cliente_tipo } : {}),
+          ...(typeof mov.precio_unitario_venta === "number" ? { precio_unitario_venta: mov.precio_unitario_venta } : {}),
+          ...(typeof mov.total_venta === "number" ? { total_venta: mov.total_venta } : {}),
           ...(destAlmId ? { almacen_destino_id: destAlmId } : {})
         });
       });
@@ -1038,6 +1419,11 @@ export const firestoreService = {
       ...(mov.compra_id ? { compra_id: mov.compra_id } : {}),
       ...(mov.lote_id ? { lote_id: mov.lote_id } : {}),
       ...(typeof mov.costo_unitario === "number" ? { costo_unitario: mov.costo_unitario } : {}),
+      ...(mov.cliente_id ? { cliente_id: mov.cliente_id } : {}),
+      ...(mov.cliente_nombre ? { cliente_nombre: mov.cliente_nombre } : {}),
+      ...(mov.cliente_tipo ? { cliente_tipo: mov.cliente_tipo } : {}),
+      ...(typeof mov.precio_unitario_venta === "number" ? { precio_unitario_venta: mov.precio_unitario_venta } : {}),
+      ...(typeof mov.total_venta === "number" ? { total_venta: mov.total_venta } : {}),
       ...(destAlmId ? { almacen_destino_id: destAlmId } : {})
     };
 
@@ -1328,6 +1714,11 @@ export const firestoreService = {
             compra_id: data.compra_id,
             lote_id: data.lote_id,
             costo_unitario: typeof data.costo_unitario === "number" ? data.costo_unitario : undefined,
+            cliente_id: data.cliente_id,
+            cliente_nombre: data.cliente_nombre,
+            cliente_tipo: data.cliente_tipo,
+            precio_unitario_venta: typeof data.precio_unitario_venta === "number" ? data.precio_unitario_venta : undefined,
+            total_venta: typeof data.total_venta === "number" ? data.total_venta : undefined,
             estado: data.estado || "activo",
             anulado_at: data.anulado_at ? (data.anulado_at as Timestamp).toDate() : undefined,
             anulado_por: data.anulado_por,
@@ -1362,6 +1753,11 @@ export const firestoreService = {
               compra_id: data.compra_id,
               lote_id: data.lote_id,
               costo_unitario: typeof data.costo_unitario === "number" ? data.costo_unitario : undefined,
+              cliente_id: data.cliente_id,
+              cliente_nombre: data.cliente_nombre,
+              cliente_tipo: data.cliente_tipo,
+              precio_unitario_venta: typeof data.precio_unitario_venta === "number" ? data.precio_unitario_venta : undefined,
+              total_venta: typeof data.total_venta === "number" ? data.total_venta : undefined,
               estado: data.estado || "activo",
               anulado_at: data.anulado_at ? (data.anulado_at as Timestamp).toDate() : undefined,
               anulado_por: data.anulado_por,

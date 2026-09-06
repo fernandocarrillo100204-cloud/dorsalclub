@@ -19,7 +19,8 @@ import {
   User as UserIcon,
   Sun,
   Moon,
-  Tag
+  Tag,
+  Users
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Usuario, NavigationTab } from "../types";
@@ -51,6 +52,12 @@ const NAV_ITEMS: NavItem[] = [
     label: "Ventas", 
     icon: ShoppingCart,
     matchActive: (curr) => curr === "ventas_nueva"
+  },
+  { 
+    id: "clientes", 
+    label: "Clientes", 
+    icon: Users,
+    matchActive: (curr) => curr === "clientes"
   },
   { 
     id: "transferencias_nueva", 

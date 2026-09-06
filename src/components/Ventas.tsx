@@ -5,7 +5,8 @@
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
-import { Almacen, Producto, StockItem } from "../types";
+import { Almacen, Producto, StockItem, Cliente, TipoCliente } from "../types";
+import ClienteModal from "./ClienteModal";
 import {
   TrendingDown,
   QrCode,
@@ -17,10 +18,16 @@ import {
   ShoppingCart,
   DollarSign,
   User,
+  Users,
   Hash,
   ArrowRight,
   Warehouse,
-  Barcode
+  Barcode,
+  Plus,
+  AlertTriangle,
+  ChevronDown,
+  Check,
+  X
 } from "lucide-react";
 
 interface VentasProps {
@@ -28,6 +35,7 @@ interface VentasProps {
   productos: Producto[];
   preselectedSku?: string;
   preselectedAlmacenId?: string;
+  preselectedClienteId?: string;
   onSuccess?: () => void;
   onCancel?: () => void;
 }
@@ -37,14 +45,23 @@ export default function Ventas({
   productos,
   preselectedSku = "",
   preselectedAlmacenId = "",
+  preselectedClienteId = "",
   onSuccess,
   onCancel
 }: VentasProps) {
   const [sku, setSku] = useState(preselectedSku);
   const [almacenId, setAlmacenId] = useState<string>(preselectedAlmacenId || almacenes[0]?.id || "");
   const [cantidad, setCantidad] = useState<number | string>(1);
+  const [precioUnitario, setPrecioUnitario] = useState<number | string>("");
   const [referencia, setReferencia] = useState("");
-  const [cliente, setCliente] = useState("");
+
+  // Client Selection State
+  const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [selectedClienteId, setSelectedClienteId] = useState<string>(preselectedClienteId || "");
+  const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
+  const [clientSearchText, setClientSearchText] = useState("");
+  const [isClienteModalOpen, setIsClienteModalOpen] = useState(false);
+  const clientDropdownRef = useRef<HTMLDivElement>(null);
 
   const [stockList, setStockList] = useState<StockItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -60,12 +77,32 @@ export default function Ventas({
   useEffect(() => {
     if (preselectedSku) setSku(preselectedSku);
     if (preselectedAlmacenId) setAlmacenId(preselectedAlmacenId);
-  }, [preselectedSku, preselectedAlmacenId]);
+    if (preselectedClienteId) setSelectedClienteId(preselectedClienteId);
+  }, [preselectedSku, preselectedAlmacenId, preselectedClienteId]);
+
+  // Close client dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (clientDropdownRef.current && !clientDropdownRef.current.contains(event.target as Node)) {
+        setIsClientDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Subscribe to stock
   useEffect(() => {
     const unsub = firestoreService.getStockRealtime((items) => {
       setStockList(items);
+    });
+    return () => unsub();
+  }, []);
+
+  // Subscribe to clientes
+  useEffect(() => {
+    const unsub = firestoreService.getClientesRealtime((items) => {
+      setClientes(items);
     });
     return () => unsub();
   }, []);
@@ -76,6 +113,38 @@ export default function Ventas({
     return productos.find((p) => p.sku.toLowerCase() === sku.toLowerCase()) || null;
   }, [sku, productos]);
 
+  // Update default unit price when product changes
+  useEffect(() => {
+    if (selectedProduct && selectedProduct.precio_venta !== undefined) {
+      setPrecioUnitario(selectedProduct.precio_venta);
+    }
+  }, [selectedProduct]);
+
+  // Selected client details
+  const selectedCliente = useMemo(() => {
+    if (!selectedClienteId || selectedClienteId === "mostrador") return null;
+    return clientes.find((c) => c.id === selectedClienteId) || null;
+  }, [selectedClienteId, clientes]);
+
+  const isClienteInactivo = useMemo(() => {
+    return selectedCliente?.estado === "inactivo";
+  }, [selectedCliente]);
+
+  // Filtered clients for the dropdown
+  const filteredDropdownClientes = useMemo(() => {
+    const term = clientSearchText.trim().toLowerCase();
+    if (!term) return clientes;
+    const termClean = term.replace(/[@\s-]/g, "");
+
+    return clientes.filter((c) => {
+      const matchName = c.nombre_normalizado?.includes(term) || c.nombre_completo.toLowerCase().includes(term);
+      const matchIg = c.instagram_normalizado?.includes(termClean) || c.instagram?.toLowerCase().includes(term);
+      const phoneClean = c.telefono ? String(c.telefono).replace(/\D/g, "") : "";
+      const matchPhone = phoneClean.includes(termClean) || (c.telefono && c.telefono.includes(term));
+      return matchName || matchIg || matchPhone;
+    });
+  }, [clientes, clientSearchText]);
+
   // Current stock available in selected warehouse
   const availableStock = useMemo(() => {
     if (!sku || !almacenId) return null;
@@ -84,6 +153,11 @@ export default function Ventas({
     );
     return stockItem ? stockItem.cantidad : 0;
   }, [sku, almacenId, stockList]);
+
+  // Calculated totals
+  const numQuantity = Number(cantidad) || 0;
+  const unitPriceVal = typeof precioUnitario === "number" ? precioUnitario : parseFloat(String(precioUnitario)) || 0;
+  const totalCalculado = unitPriceVal * numQuantity;
 
   // Scanner controls
   const startScanner = async () => {
@@ -144,41 +218,51 @@ export default function Ventas({
       return;
     }
 
-    const numQty = Number(cantidad);
-    if (isNaN(numQty) || numQty <= 0) {
+    if (isNaN(numQuantity) || numQuantity <= 0) {
       setFormError("La cantidad debe ser un número entero mayor a cero.");
       return;
     }
 
-    if (availableStock !== null && availableStock < numQty) {
+    if (availableStock !== null && availableStock < numQuantity) {
       setFormError(
-        `Stock insuficiente en el almacén seleccionado. Stock disponible: ${availableStock} uds, solicitado: ${numQty} uds.`
+        `Stock insuficiente en el almacén seleccionado. Stock disponible: ${availableStock} uds, solicitado: ${numQuantity} uds.`
       );
       return;
     }
 
     setLoading(true);
     try {
+      // Determine client snapshot values
+      const isMostrador = !selectedClienteId || selectedClienteId === "mostrador";
+      const clienteNombre = isMostrador ? "Venta sin cliente / Mostrador" : selectedCliente?.nombre_completo || "Cliente";
+      const clienteTipo = isMostrador ? undefined : selectedCliente?.tipo_cliente;
+      const clienteId = isMostrador ? undefined : selectedCliente?.id;
+
       const fullReference = [
         referencia.trim() ? `Ref: ${referencia.trim()}` : "",
-        cliente.trim() ? `Cliente: ${cliente.trim()}` : ""
+        `Cliente: ${clienteNombre}`
       ]
         .filter(Boolean)
-        .join(" | ") || "Venta de mostrador / Tienda";
+        .join(" | ");
 
       const res = await firestoreService.registerMovimientoTransaction({
         sku: cleanSku,
         almacen_id: almacenId,
         tipo: "salida",
-        cantidad: numQty,
-        referencia: fullReference
+        cantidad: numQuantity,
+        referencia: fullReference,
+        cliente_id: clienteId,
+        cliente_nombre: clienteNombre,
+        cliente_tipo: clienteTipo,
+        precio_unitario_venta: unitPriceVal,
+        total_venta: totalCalculado
       });
 
       setFormSuccess(`¡Venta registrada con éxito! Folio generado: ${res.folio}. El stock ha sido descontado.`);
 
       setCantidad(1);
       setReferencia("");
-      setCliente("");
+      setSelectedClienteId("");
 
       if (onSuccess) {
         setTimeout(() => onSuccess(), 1500);
@@ -200,7 +284,7 @@ export default function Ventas({
           Registrar Venta / Despacho
         </h1>
         <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-          Descuenta unidades vendidas en tienda física o canales digitales y actualiza el análisis comercial en vivo.
+          Descuenta unidades vendidas en mostrador o asociadas a un cliente con trazabilidad comercial completa.
         </p>
       </div>
 
@@ -252,70 +336,73 @@ export default function Ventas({
               <button
                 type="button"
                 onClick={startScanner}
-                className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-600 dark:text-rose-400 hover:underline"
+                className="text-xs text-rose-500 hover:text-rose-600 flex items-center gap-1 font-semibold"
               >
                 <Barcode className="w-3.5 h-3.5" />
-                <span>Escanear Código</span>
+                <span>Escanear código de barras</span>
               </button>
             </div>
 
-            <select
-              value={sku}
-              onChange={(e) => setSku(e.target.value)}
-              className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
-            >
-              <option value="">-- Seleccionar producto del catálogo --</option>
-              {productos.map((prod) => (
-                <option key={prod.id || prod.sku} value={prod.sku}>
-                  {prod.sku} — {prod.nombre} ({prod.color || "U"} / {prod.talla || "U"}) - ${prod.precio_venta || 0}
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                value={sku}
+                onChange={(e) => setSku(e.target.value)}
+                className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white font-mono"
+              >
+                <option value="">-- Seleccionar producto por SKU o Nombre --</option>
+                {productos.map((prod) => (
+                  <option key={prod.sku} value={prod.sku}>
+                    [{prod.sku}] {prod.nombre} {prod.talla ? `- Talla: ${prod.talla}` : ""}{" "}
+                    {prod.color ? `(${prod.color})` : ""} - Precio: ${prod.precio_venta || 0}
+                  </option>
+                ))}
+              </select>
+            </div>
 
+            {/* Selected Product Specs Badge */}
             {selectedProduct && (
-              <div className="mt-2.5 p-3 bg-zinc-50 dark:bg-zinc-800/40 rounded-xl border border-zinc-200 dark:border-zinc-700 flex flex-wrap items-center justify-between gap-2 text-xs">
-                <div>
-                  <span className="font-bold text-zinc-900 dark:text-white block">{selectedProduct.nombre}</span>
-                  <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                    Marca: {selectedProduct.marca || "dorsalclub"} • Color: {selectedProduct.color || "—"} • Talla: {selectedProduct.talla || "U"}
+              <div className="mt-2 p-3 bg-zinc-50 dark:bg-zinc-800/40 rounded-xl border border-zinc-200 dark:border-zinc-700/60 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <Package className="w-4 h-4 text-rose-500 shrink-0" />
+                  <span className="font-bold text-zinc-900 dark:text-white">
+                    {selectedProduct.nombre}
                   </span>
+                  {selectedProduct.talla && (
+                    <span className="px-1.5 py-0.5 bg-zinc-200 dark:bg-zinc-700 rounded text-[10px] font-mono">
+                      Talla: {selectedProduct.talla}
+                    </span>
+                  )}
+                  {selectedProduct.color && (
+                    <span className="px-1.5 py-0.5 bg-zinc-200 dark:bg-zinc-700 rounded text-[10px]">
+                      {selectedProduct.color}
+                    </span>
+                  )}
                 </div>
-                <div className="text-right">
-                  <span className="text-[10px] text-zinc-400 block uppercase font-semibold">Precio de Venta</span>
-                  <span className="font-bold font-mono text-zinc-900 dark:text-white text-sm">
-                    ${(selectedProduct.precio_venta || 0).toFixed(2)} MXN
-                  </span>
+                <div className="text-zinc-500 text-[11px] font-mono">
+                  Precio sugerido: ${selectedProduct.precio_venta || 0} MXN
                 </div>
               </div>
             )}
           </div>
 
-          {/* Warehouse and Quantity */}
+          {/* Warehouse and Stock */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Almacén de despacho */}
             <div>
               <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
                 Almacén de Despacho <span className="text-rose-500">*</span>
               </label>
-              <div className="relative flex items-center">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-zinc-400">
-                  <Warehouse className="w-4 h-4" />
-                </span>
-                <select
-                  required
-                  value={almacenId}
-                  onChange={(e) => setAlmacenId(e.target.value)}
-                  className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl pl-9 pr-3 py-2.5 text-xs text-zinc-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
-                >
-                  {almacenes.map((alm) => (
-                    <option key={alm.id} value={alm.id}>
-                      {alm.nombre} — {alm.ubicacion}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <select
+                value={almacenId}
+                onChange={(e) => setAlmacenId(e.target.value)}
+                className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white font-medium"
+              >
+                {almacenes.map((alm) => (
+                  <option key={alm.id} value={alm.id}>
+                    {alm.nombre}
+                  </option>
+                ))}
+              </select>
 
-              {/* Stock in this warehouse indicator */}
               {sku && (
                 <div className="mt-1.5 text-[11px] flex items-center gap-1.5">
                   <span className="text-zinc-500">Stock disponible en este almacén:</span>
@@ -346,19 +433,194 @@ export default function Ventas({
                 onChange={(e) => setCantidad(e.target.value === "" ? "" : Math.max(1, parseInt(e.target.value) || 1))}
                 className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
               />
-              {selectedProduct && typeof cantidad === "number" && (
-                <div className="mt-1.5 text-[11px] text-zinc-500 flex justify-between">
-                  <span>Total estimado venta:</span>
-                  <span className="font-bold text-zinc-900 dark:text-white font-mono">
-                    ${((selectedProduct.precio_venta || 0) * cantidad).toFixed(2)} MXN
-                  </span>
-                </div>
-              )}
             </div>
           </div>
 
-          {/* Reference & Customer */}
+          {/* Pricing Row: Unit Price & Calculated Total */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3.5 bg-zinc-50 dark:bg-zinc-800/30 rounded-xl border border-zinc-200 dark:border-zinc-800">
+            <div>
+              <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
+                Precio Unitario de Venta ($ MXN)
+              </label>
+              <div className="relative">
+                <DollarSign className="w-4 h-4 text-zinc-400 absolute left-3 top-2.5" />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={precioUnitario}
+                  onChange={(e) => setPrecioUnitario(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl pl-9 pr-3 py-2 text-xs font-bold text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white font-mono"
+                />
+              </div>
+              <p className="text-[11px] text-zinc-400 mt-1">
+                Editable por venta o toma el precio del catálogo.
+              </p>
+            </div>
+
+            <div className="flex flex-col justify-center">
+              <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider block mb-1">
+                Total de la Venta
+              </span>
+              <div className="text-xl font-bold font-mono text-zinc-900 dark:text-white">
+                ${totalCalculado.toFixed(2)} <span className="text-xs text-zinc-400 font-sans font-normal">MXN</span>
+              </div>
+              <span className="text-[11px] text-zinc-500 font-mono">
+                {numQuantity} uds × ${unitPriceVal.toFixed(2)}
+              </span>
+            </div>
+          </div>
+
+          {/* Customer Selection & Ticket Reference */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Searchable Client Selector */}
+            <div className="relative" ref={clientDropdownRef}>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Cliente / Comprador</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setIsClienteModalOpen(true)}
+                  className="text-xs text-rose-500 hover:text-rose-600 font-bold flex items-center gap-1"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>Nuevo cliente</span>
+                </button>
+              </div>
+
+              {/* Selector Trigger Button */}
+              <div
+                onClick={() => setIsClientDropdownOpen(!isClientDropdownOpen)}
+                className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white cursor-pointer flex items-center justify-between gap-2 focus:ring-2 focus:ring-zinc-900"
+              >
+                <div className="truncate">
+                  {selectedClienteId === "mostrador" ? (
+                    <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+                      🏪 Venta sin cliente / Mostrador
+                    </span>
+                  ) : selectedCliente ? (
+                    <div className="flex items-center gap-2 truncate">
+                      <span className="font-bold text-zinc-900 dark:text-white truncate">
+                        {selectedCliente.nombre_completo}
+                      </span>
+                      <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-zinc-200 dark:bg-zinc-700 capitalize">
+                        {selectedCliente.tipo_cliente}
+                      </span>
+                      {selectedCliente.telefono && (
+                        <span className="text-zinc-400 text-[11px] font-mono">
+                          {selectedCliente.telefono}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-zinc-400">
+                      — Seleccionar cliente o elegir mostrador —
+                    </span>
+                  )}
+                </div>
+                <ChevronDown className="w-4 h-4 text-zinc-400 shrink-0" />
+              </div>
+
+              {/* Inactive Client Warning */}
+              {isClienteInactivo && selectedCliente && (
+                <div className="mt-2 p-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl flex items-center gap-2 text-amber-800 dark:text-amber-300 text-xs">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>
+                    <strong>Advertencia:</strong> El cliente <em>{selectedCliente.nombre_completo}</em> está marcado como inactivo. Puedes continuar con la venta si lo requieres.
+                  </span>
+                </div>
+              )}
+
+              {/* Dropdown Menu */}
+              {isClientDropdownOpen && (
+                <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl overflow-hidden max-h-64 flex flex-col">
+                  {/* Search inside dropdown */}
+                  <div className="p-2 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-2" />
+                      <input
+                        type="text"
+                        placeholder="Buscar por nombre, Instagram o teléfono..."
+                        value={clientSearchText}
+                        onChange={(e) => setClientSearchText(e.target.value)}
+                        className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none"
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+
+                  {/* Options list */}
+                  <div className="overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-800/60 flex-1">
+                    {/* Explicit Mostrador Option */}
+                    <div
+                      onClick={() => {
+                        setSelectedClienteId("mostrador");
+                        setIsClientDropdownOpen(false);
+                      }}
+                      className={`p-2.5 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer flex items-center justify-between ${
+                        selectedClienteId === "mostrador" ? "bg-rose-50/50 dark:bg-rose-950/20 font-bold text-rose-600 dark:text-rose-400" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span>🏪</span>
+                        <span>Venta sin cliente / Mostrador</span>
+                      </div>
+                      {selectedClienteId === "mostrador" && <Check className="w-3.5 h-3.5 text-rose-500" />}
+                    </div>
+
+                    {/* Clientes list */}
+                    {filteredDropdownClientes.map((c) => {
+                      const isSelected = selectedClienteId === c.id;
+                      return (
+                        <div
+                          key={c.id}
+                          onClick={() => {
+                            setSelectedClienteId(c.id || "");
+                            setIsClientDropdownOpen(false);
+                          }}
+                          className={`p-2.5 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer flex items-center justify-between ${
+                            isSelected ? "bg-rose-50/50 dark:bg-rose-950/20 font-bold text-rose-600 dark:text-rose-400" : ""
+                          }`}
+                        >
+                          <div className="min-w-0 pr-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-zinc-900 dark:text-white truncate">
+                                {c.nombre_completo}
+                              </span>
+                              <span className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 capitalize">
+                                {c.tipo_cliente}
+                              </span>
+                              {c.estado === "inactivo" && (
+                                <span className="px-1 py-0.2 rounded text-[9px] bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 font-bold">
+                                  Inactivo
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-zinc-400 flex items-center gap-2 mt-0.5">
+                              {c.telefono && <span>📞 {c.telefono}</span>}
+                              {c.instagram && <span>📷 @{c.instagram.replace(/^@+/, "")}</span>}
+                              {c.ciudad && <span>📍 {c.ciudad}</span>}
+                            </div>
+                          </div>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-rose-500 shrink-0" />}
+                        </div>
+                      );
+                    })}
+
+                    {filteredDropdownClientes.length === 0 && (
+                      <div className="p-4 text-center text-xs text-zinc-400">
+                        No se encontraron clientes coincidentes.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Ticket reference */}
             <div>
               <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
                 Folio Ticket / Pedido E-commerce (Opcional)
@@ -370,19 +632,9 @@ export default function Ventas({
                 onChange={(e) => setReferencia(e.target.value)}
                 className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white font-mono"
               />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                Cliente / Destinatario (Opcional)
-              </label>
-              <input
-                type="text"
-                placeholder="Ej. Juan Pérez / Mostrador"
-                value={cliente}
-                onChange={(e) => setCliente(e.target.value)}
-                className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
-              />
+              <p className="text-[11px] text-zinc-400 mt-1">
+                Identificador de venta externa o canal de despacho.
+              </p>
             </div>
           </div>
         </div>
@@ -393,30 +645,45 @@ export default function Ventas({
             <button
               type="button"
               onClick={onCancel}
-              className="px-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 font-semibold text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+              className="px-4 py-2 text-xs font-semibold text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors"
             >
               Cancelar
             </button>
           )}
+
           <button
             type="submit"
-            disabled={loading || (availableStock !== null && availableStock < Number(cantidad))}
-            className="px-6 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-white dark:hover:bg-zinc-100 dark:text-zinc-900 font-bold text-xs transition-all shadow-sm flex items-center gap-2 disabled:opacity-50"
+            disabled={loading}
+            className="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-xs hover:shadow-md transition-all flex items-center gap-2 disabled:opacity-50"
+            id="confirmar-venta-btn"
           >
             {loading ? (
               <>
-                <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                <span>Registrando Venta...</span>
+                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <span>Registrando venta...</span>
               </>
             ) : (
               <>
-                <TrendingDown className="w-4 h-4 text-rose-500" />
-                <span>Registrar Venta</span>
+                <ShoppingCart className="w-4 h-4" />
+                <span>Confirmar Venta (${totalCalculado.toFixed(2)} MXN)</span>
               </>
             )}
           </button>
         </div>
       </form>
+
+      {/* Reusable Client Modal */}
+      <ClienteModal
+        isOpen={isClienteModalOpen}
+        onClose={() => setIsClienteModalOpen(false)}
+        existingClientes={clientes}
+        onClienteSaved={(newCliente) => {
+          setIsClienteModalOpen(false);
+          if (newCliente.id) {
+            setSelectedClienteId(newCliente.id);
+          }
+        }}
+      />
     </div>
   );
 }
