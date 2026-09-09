@@ -20,7 +20,8 @@ import {
   Sun,
   Moon,
   Tag,
-  Users
+  Users,
+  UserCheck
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Usuario, NavigationTab } from "../types";
@@ -82,6 +83,12 @@ const NAV_ITEMS: NavItem[] = [
     label: "Análisis de ventas", 
     icon: TrendingUp,
     matchActive: (curr) => curr === "analisis_ventas" || curr === "ventas"
+  },
+  { 
+    id: "analisis_clientes", 
+    label: "Análisis de clientes", 
+    icon: UserCheck,
+    matchActive: (curr) => curr === "analisis_clientes"
   },
   { 
     id: "almacenes", 

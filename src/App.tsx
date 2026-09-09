@@ -18,6 +18,7 @@ const Historial = lazy(() => import("./components/Historial"));
 const GestionAlmacenes = lazy(() => import("./components/GestionAlmacenes"));
 const GestionProductos = lazy(() => import("./components/GestionProductos"));
 const AnalisisVentas = lazy(() => import("./components/AnalisisVentas"));
+const AnalisisClientes = lazy(() => import("./components/AnalisisClientes"));
 const Clientes = lazy(() => import("./components/Clientes"));
 
 const getTabFromPath = (path: string): NavigationTab => {
@@ -46,6 +47,9 @@ const getTabFromPath = (path: string): NavigationTab => {
   if (normalized === "/ventas" || normalized === "/analisis-ventas" || normalized === "/analisis_ventas") {
     return "analisis_ventas";
   }
+  if (normalized === "/analisis-clientes" || normalized === "/analisis_clientes") {
+    return "analisis_clientes";
+  }
   if (normalized === "/almacenes") {
     return "almacenes";
   }
@@ -71,6 +75,8 @@ const getPathFromTab = (tab: NavigationTab): string => {
     case "analisis_ventas":
     case "ventas":
       return "/ventas";
+    case "analisis_clientes":
+      return "/analisis-clientes";
     case "historial":
       return "/historial";
     case "almacenes":
@@ -385,6 +391,25 @@ export default function App() {
                       almacenes={almacenes} 
                       productos={productos} 
                       onNavigateToHistory={(sku) => navigateTo("historial", { sku })}
+                    />
+                  </motion.div>
+                )}
+
+                {/* Análisis de Clientes */}
+                {activeTab === "analisis_clientes" && (
+                  <motion.div
+                    key="analisis_clientes"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                  >
+                    <AnalisisClientes 
+                      almacenes={almacenes} 
+                      productos={productos}
+                      preselectedClienteId={preselectedClienteId}
+                      onNavigateToClientes={(clienteId) => navigateTo("clientes", { clienteId })}
+                      onNavigateToVentaNueva={(clienteId) => navigateTo("ventas_nueva", { clienteId })}
                     />
                   </motion.div>
                 )}

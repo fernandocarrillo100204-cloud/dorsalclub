@@ -1839,6 +1839,128 @@ export const firestoreService = {
     return res.items;
   },
 
+  // --- CONSULTA PAGINADA DE MOVIMIENTOS POR CLIENTE (50 EN 50 CON STARTAFTER) ---
+  getMovimientosByClientePaginated: async (options: {
+    clienteId: string;
+    pageSize?: number;
+    lastDoc?: any;
+  }): Promise<{
+    items: Movimiento[];
+    lastDoc: any;
+    hasMore: boolean;
+  }> => {
+    const pageSize = options.pageSize || 50;
+
+    if (isConfigured && realDb) {
+      try {
+        const constraints: any[] = [
+          where("cliente_id", "==", options.clienteId),
+          where("tipo", "==", "salida"),
+          orderBy("fecha", "desc"),
+          limit(pageSize + 1)
+        ];
+
+        if (options.lastDoc) {
+          constraints.push(startAfter(options.lastDoc));
+        }
+
+        const q = query(collection(realDb, "movimientos"), ...constraints);
+        const snap = await getDocs(q);
+        const docs = snap.docs;
+        const hasMore = docs.length > pageSize;
+        const itemsToProcess = hasMore ? docs.slice(0, pageSize) : docs;
+        const nextLastDoc = itemsToProcess.length > 0 ? itemsToProcess[itemsToProcess.length - 1] : null;
+
+        const items: Movimiento[] = itemsToProcess.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            folio: data.folio,
+            sku: data.sku,
+            almacen_id: data.almacen_id,
+            tipo: data.tipo,
+            cantidad: Number(data.cantidad) || 0,
+            referencia: data.referencia || "",
+            usuario: data.usuario || "",
+            fecha: data.fecha ? (data.fecha.toDate ? data.fecha.toDate() : new Date(data.fecha)) : new Date(),
+            almacen_destino_id: data.almacen_destino_id,
+            compra_id: data.compra_id,
+            lote_id: data.lote_id,
+            costo_unitario: typeof data.costo_unitario === "number" ? data.costo_unitario : undefined,
+            cliente_id: data.cliente_id,
+            cliente_nombre: data.cliente_nombre,
+            cliente_tipo: data.cliente_tipo,
+            precio_unitario_venta: typeof data.precio_unitario_venta === "number" ? data.precio_unitario_venta : undefined,
+            total_venta: typeof data.total_venta === "number" ? data.total_venta : undefined,
+            estado: data.estado || "activo",
+            anulado_at: data.anulado_at ? (data.anulado_at.toDate ? data.anulado_at.toDate() : new Date(data.anulado_at)) : undefined,
+            anulado_por: data.anulado_por,
+            motivo_anulacion: data.motivo_anulacion
+          };
+        });
+
+        return {
+          items,
+          lastDoc: nextLastDoc,
+          hasMore
+        };
+      } catch (err: any) {
+        console.warn("Error en query indexado de cliente en Firestore, ejecutando fallback:", err);
+        // Fallback local o sin índice compuesto
+        let movs = getLocalStorageItem<Movimiento[]>("movimientos", []);
+        movs = movs.filter(m => m.cliente_id === options.clienteId && m.tipo === "salida");
+        movs = movs.map(m => ({
+          ...m,
+          fecha: typeof m.fecha === "string" ? new Date(m.fecha) : (m.fecha as any)?.toDate ? (m.fecha as any).toDate() : m.fecha,
+          estado: m.estado || "activo",
+          anulado_at: m.anulado_at ? (typeof m.anulado_at === "string" ? new Date(m.anulado_at) : (m.anulado_at as any)?.toDate ? (m.anulado_at as any).toDate() : m.anulado_at) : undefined
+        }));
+        movs.sort((a, b) => {
+          const timeA = a.fecha instanceof Date ? a.fecha.getTime() : new Date((a.fecha as any).seconds * 1000).getTime();
+          const timeB = b.fecha instanceof Date ? b.fecha.getTime() : new Date((b.fecha as any).seconds * 1000).getTime();
+          return timeB - timeA;
+        });
+
+        const startIndex = typeof options.lastDoc === "number" ? options.lastDoc : 0;
+        const pageItems = movs.slice(startIndex, startIndex + pageSize);
+        const nextIndex = startIndex + pageItems.length;
+        const hasMore = nextIndex < movs.length;
+
+        return {
+          items: pageItems,
+          lastDoc: nextIndex,
+          hasMore
+        };
+      }
+    }
+
+    // Modo local
+    let movs = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    movs = movs.filter(m => m.cliente_id === options.clienteId && m.tipo === "salida");
+    movs = movs.map(m => ({
+      ...m,
+      fecha: typeof m.fecha === "string" ? new Date(m.fecha) : (m.fecha as any)?.toDate ? (m.fecha as any).toDate() : m.fecha,
+      estado: m.estado || "activo",
+      anulado_at: m.anulado_at ? (typeof m.anulado_at === "string" ? new Date(m.anulado_at) : (m.anulado_at as any)?.toDate ? (m.anulado_at as any).toDate() : m.anulado_at) : undefined
+    }));
+    movs.sort((a, b) => {
+      const timeA = a.fecha instanceof Date ? a.fecha.getTime() : new Date((a.fecha as any).seconds * 1000).getTime();
+      const timeB = b.fecha instanceof Date ? b.fecha.getTime() : new Date((b.fecha as any).seconds * 1000).getTime();
+      return timeB - timeA;
+    });
+
+    const startIndex = typeof options.lastDoc === "number" ? options.lastDoc : 0;
+    const pageItems = movs.slice(startIndex, startIndex + pageSize);
+    const nextIndex = startIndex + pageItems.length;
+    const hasMore = nextIndex < movs.length;
+
+    return {
+      items: pageItems,
+      lastDoc: nextIndex,
+      hasMore
+    };
+  },
+
   // --- CONSULTA OPTIMIZADA DE RESÚMENES INCREMENTALES DE VENTAS ---
   getResumenVentasByDateRange: async (startDate: Date, endDate: Date): Promise<ResumenVentaDiaria[]> => {
     const startStr = getLocalDateString(startDate);

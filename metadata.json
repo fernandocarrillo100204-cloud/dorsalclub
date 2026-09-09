@@ -1,6 +1,6 @@
 {
   "name": "dorsalclub",
-  "description": "Inventario de streetwear y sneakers",
+  "description": "Inventario de streetwear, sneakers y análisis comercial de clientes",
   "requestFramePermissions": [
     "camera"
   ],

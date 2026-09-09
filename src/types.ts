@@ -129,6 +129,7 @@ export type NavigationTab =
   | "transferencias_nueva"
   | "historial" 
   | "analisis_ventas" 
+  | "analisis_clientes"
   | "almacenes" 
   | "catalogo"
   | "ventas" // legacy/alias for sales analysis
