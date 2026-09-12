@@ -172,14 +172,23 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
         return;
       }
       console.error("Error al cargar datos del resumen financiero:", err);
-      // Si la consulta del nuevo periodo falla, no mostrar cantidades del periodo anterior
-      if (!isSamePeriodValid) {
-        setData(null);
-      }
-      setError(
-        err?.message ||
-          "No fue posible consultar los datos financieros del periodo. Verifica tu conexión e inténtalo de nuevo."
-      );
+      // En caso de error, nunca mostrar cifras falsas ni datos obsoletos
+      setData(null);
+
+      const rawMsg: string = err?.message || "";
+      const isIndexError =
+        err?.code === "failed-precondition" ||
+        rawMsg.includes("index") ||
+        rawMsg.includes("indexes") ||
+        rawMsg.includes("The query requires an index") ||
+        rawMsg.includes("El índice de Firestore");
+
+      const friendlyMessage = isIndexError
+        ? "El índice de Firestore necesario para consultar este periodo no está disponible todavía. Revisa la sección Índices de Firebase y vuelve a intentarlo cuando aparezca como habilitado."
+        : rawMsg ||
+          "No fue posible consultar los datos financieros del periodo. Verifica tu conexión e inténtalo de nuevo.";
+
+      setError(friendlyMessage);
     } finally {
       if (reqId === requestIdRef.current) {
         setInitialLoading(false);
