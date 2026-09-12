@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   TrendingUp,
   TrendingDown,
@@ -108,10 +108,10 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  // Available years list
+  // Available years list (from 2020 up to currentYear + 1)
   const availableYears = useMemo(() => {
     const years: number[] = [];
-    for (let y = currentYear - 2; y <= currentYear + 1; y++) {
+    for (let y = 2020; y <= currentYear + 1; y++) {
       years.push(y);
     }
     return years;
@@ -119,31 +119,72 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
 
   const isCurrentMonthSelected = selectedMonth === currentMonth && selectedYear === currentYear;
 
-  // Data fetching logic with separation of initialLoading and refreshing
+  // Request ID counter to protect against out-of-order responses
+  const requestIdRef = useRef<number>(0);
+  const dataRef = useRef<DatosFinancierosMensuales | null>(null);
+  dataRef.current = data;
+
+  // Validate that data strictly belongs to the currently selected period
+  const isDataValidForPeriod = Boolean(
+    data && data.year === selectedYear && data.month === selectedMonth
+  );
+
+  // Data fetching logic with separation of initialLoading and refreshing, out-of-order protection
   const fetchData = useCallback(async (isRefresh: boolean = false) => {
-    if (isRefresh) {
+    const reqId = ++requestIdRef.current;
+    const targetYear = selectedYear;
+    const targetMonth = selectedMonth;
+
+    const isSamePeriodValid = Boolean(
+      dataRef.current &&
+      dataRef.current.year === targetYear &&
+      dataRef.current.month === targetMonth
+    );
+
+    if (isRefresh && isSamePeriodValid) {
       setRefreshing(true);
     } else {
       setInitialLoading(true);
+      setRefreshing(false);
+      setData(null);
     }
     setError(null);
 
     try {
       const res = await firestoreService.getDatosFinancierosMensuales(
-        selectedYear,
-        selectedMonth,
+        targetYear,
+        targetMonth,
         isRefresh
       );
-      setData(res);
+
+      // Si llegó otra respuesta de una petición posterior, descartar
+      if (reqId !== requestIdRef.current) {
+        return;
+      }
+
+      // Validar que el resultado pertenezca exactamente al mes y año actualmente seleccionados
+      if (res.year === targetYear && res.month === targetMonth) {
+        setData(res);
+        setError(null);
+      }
     } catch (err: any) {
+      if (reqId !== requestIdRef.current) {
+        return;
+      }
       console.error("Error al cargar datos del resumen financiero:", err);
+      // Si la consulta del nuevo periodo falla, no mostrar cantidades del periodo anterior
+      if (!isSamePeriodValid) {
+        setData(null);
+      }
       setError(
         err?.message ||
           "No fue posible consultar los datos financieros del periodo. Verifica tu conexión e inténtalo de nuevo."
       );
     } finally {
-      setInitialLoading(false);
-      setRefreshing(false);
+      if (reqId === requestIdRef.current) {
+        setInitialLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [selectedYear, selectedMonth]);
 
@@ -152,8 +193,11 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
   }, [fetchData]);
 
   const handleResetToCurrentMonth = () => {
-    setSelectedMonth(currentMonth);
-    setSelectedYear(currentYear);
+    if (selectedMonth !== currentMonth || selectedYear !== currentYear) {
+      setData(null);
+      setSelectedMonth(currentMonth);
+      setSelectedYear(currentYear);
+    }
   };
 
   const monthLabel = useMemo(() => {
@@ -163,7 +207,7 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
 
   // Donut data calculation
   const donutData = useMemo(() => {
-    if (!data) return [];
+    if (!isDataValidForPeriod || !data) return [];
     const items = [
       { name: "Mercancía neta", value: data.mercanciaNeta, color: COLORS_DONUT[0] },
       { name: "Gastos asociados a compras", value: data.gastosAsociadosCompras, color: COLORS_DONUT[1] },
@@ -171,15 +215,15 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
     ];
     // Only return items with value > 0 for rendering slices
     return items.filter(i => i.value > 0);
-  }, [data]);
+  }, [data, isDataValidForPeriod]);
 
   const hasDonutData = donutData.length > 0;
 
   // Check if daily data has any movements
   const hasDailyMovements = useMemo(() => {
-    if (!data || !data.dailyData) return false;
+    if (!isDataValidForPeriod || !data || !data.dailyData) return false;
     return data.dailyData.some(d => d.ingresos > 0 || d.egresos > 0);
-  }, [data]);
+  }, [data, isDataValidForPeriod]);
 
   return (
     <div className="space-y-6">
@@ -201,8 +245,14 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
             <select
               id="select-finanzas-mes"
               value={selectedMonth}
-              onChange={(e) => setSelectedMonth(Number(e.target.value))}
-              disabled={initialLoading}
+              onChange={(e) => {
+                const newMonth = Number(e.target.value);
+                if (newMonth !== selectedMonth) {
+                  setData(null);
+                  setSelectedMonth(newMonth);
+                }
+              }}
+              disabled={initialLoading && !data}
               className="px-3 py-2 pr-8 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#111827] text-xs sm:text-sm font-medium text-[#172033] dark:text-[#F8FAFC] focus:outline-none focus:ring-2 focus:ring-[#059669] focus:border-transparent transition-all cursor-pointer shadow-2xs"
             >
               {MESES.map((m) => (
@@ -218,8 +268,14 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
             <select
               id="select-finanzas-anio"
               value={selectedYear}
-              onChange={(e) => setSelectedYear(Number(e.target.value))}
-              disabled={initialLoading}
+              onChange={(e) => {
+                const newYear = Number(e.target.value);
+                if (newYear !== selectedYear) {
+                  setData(null);
+                  setSelectedYear(newYear);
+                }
+              }}
+              disabled={initialLoading && !data}
               className="px-3 py-2 pr-8 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#111827] text-xs sm:text-sm font-medium text-[#172033] dark:text-[#F8FAFC] focus:outline-none focus:ring-2 focus:ring-[#059669] focus:border-transparent transition-all cursor-pointer shadow-2xs"
             >
               {availableYears.map((y) => (
@@ -272,7 +328,7 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
       </div>
 
       {/* Warning for sales without registered amount */}
-      {data && data.ventasSinImporte > 0 && (
+      {isDataValidForPeriod && data && data.ventasSinImporte > 0 && (
         <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 rounded-xl p-3.5 text-xs text-amber-800 dark:text-amber-300 flex items-start space-x-3 shadow-2xs">
           <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
           <div>
@@ -308,8 +364,11 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
         </div>
       )}
 
-      {/* Main Metric Cards (5 Cards) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+      {/* Visualización de métricas y gráficas: se muestran skeletons en carga inicial o los datos válidos del periodo */}
+      {(initialLoading || isDataValidForPeriod) && (
+        <>
+          {/* Main Metric Cards (5 Cards) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
         {/* 1. Ingresos por ventas */}
         <div className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-xl p-4 shadow-2xs flex flex-col justify-between space-y-3">
           <div className="space-y-1">
@@ -778,6 +837,8 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </>
+  )}
+</div>
   );
 };

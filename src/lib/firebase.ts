@@ -403,9 +403,22 @@ export const authService = {
   }
 };
 
+// --- CACHÉ EN MEMORIA PARA EL DASHBOARD FINANCIERO MENSUAL ---
+const finanzasMonthlyCache = new Map<string, DatosFinancierosMensuales>();
+
+export function clearFinanzasCache(year?: number, month?: number): void {
+  if (year && month) {
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    finanzasMonthlyCache.delete(key);
+  } else {
+    finanzasMonthlyCache.clear();
+  }
+}
+
 // --- SERVICIO DE FIRESTORE / INVENTARIO ---
 export const firestoreService = {
   isConfigured: () => isConfigured,
+  clearFinanzasCache,
 
   // --- ALMACENES ---
   getAlmacenes: async (): Promise<Almacen[]> => {
@@ -1353,6 +1366,7 @@ export const firestoreService = {
         });
       });
 
+      clearFinanzasCache();
       return { id: docId, folio: generatedFolio };
     }
 
@@ -1459,6 +1473,7 @@ export const firestoreService = {
     setLocalStorageItem("movimientos", movimientos);
     notifyListeners("movimientos", movimientos);
 
+    clearFinanzasCache();
     return { id: docId, folio: generatedFolio };
   },
 
@@ -1581,6 +1596,7 @@ export const firestoreService = {
         });
       });
 
+      clearFinanzasCache();
       return;
     }
 
@@ -1675,6 +1691,7 @@ export const firestoreService = {
 
     setLocalStorageItem("movimientos", movimientos);
     notifyListeners("movimientos", movimientos);
+    clearFinanzasCache();
   },
 
   deleteMovimiento: async (id: string): Promise<void> => {
@@ -2261,6 +2278,7 @@ export const firestoreService = {
         });
       });
 
+      clearFinanzasCache();
       return {
         id: compraDocId,
         folio: generatedCompraFolio,
@@ -2351,6 +2369,7 @@ export const firestoreService = {
     setLocalStorageItem("compras", comprasList);
     notifyListeners("compras", comprasList);
 
+    clearFinanzasCache();
     return {
       id: compraDocId,
       folio: generatedCompraFolio,
@@ -3783,6 +3802,7 @@ export const firestoreService = {
       try {
         const docRef = doc(collection(realDb, "gastos"));
         await setDoc(docRef, payload);
+        clearFinanzasCache();
 
         const createdGasto: Gasto = {
           id: docRef.id,
@@ -3832,6 +3852,7 @@ export const firestoreService = {
     list.unshift(createdLocal);
     setLocalStorageItem("gastos", list);
     notifyListeners("gastos", list);
+    clearFinanzasCache();
 
     return createdLocal;
   },
@@ -3956,6 +3977,7 @@ export const firestoreService = {
       try {
         const docRef = doc(realDb, "gastos", id);
         await setDoc(docRef, updatePayload, { merge: true });
+        clearFinanzasCache();
         return;
       } catch (err: any) {
         console.error("Error al actualizar gasto en Firestore:", err);
@@ -3983,6 +4005,7 @@ export const firestoreService = {
       list[idx] = { ...existing, ...parsedUpdate };
       setLocalStorageItem("gastos", list);
       notifyListeners("gastos", list);
+      clearFinanzasCache();
     }
   },
 
@@ -3993,6 +4016,7 @@ export const firestoreService = {
       try {
         const docRef = doc(realDb, "gastos", id);
         await deleteDoc(docRef);
+        clearFinanzasCache();
         return;
       } catch (err: any) {
         console.error("Error al eliminar gasto en Firestore:", err);
@@ -4004,6 +4028,7 @@ export const firestoreService = {
     const updated = list.filter(g => g.id !== id);
     setLocalStorageItem("gastos", updated);
     notifyListeners("gastos", updated);
+    clearFinanzasCache();
   },
 
   // --- DASHBOARD FINANCIERO MENSUAL (FLUJO DE DINERO) ---
@@ -4313,17 +4338,5 @@ export const firestoreService = {
 
     finanzasMonthlyCache.set(cacheKey, result);
     return result;
-  }
-};
-
-// Cache en memoria por sesión para el dashboard mensual de finanzas
-const finanzasMonthlyCache = new Map<string, DatosFinancierosMensuales>();
-
-export const clearFinanzasCache = (year?: number, month?: number) => {
-  if (year && month) {
-    const key = `${year}-${String(month).padStart(2, "0")}`;
-    finanzasMonthlyCache.delete(key);
-  } else {
-    finanzasMonthlyCache.clear();
   }
 };
