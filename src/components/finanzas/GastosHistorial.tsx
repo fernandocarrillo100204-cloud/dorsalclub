@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { 
   Receipt, 
   Plus, 
@@ -31,7 +31,7 @@ import {
   CATEGORIAS_GASTO, 
   METODOS_PAGO_GASTO 
 } from "../../types";
-import { firestoreService } from "../../lib/firebase";
+import { firestoreService, isRealFirebase } from "../../lib/firebase";
 
 interface GastosHistorialProps {
   almacenes: Almacen[];
@@ -46,8 +46,10 @@ export default function GastosHistorial({
 }: GastosHistorialProps) {
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [lastDoc, setLastDoc] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isUsingLocalFallback, setIsUsingLocalFallback] = useState(false);
   const [dismissNotice, setDismissNotice] = useState(false);
 
   // Filters state
@@ -64,57 +66,54 @@ export default function GastosHistorial({
   const [gastoToDelete, setGastoToDelete] = useState<Gasto | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Real-time listener & subscription
-  useEffect(() => {
+  // Carga paginada única
+  const loadInitialGastos = useCallback(async () => {
     setLoading(true);
     setError(null);
-    let isMounted = true;
-    const unsubscribe = firestoreService.getGastosRealtime(
-      (data) => {
-        if (!isMounted) return;
-        setGastos(data);
-        setLoading(false);
-      },
-      (err: any) => {
-        if (!isMounted) return;
-        setLoading(false);
-        const isPermission = err?.code === "permission-denied" || (err?.message && (err.message.includes("permission") || err.message.includes("Missing or insufficient")));
-        if (isPermission) {
-          setIsUsingLocalFallback(true);
-        } else {
-          console.warn("Aviso en listener de gastos:", err);
-          setError("No se pudieron cargar los registros de gastos en tiempo real.");
-        }
+    try {
+      const res = await firestoreService.getGastosPaginated({ pageSize: 50 });
+      setGastos(res.items);
+      setLastDoc(res.lastDoc);
+      setHasMore(res.hasMore);
+    } catch (err: any) {
+      console.error("Error al cargar historial de gastos:", err);
+      const isPermission = err?.code === "permission-denied" || (err?.message && (err.message.includes("permission") || err.message.includes("Missing or insufficient")));
+      if (isPermission) {
+        setError("Permiso denegado en Firestore. Revisa las reglas de seguridad para la colección /gastos en Firebase Console.");
+      } else {
+        setError("No se pudieron cargar los registros de gastos: " + (err?.message || "Error al conectar con la base de datos."));
       }
-    );
-
-    return () => {
-      isMounted = false;
-      unsubscribe();
-    };
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const handleRetry = () => {
-    setLoading(true);
-    setError(null);
-    firestoreService.getGastosPaginated({ pageSize: 100 })
-      .then((res) => {
-        setGastos(res.items);
-        setLoading(false);
-      })
-      .catch((err: any) => {
-        const isPermission = err?.code === "permission-denied" || (err?.message && (err.message.includes("permission") || err.message.includes("Missing or insufficient")));
-        if (isPermission) {
-          setIsUsingLocalFallback(true);
-          const fallback = firestoreService.getGastosPaginatedLocal({ pageSize: 100 });
-          setGastos(fallback.items);
-          setLoading(false);
-        } else {
-          console.warn("Aviso al reintentar carga de gastos:", err);
-          setError("Error al conectar con la base de datos.");
-          setLoading(false);
-        }
+  useEffect(() => {
+    loadInitialGastos();
+  }, [loadInitialGastos]);
+
+  const handleLoadMore = async () => {
+    if (loadingMore || !hasMore || !lastDoc) return;
+    setLoadingMore(true);
+    try {
+      const res = await firestoreService.getGastosPaginated({ pageSize: 50, lastDoc });
+      setGastos((prev) => {
+        const existingIds = new Set(prev.map((g) => g.id));
+        const newItems = res.items.filter((g) => !existingIds.has(g.id));
+        return [...prev, ...newItems];
       });
+      setLastDoc(res.lastDoc);
+      setHasMore(res.hasMore);
+    } catch (err: any) {
+      console.error("Error al cargar más gastos:", err);
+      alert("Error al cargar la siguiente página de gastos: " + (err?.message || "Error de conexión"));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const handleRetry = () => {
+    loadInitialGastos();
   };
 
   const handleResetFilters = () => {
@@ -198,10 +197,11 @@ export default function GastosHistorial({
     setDeleting(true);
     try {
       await firestoreService.deleteGasto(gastoToDelete.id);
+      setGastos((prev) => prev.filter((g) => g.id !== gastoToDelete.id));
       setGastoToDelete(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error al eliminar gasto:", err);
-      alert("No se pudo eliminar el gasto. Intenta nuevamente.");
+      alert("No se pudo eliminar el gasto: " + (err?.message || "Error al conectar con la base de datos."));
     } finally {
       setDeleting(false);
     }
@@ -300,13 +300,13 @@ export default function GastosHistorial({
         </div>
       )}
 
-      {/* Local mode / Firestore rules notice (non-blocking) */}
-      {isUsingLocalFallback && !dismissNotice && (
+      {/* Aviso de modo emulador local solo si Firebase no está configurado */}
+      {!isRealFirebase && !dismissNotice && (
         <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center justify-between gap-3 text-amber-800 dark:text-amber-300 text-xs">
           <div className="flex items-center gap-2">
             <span className="inline-block w-2 h-2 rounded-full bg-amber-500 shrink-0" />
             <span>
-              <strong>Modo de persistencia local activo:</strong> Los gastos se registran y gestionan de forma local persistente. Si utilizas un proyecto de Firebase conectado, añade la regla de seguridad para <code className="bg-amber-500/15 px-1 py-0.5 rounded font-mono text-[11px]">/gastos</code> en tu consola de Firestore.
+              <strong>Modo de persistencia local activo:</strong> Las credenciales de Firebase no están configuradas en el entorno. La aplicación opera temporalmente con almacenamiento local en este navegador.
             </span>
           </div>
           <button
@@ -632,6 +632,51 @@ export default function GastosHistorial({
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Footer / Pagination Controls */}
+        <div className="px-4 py-3 border-t border-[#E2E8F0] dark:border-[#263449] bg-slate-50/75 dark:bg-[#182235]/50 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#64748B] dark:text-[#94A3B8]">
+          <div className="flex items-center space-x-2">
+            <span>
+              Mostrando <strong className="text-[#172033] dark:text-[#F8FAFC]">{filteredGastos.length}</strong> de{" "}
+              <strong className="text-[#172033] dark:text-[#F8FAFC]">{gastos.length}</strong> {gastos.length === 1 ? "registro cargado" : "registros cargados"}
+            </span>
+            {hasActiveFilters && filteredGastos.length !== gastos.length && (
+              <span className="text-slate-400 dark:text-slate-500">
+                (filtrados en memoria)
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center space-x-3">
+            {hasMore && (
+              <button
+                type="button"
+                id="btn-cargar-mas-gastos"
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] hover:bg-slate-50 dark:hover:bg-[#1E293B] text-[#172033] dark:text-[#F8FAFC] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-2xs cursor-pointer"
+              >
+                {loadingMore ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-[#059669] border-t-transparent rounded-full animate-spin" />
+                    <span>Cargando más...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Cargar más</span>
+                    <ChevronDown className="h-3.5 w-3.5 text-[#64748B] dark:text-[#94A3B8]" />
+                  </>
+                )}
+              </button>
+            )}
+
+            {!hasMore && gastos.length > 0 && !loading && (
+              <span className="text-[11px] text-slate-400 dark:text-slate-500 italic">
+                Todos los registros cargados
+              </span>
+            )}
+          </div>
         </div>
       </div>
 

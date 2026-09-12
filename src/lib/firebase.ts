@@ -3577,160 +3577,6 @@ export const firestoreService = {
   },
 
   // --- MÓDULO DE GASTOS (FINANZAS) ---
-  getGastosRealtime: (onUpdate: (gastos: Gasto[]) => void, onError?: (error: any) => void): (() => void) => {
-    // Entregar cache local inmediatamente
-    const localCached = getLocalStorageItem<Gasto[]>("gastos", []);
-    onUpdate(localCached);
-
-    if (isConfigured && realDb) {
-      let isUnsubscribed = false;
-      let unsubscribeSnapshot: () => void = () => {};
-
-      const updateFromLocal = () => {
-        const list = getLocalStorageItem<Gasto[]>("gastos", []);
-        onUpdate(list);
-      };
-      listeners.gastos.push(updateFromLocal);
-
-      try {
-        const q = query(collection(realDb, "gastos"), orderBy("fecha", "desc"), limit(100));
-        unsubscribeSnapshot = onSnapshot(
-          q,
-          (snap) => {
-            if (isUnsubscribed) return;
-            const list: Gasto[] = [];
-            snap.forEach(d => {
-              const data = d.data();
-              list.push({
-                id: d.id,
-                concepto: data.concepto || "",
-                categoria: data.categoria || "Otros",
-                monto: Number(data.monto) || 0,
-                fecha: data.fecha ? (data.fecha.toDate ? data.fecha.toDate() : new Date(data.fecha)) : new Date(),
-                fecha_str: data.fecha_str || getLocalDateString(data.fecha || new Date()),
-                metodo_pago: data.metodo_pago || "Efectivo",
-                almacen_id: data.almacen_id || undefined,
-                almacen_nombre: data.almacen_nombre || undefined,
-                proveedor: data.proveedor || undefined,
-                referencia: data.referencia || undefined,
-                notas: data.notas || undefined,
-                creado_por: data.creado_por || "sistema",
-                creado_at: data.creado_at ? (data.creado_at.toDate ? data.creado_at.toDate() : data.creado_at) : new Date(),
-                actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date()
-              });
-            });
-            list.sort((a, b) => {
-              const tA = a.fecha instanceof Date ? a.fecha.getTime() : (a.fecha as any)?.seconds ? (a.fecha as any).seconds * 1000 : 0;
-              const tB = b.fecha instanceof Date ? b.fecha.getTime() : (b.fecha as any)?.seconds ? (b.fecha as any).seconds * 1000 : 0;
-              return tB - tA;
-            });
-            setLocalStorageItem("gastos", list);
-            onUpdate(list);
-          },
-          (error: any) => {
-            if (isUnsubscribed) return;
-            const isPermission = error?.code === "permission-denied" || (error?.message && (error.message.includes("permission") || error.message.includes("Missing or insufficient")));
-            if (isPermission) {
-              console.warn("Firestore gastos: Reglas de seguridad pendientes en Firebase Console para /gastos. Operando en sincronización local persistente.");
-            } else {
-              console.warn("Aviso en listener de gastos de Firestore:", error);
-            }
-            const fallbackList = getLocalStorageItem<Gasto[]>("gastos", []);
-            onUpdate(fallbackList);
-            if (onError) onError(error);
-          }
-        );
-      } catch (err) {
-        console.warn("Excepción al suscribir listener de gastos:", err);
-        const fallbackList = getLocalStorageItem<Gasto[]>("gastos", []);
-        onUpdate(fallbackList);
-        if (onError) onError(err);
-      }
-
-      return () => {
-        isUnsubscribed = true;
-        try {
-          unsubscribeSnapshot();
-        } catch {}
-        listeners.gastos = listeners.gastos.filter(cb => cb !== updateFromLocal);
-      };
-    }
-
-    const update = () => {
-      const list = getLocalStorageItem<Gasto[]>("gastos", []);
-      onUpdate(list);
-    };
-    update();
-    listeners.gastos.push(update);
-    return () => {
-      listeners.gastos = listeners.gastos.filter(cb => cb !== update);
-    };
-  },
-
-  getGastosPaginatedLocal: (options: {
-    pageSize?: number;
-    lastDoc?: any;
-    categoriaFilter?: string;
-    warehouseFilter?: string;
-    metodoPagoFilter?: string;
-    startDate?: string;
-    endDate?: string;
-    searchTerm?: string;
-  } = {}): {
-    items: Gasto[];
-    lastDoc: any;
-    hasMore: boolean;
-    totalLoaded: number;
-  } => {
-    const pageSize = options.pageSize || 50;
-    let list = getLocalStorageItem<Gasto[]>("gastos", []);
-    list = list.map(g => ({
-      ...g,
-      fecha: g.fecha instanceof Date ? g.fecha : new Date(typeof g.fecha === "string" ? g.fecha : (g.fecha as any).seconds * 1000),
-      creado_at: g.creado_at instanceof Date ? g.creado_at : new Date(typeof g.creado_at === "string" ? g.creado_at : (g.creado_at as any).seconds * 1000),
-      actualizado_at: g.actualizado_at instanceof Date ? g.actualizado_at : new Date(typeof g.actualizado_at === "string" ? g.actualizado_at : (g.actualizado_at as any).seconds * 1000)
-    }));
-
-    list.sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
-
-    if (options.categoriaFilter && options.categoriaFilter !== "all") {
-      list = list.filter(g => g.categoria === options.categoriaFilter);
-    }
-    if (options.warehouseFilter && options.warehouseFilter !== "all") {
-      list = list.filter(g => g.almacen_id === options.warehouseFilter);
-    }
-    if (options.metodoPagoFilter && options.metodoPagoFilter !== "all") {
-      list = list.filter(g => g.metodo_pago === options.metodoPagoFilter);
-    }
-    if (options.startDate) {
-      list = list.filter(g => g.fecha_str >= options.startDate!);
-    }
-    if (options.endDate) {
-      list = list.filter(g => g.fecha_str <= options.endDate!);
-    }
-    if (options.searchTerm) {
-      const term = options.searchTerm.toLowerCase().trim();
-      list = list.filter(g =>
-        g.concepto.toLowerCase().includes(term) ||
-        (g.proveedor && g.proveedor.toLowerCase().includes(term)) ||
-        (g.referencia && g.referencia.toLowerCase().includes(term)) ||
-        (g.notas && g.notas.toLowerCase().includes(term))
-      );
-    }
-
-    const startIndex = typeof options.lastDoc === "number" ? options.lastDoc : 0;
-    const pageItems = list.slice(startIndex, startIndex + pageSize);
-    const nextIndex = startIndex + pageItems.length;
-    const hasMore = nextIndex < list.length;
-
-    return {
-      items: pageItems,
-      lastDoc: nextIndex,
-      hasMore,
-      totalLoaded: pageItems.length
-    };
-  },
-
   getGastosPaginated: async (options: {
     pageSize?: number;
     lastDoc?: any;
@@ -3750,17 +3596,7 @@ export const firestoreService = {
 
     if (isConfigured && realDb) {
       try {
-        let qConstraints: any[] = [orderBy("fecha", "desc"), limit(pageSize + 1)];
-
-        if (options.categoriaFilter && options.categoriaFilter !== "all") {
-          qConstraints.unshift(where("categoria", "==", options.categoriaFilter));
-        }
-        if (options.warehouseFilter && options.warehouseFilter !== "all") {
-          qConstraints.unshift(where("almacen_id", "==", options.warehouseFilter));
-        }
-        if (options.metodoPagoFilter && options.metodoPagoFilter !== "all") {
-          qConstraints.unshift(where("metodo_pago", "==", options.metodoPagoFilter));
-        }
+        const qConstraints: any[] = [orderBy("fecha", "desc"), limit(pageSize + 1)];
 
         if (options.lastDoc) {
           qConstraints.push(startAfter(options.lastDoc));
@@ -3774,7 +3610,7 @@ export const firestoreService = {
         const itemsToProcess = hasMore ? docs.slice(0, pageSize) : docs;
         const nextLastDoc = itemsToProcess.length > 0 ? itemsToProcess[itemsToProcess.length - 1] : null;
 
-        let list: Gasto[] = itemsToProcess.map(d => {
+        const list: Gasto[] = itemsToProcess.map(d => {
           const data = d.data();
           return {
             id: d.id,
@@ -3795,23 +3631,6 @@ export const firestoreService = {
           };
         });
 
-        // Filtrado adicional en memoria para rangos y búsqueda de texto
-        if (options.startDate) {
-          list = list.filter(g => g.fecha_str >= options.startDate!);
-        }
-        if (options.endDate) {
-          list = list.filter(g => g.fecha_str <= options.endDate!);
-        }
-        if (options.searchTerm) {
-          const term = options.searchTerm.toLowerCase().trim();
-          list = list.filter(g =>
-            g.concepto.toLowerCase().includes(term) ||
-            (g.proveedor && g.proveedor.toLowerCase().includes(term)) ||
-            (g.referencia && g.referencia.toLowerCase().includes(term)) ||
-            (g.notas && g.notas.toLowerCase().includes(term))
-          );
-        }
-
         return {
           items: list,
           lastDoc: nextLastDoc,
@@ -3819,84 +3638,33 @@ export const firestoreService = {
           totalLoaded: list.length
         };
       } catch (err: any) {
-        const isPermission = err?.code === "permission-denied" || (err?.message && (err.message.includes("permission") || err.message.includes("Missing or insufficient")));
-        if (isPermission) {
-          console.warn("Firestore gastos: Consulta sin permisos para /gastos. Usando persistencia local segura.");
-          return firestoreService.getGastosPaginatedLocal(options);
-        }
-
-        console.warn("Consulta indexada de gastos en Firestore no disponible, aplicando fallback simple:", err?.message || err);
-        try {
-          // Fallback simple por límite sin índices compuestos
-          const qFallback = query(collection(realDb, "gastos"), limit(pageSize * 2));
-          const snap = await getDocs(qFallback);
-          let list: Gasto[] = snap.docs.map(d => {
-            const data = d.data();
-            return {
-              id: d.id,
-              concepto: data.concepto || "",
-              categoria: data.categoria || "Otros",
-              monto: Number(data.monto) || 0,
-              fecha: data.fecha ? (data.fecha.toDate ? data.fecha.toDate() : new Date(data.fecha)) : new Date(),
-              fecha_str: data.fecha_str || getLocalDateString(data.fecha || new Date()),
-              metodo_pago: data.metodo_pago || "Efectivo",
-              almacen_id: data.almacen_id || undefined,
-              almacen_nombre: data.almacen_nombre || undefined,
-              proveedor: data.proveedor || undefined,
-              referencia: data.referencia || undefined,
-              notas: data.notas || undefined,
-              creado_por: data.creado_por || "sistema",
-              creado_at: data.creado_at ? (data.creado_at.toDate ? data.creado_at.toDate() : data.creado_at) : new Date(),
-              actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date()
-            };
-          });
-
-          list.sort((a, b) => {
-            const tA = a.fecha instanceof Date ? a.fecha.getTime() : (a.fecha as any)?.seconds ? (a.fecha as any).seconds * 1000 : 0;
-            const tB = b.fecha instanceof Date ? b.fecha.getTime() : (b.fecha as any)?.seconds ? (b.fecha as any).seconds * 1000 : 0;
-            return tB - tA;
-          });
-
-          if (options.categoriaFilter && options.categoriaFilter !== "all") {
-            list = list.filter(g => g.categoria === options.categoriaFilter);
-          }
-          if (options.warehouseFilter && options.warehouseFilter !== "all") {
-            list = list.filter(g => g.almacen_id === options.warehouseFilter);
-          }
-          if (options.metodoPagoFilter && options.metodoPagoFilter !== "all") {
-            list = list.filter(g => g.metodo_pago === options.metodoPagoFilter);
-          }
-          if (options.startDate) {
-            list = list.filter(g => g.fecha_str >= options.startDate!);
-          }
-          if (options.endDate) {
-            list = list.filter(g => g.fecha_str <= options.endDate!);
-          }
-          if (options.searchTerm) {
-            const term = options.searchTerm.toLowerCase().trim();
-            list = list.filter(g =>
-              g.concepto.toLowerCase().includes(term) ||
-              (g.proveedor && g.proveedor.toLowerCase().includes(term)) ||
-              (g.referencia && g.referencia.toLowerCase().includes(term)) ||
-              (g.notas && g.notas.toLowerCase().includes(term))
-            );
-          }
-
-          return {
-            items: list.slice(0, pageSize),
-            lastDoc: null,
-            hasMore: list.length > pageSize,
-            totalLoaded: list.slice(0, pageSize).length
-          };
-        } catch (fallbackErr: any) {
-          console.warn("Fallback de consulta de Firestore no disponible, usando almacenamiento local:", fallbackErr?.message || fallbackErr);
-          return firestoreService.getGastosPaginatedLocal(options);
-        }
+        console.error("Error al obtener gastos paginados de Firestore:", err);
+        throw err;
       }
     }
 
-    // Modo local
-    return firestoreService.getGastosPaginatedLocal(options);
+    // Modo local exclusivo para desarrollo cuando Firebase NO está configurado
+    let list = getLocalStorageItem<Gasto[]>("gastos", []);
+    list = list.map(g => ({
+      ...g,
+      fecha: g.fecha instanceof Date ? g.fecha : new Date(typeof g.fecha === "string" ? g.fecha : (g.fecha as any).seconds * 1000),
+      creado_at: g.creado_at instanceof Date ? g.creado_at : new Date(typeof g.creado_at === "string" ? g.creado_at : (g.creado_at as any).seconds * 1000),
+      actualizado_at: g.actualizado_at instanceof Date ? g.actualizado_at : new Date(typeof g.actualizado_at === "string" ? g.actualizado_at : (g.actualizado_at as any).seconds * 1000)
+    }));
+
+    list.sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
+
+    const startIndex = typeof options.lastDoc === "number" ? options.lastDoc : 0;
+    const pageItems = list.slice(startIndex, startIndex + pageSize);
+    const nextIndex = startIndex + pageItems.length;
+    const hasMore = nextIndex < list.length;
+
+    return {
+      items: pageItems,
+      lastDoc: nextIndex,
+      hasMore,
+      totalLoaded: pageItems.length
+    };
   },
 
   getGastoById: async (id: string): Promise<Gasto | null> => {
@@ -3925,8 +3693,10 @@ export const firestoreService = {
             actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date()
           };
         }
-      } catch (err) {
-        console.warn("Error al obtener gasto de Firestore:", err);
+        return null;
+      } catch (err: any) {
+        console.error("Error al obtener gasto por ID de Firestore:", err);
+        throw err;
       }
     }
 
@@ -3981,12 +3751,12 @@ export const firestoreService = {
       concepto: cleanConcepto,
       categoria: gastoData.categoria,
       monto,
-      fecha: Timestamp.fromDate(gastoData.fecha),
+      fecha: isConfigured && realDb ? Timestamp.fromDate(gastoData.fecha) : gastoData.fecha,
       fecha_str,
       metodo_pago: gastoData.metodo_pago,
       creado_por: userEmail,
-      creado_at: Timestamp.now(),
-      actualizado_at: Timestamp.now()
+      creado_at: isConfigured && realDb ? Timestamp.now() : new Date(),
+      actualizado_at: isConfigured && realDb ? Timestamp.now() : new Date()
     };
 
     if (gastoData.almacen_id && gastoData.almacen_id.trim()) {
@@ -4028,14 +3798,10 @@ export const firestoreService = {
           actualizado_at: new Date()
         };
 
-        const list = getLocalStorageItem<Gasto[]>("gastos", []);
-        list.unshift(createdGasto);
-        setLocalStorageItem("gastos", list);
-        notifyListeners("gastos", list);
-
         return createdGasto;
-      } catch (err) {
-        console.warn("Error al guardar gasto en Firestore, almacenando localmente:", err);
+      } catch (err: any) {
+        console.error("Error al registrar gasto en Firestore:", err);
+        throw err;
       }
     }
 
@@ -4128,8 +3894,10 @@ export const firestoreService = {
       try {
         const docRef = doc(realDb, "gastos", id);
         await setDoc(docRef, updatePayload, { merge: true });
-      } catch (err) {
-        console.warn("Error al actualizar gasto en Firestore:", err);
+        return;
+      } catch (err: any) {
+        console.error("Error al actualizar gasto en Firestore:", err);
+        throw err;
       }
     }
 
@@ -4157,8 +3925,10 @@ export const firestoreService = {
       try {
         const docRef = doc(realDb, "gastos", id);
         await deleteDoc(docRef);
-      } catch (err) {
-        console.warn("Error al eliminar gasto en Firestore:", err);
+        return;
+      } catch (err: any) {
+        console.error("Error al eliminar gasto en Firestore:", err);
+        throw err;
       }
     }
 

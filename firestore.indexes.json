@@ -47,13 +47,6 @@
         { "fieldPath": "fecha_str", "order": "ASCENDING" },
         { "fieldPath": "sku", "order": "ASCENDING" }
       ]
-    },
-    {
-      "collectionGroup": "gastos",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "fecha", "order": "DESCENDING" }
-      ]
     }
   ],
   "fieldOverrides": []
