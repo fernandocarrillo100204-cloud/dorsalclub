@@ -128,6 +128,10 @@ export type NavigationTab =
   | "clientes"
   | "transferencias_nueva"
   | "historial" 
+  | "finanzas_gastos"
+  | "finanzas_gastos_nuevo"
+  | "finanzas_gastos_editar"
+  | "finanzas"
   | "analisis_ventas" 
   | "analisis_clientes"
   | "almacenes" 
@@ -253,5 +257,79 @@ export interface ResumenVentaDiaria {
     nanoseconds: number;
   } | Date;
 }
+
+export type CategoriaGasto =
+  | "Envíos y paquetería"
+  | "Empaque"
+  | "Publicidad"
+  | "Comisiones de plataformas"
+  | "Comisiones bancarias"
+  | "Transporte y gasolina"
+  | "Renta"
+  | "Servicios"
+  | "Sueldos"
+  | "Impuestos y aranceles"
+  | "Mantenimiento"
+  | "Devoluciones"
+  | "Otros";
+
+export const CATEGORIAS_GASTO: CategoriaGasto[] = [
+  "Envíos y paquetería",
+  "Empaque",
+  "Publicidad",
+  "Comisiones de plataformas",
+  "Comisiones bancarias",
+  "Transporte y gasolina",
+  "Renta",
+  "Servicios",
+  "Sueldos",
+  "Impuestos y aranceles",
+  "Mantenimiento",
+  "Devoluciones",
+  "Otros"
+];
+
+export type MetodoPagoGasto =
+  | "Efectivo"
+  | "Transferencia"
+  | "Tarjeta de débito"
+  | "Tarjeta de crédito"
+  | "Otro";
+
+export const METODOS_PAGO_GASTO: MetodoPagoGasto[] = [
+  "Efectivo",
+  "Transferencia",
+  "Tarjeta de débito",
+  "Tarjeta de crédito",
+  "Otro"
+];
+
+export interface Gasto {
+  id?: string;
+  concepto: string;
+  categoria: CategoriaGasto | string;
+  monto: number;
+  fecha: {
+    seconds: number;
+    nanoseconds: number;
+  } | Date;
+  fecha_str: string; // YYYY-MM-DD
+  metodo_pago: MetodoPagoGasto | string;
+  almacen_id?: string;
+  almacen_nombre?: string;
+  proveedor?: string;
+  referencia?: string;
+  notas?: string;
+  creado_por: string;
+  creado_at: {
+    seconds: number;
+    nanoseconds: number;
+  } | Date;
+  actualizado_at: {
+    seconds: number;
+    nanoseconds: number;
+  } | Date;
+}
+
 
 

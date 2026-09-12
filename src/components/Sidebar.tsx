@@ -21,7 +21,8 @@ import {
   Moon,
   Tag,
   Users,
-  UserCheck
+  UserCheck,
+  Receipt
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Usuario, NavigationTab } from "../types";
@@ -71,6 +72,12 @@ const NAV_ITEMS: NavItem[] = [
     label: "Historial", 
     icon: History,
     matchActive: (curr) => curr === "historial"
+  },
+  { 
+    id: "finanzas_gastos", 
+    label: "Finanzas", 
+    icon: Receipt,
+    matchActive: (curr) => curr === "finanzas_gastos" || curr === "finanzas_gastos_nuevo" || curr === "finanzas_gastos_editar" || curr === "finanzas"
   },
   { 
     id: "dashboard", 

@@ -20,9 +20,24 @@ const GestionProductos = lazy(() => import("./components/GestionProductos"));
 const AnalisisVentas = lazy(() => import("./components/AnalisisVentas"));
 const AnalisisClientes = lazy(() => import("./components/AnalisisClientes"));
 const Clientes = lazy(() => import("./components/Clientes"));
+const Finanzas = lazy(() => import("./components/Finanzas"));
+
+const getGastoIdFromPath = (path: string): string => {
+  const match = path.match(/\/finanzas\/gastos\/([^/]+)\/editar\/?$/i);
+  return match ? match[1] : "";
+};
 
 const getTabFromPath = (path: string): NavigationTab => {
   const normalized = path.toLowerCase().replace(/\/$/, "");
+  if (normalized === "/finanzas/gastos/nuevo") {
+    return "finanzas_gastos_nuevo";
+  }
+  if (/^\/finanzas\/gastos\/[^/]+\/editar$/.test(normalized)) {
+    return "finanzas_gastos_editar";
+  }
+  if (normalized === "/finanzas/gastos" || normalized === "/finanzas") {
+    return "finanzas_gastos";
+  }
   if (normalized === "/clientes") {
     return "clientes";
   }
@@ -85,6 +100,11 @@ const getPathFromTab = (tab: NavigationTab): string => {
       return "/productos";
     case "clientes":
       return "/clientes";
+    case "finanzas":
+    case "finanzas_gastos":
+      return "/finanzas/gastos";
+    case "finanzas_gastos_nuevo":
+      return "/finanzas/gastos/nuevo";
     case "movimientos":
       return "/compras/nueva";
     case "dashboard":
@@ -113,6 +133,9 @@ export default function App() {
     const searchParams = new URLSearchParams(window.location.search);
     return searchParams.get("clienteId") || "";
   });
+  const [preselectedGastoId, setPreselectedGastoId] = useState(() => {
+    return getGastoIdFromPath(window.location.pathname);
+  });
 
   const [almacenes, setAlmacenes] = useState<Almacen[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -122,8 +145,14 @@ export default function App() {
   const [stockLoaded, setStockLoaded] = useState(false);
 
   // Navigation helper that updates browser history and URL
-  const navigateTo = (tab: NavigationTab, params?: { sku?: string; almacenId?: string; clienteId?: string }) => {
-    let targetPath = getPathFromTab(tab);
+  const navigateTo = (tab: NavigationTab, params?: { sku?: string; almacenId?: string; clienteId?: string; gastoId?: string }) => {
+    let targetPath = "";
+    if (tab === "finanzas_gastos_editar") {
+      const gId = params?.gastoId || preselectedGastoId;
+      targetPath = gId ? `/finanzas/gastos/${gId}/editar` : "/finanzas/gastos";
+    } else {
+      targetPath = getPathFromTab(tab);
+    }
     const sp = new URLSearchParams();
     if (params?.sku) sp.set("sku", params.sku);
     if (params?.almacenId) sp.set("almacenId", params.almacenId);
@@ -139,6 +168,7 @@ export default function App() {
     setPreselectedSku(params?.sku || "");
     setPreselectedAlmacenId(params?.almacenId || "");
     setPreselectedClienteId(params?.clienteId || "");
+    setPreselectedGastoId(params?.gastoId || (tab === "finanzas_gastos_editar" ? preselectedGastoId : ""));
     setActiveTab(tab);
   };
 
@@ -150,6 +180,7 @@ export default function App() {
       setPreselectedSku(searchParams.get("sku") || "");
       setPreselectedAlmacenId(searchParams.get("almacenId") || "");
       setPreselectedClienteId(searchParams.get("clienteId") || "");
+      setPreselectedGastoId(getGastoIdFromPath(window.location.pathname));
       setActiveTab(tab);
     };
 
@@ -465,6 +496,32 @@ export default function App() {
                       preselectedClienteId={preselectedClienteId}
                       onClearPreselectedSku={() => setPreselectedSku("")}
                       onNavigateToCliente={(clienteId) => navigateTo("clientes", { clienteId })}
+                    />
+                  </motion.div>
+                )}
+
+                {/* Finanzas: Gastos e Historial */}
+                {(activeTab === "finanzas_gastos" || activeTab === "finanzas_gastos_nuevo" || activeTab === "finanzas_gastos_editar" || activeTab === "finanzas") && (
+                  <motion.div
+                    key="finanzas"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                  >
+                    <Finanzas
+                      almacenes={almacenes}
+                      subView={
+                        activeTab === "finanzas_gastos_nuevo"
+                          ? "nuevo"
+                          : activeTab === "finanzas_gastos_editar"
+                          ? "editar"
+                          : "list"
+                      }
+                      gastoId={preselectedGastoId}
+                      onNavigateToGastos={() => navigateTo("finanzas_gastos")}
+                      onNavigateToNuevoGasto={() => navigateTo("finanzas_gastos_nuevo")}
+                      onNavigateToEditarGasto={(id) => navigateTo("finanzas_gastos_editar", { gastoId: id })}
                     />
                   </motion.div>
                 )}

@@ -114,6 +114,28 @@
         "creado_por": { "type": "string" }
       },
       "required": ["nombre_completo", "tipo_cliente", "estado"]
+    },
+    "Gasto": {
+      "title": "Gasto",
+      "description": "Registro de gasto o egreso operativo de la empresa",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "concepto": { "type": "string", "maxLength": 200 },
+        "categoria": { "type": "string" },
+        "monto": { "type": "number" },
+        "fecha_str": { "type": "string" },
+        "metodo_pago": { "type": "string" },
+        "almacen_id": { "type": "string" },
+        "almacen_nombre": { "type": "string" },
+        "proveedor": { "type": "string" },
+        "referencia": { "type": "string" },
+        "notas": { "type": "string" },
+        "creado_por": { "type": "string" },
+        "creado_at": { "type": "string" },
+        "actualizado_at": { "type": "string" }
+      },
+      "required": ["concepto", "categoria", "monto", "fecha_str", "metodo_pago"]
     }
   },
   "firestore": {
@@ -144,6 +166,10 @@
     "/clientes/{clienteId}": {
       "schema": { "$ref": "#/entities/Cliente" },
       "description": "Directorio de clientes para vinculación de ventas y seguimiento comercial"
+    },
+    "/gastos/{gastoId}": {
+      "schema": { "$ref": "#/entities/Gasto" },
+      "description": "Colección de gastos e historial de egresos operativos"
     }
   }
 }

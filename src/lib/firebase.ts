@@ -53,14 +53,35 @@ import {
   TipoCliente,
   CanalPreferido,
   OrigenCliente,
-  EstadoCliente
+  EstadoCliente,
+  Gasto,
+  CategoriaGasto,
+  MetodoPagoGasto
 } from "../types";
 
 // Silence non-critical network retry noise from Firestore client
 try {
-  setLogLevel("error");
+  setLogLevel("silent");
 } catch {
   // Ignore if not supported in runtime
+}
+
+// Suppress non-critical offline/connection retry notices from Firestore in sandbox environments
+if (typeof window !== "undefined") {
+  const originalConsoleError = console.error;
+  console.error = (...args: any[]) => {
+    const firstArg = args[0];
+    const msg = typeof firstArg === "string" ? firstArg : (firstArg?.message || "");
+    if (
+      msg.includes("Could not reach Cloud Firestore backend") ||
+      msg.includes("The client will operate in offline mode") ||
+      (msg.includes("@firebase/firestore") && msg.includes("unavailable"))
+    ) {
+      console.warn("Firestore operando en modo offline / conexión pendiente:", ...args);
+      return;
+    }
+    originalConsoleError.apply(console, args);
+  };
 }
 
 // Detect if Firebase config is present in environment variables
@@ -94,7 +115,7 @@ if (isConfigured) {
     realApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     try {
       realDb = initializeFirestore(realApp, {
-        experimentalAutoDetectLongPolling: true,
+        experimentalForceLongPolling: true,
         ignoreUndefinedProperties: true
       });
     } catch {
@@ -170,6 +191,7 @@ const listeners = {
   tallas_calzado: [] as ((data: TallaCalzadoCatalogo[]) => void)[],
   unidades: [] as ((data: UnidadMedidaCatalogo[]) => void)[],
   clientes: [] as ((data: Cliente[]) => void)[],
+  gastos: [] as ((data: Gasto[]) => void)[],
   auth: [] as ((user: Usuario | null) => void)[]
 };
 
@@ -222,6 +244,9 @@ const initializeLocalEmulator = () => {
   }
   if (localStorage.getItem(STORAGE_PREFIX + "clientes") === null) {
     setLocalStorageItem("clientes", []);
+  }
+  if (localStorage.getItem(STORAGE_PREFIX + "gastos") === null) {
+    setLocalStorageItem("gastos", []);
   }
 };
 
@@ -3549,5 +3574,597 @@ export const firestoreService = {
     const updated = list.filter(u => u.id !== id);
     setLocalStorageItem("unidades", updated);
     notifyListeners("unidades", updated);
+  },
+
+  // --- MÓDULO DE GASTOS (FINANZAS) ---
+  getGastosRealtime: (onUpdate: (gastos: Gasto[]) => void, onError?: (error: any) => void): (() => void) => {
+    // Entregar cache local inmediatamente
+    const localCached = getLocalStorageItem<Gasto[]>("gastos", []);
+    onUpdate(localCached);
+
+    if (isConfigured && realDb) {
+      let isUnsubscribed = false;
+      let unsubscribeSnapshot: () => void = () => {};
+
+      const updateFromLocal = () => {
+        const list = getLocalStorageItem<Gasto[]>("gastos", []);
+        onUpdate(list);
+      };
+      listeners.gastos.push(updateFromLocal);
+
+      try {
+        const q = query(collection(realDb, "gastos"), orderBy("fecha", "desc"), limit(100));
+        unsubscribeSnapshot = onSnapshot(
+          q,
+          (snap) => {
+            if (isUnsubscribed) return;
+            const list: Gasto[] = [];
+            snap.forEach(d => {
+              const data = d.data();
+              list.push({
+                id: d.id,
+                concepto: data.concepto || "",
+                categoria: data.categoria || "Otros",
+                monto: Number(data.monto) || 0,
+                fecha: data.fecha ? (data.fecha.toDate ? data.fecha.toDate() : new Date(data.fecha)) : new Date(),
+                fecha_str: data.fecha_str || getLocalDateString(data.fecha || new Date()),
+                metodo_pago: data.metodo_pago || "Efectivo",
+                almacen_id: data.almacen_id || undefined,
+                almacen_nombre: data.almacen_nombre || undefined,
+                proveedor: data.proveedor || undefined,
+                referencia: data.referencia || undefined,
+                notas: data.notas || undefined,
+                creado_por: data.creado_por || "sistema",
+                creado_at: data.creado_at ? (data.creado_at.toDate ? data.creado_at.toDate() : data.creado_at) : new Date(),
+                actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date()
+              });
+            });
+            list.sort((a, b) => {
+              const tA = a.fecha instanceof Date ? a.fecha.getTime() : (a.fecha as any)?.seconds ? (a.fecha as any).seconds * 1000 : 0;
+              const tB = b.fecha instanceof Date ? b.fecha.getTime() : (b.fecha as any)?.seconds ? (b.fecha as any).seconds * 1000 : 0;
+              return tB - tA;
+            });
+            setLocalStorageItem("gastos", list);
+            onUpdate(list);
+          },
+          (error: any) => {
+            if (isUnsubscribed) return;
+            const isPermission = error?.code === "permission-denied" || (error?.message && (error.message.includes("permission") || error.message.includes("Missing or insufficient")));
+            if (isPermission) {
+              console.warn("Firestore gastos: Reglas de seguridad pendientes en Firebase Console para /gastos. Operando en sincronización local persistente.");
+            } else {
+              console.warn("Aviso en listener de gastos de Firestore:", error);
+            }
+            const fallbackList = getLocalStorageItem<Gasto[]>("gastos", []);
+            onUpdate(fallbackList);
+            if (onError) onError(error);
+          }
+        );
+      } catch (err) {
+        console.warn("Excepción al suscribir listener de gastos:", err);
+        const fallbackList = getLocalStorageItem<Gasto[]>("gastos", []);
+        onUpdate(fallbackList);
+        if (onError) onError(err);
+      }
+
+      return () => {
+        isUnsubscribed = true;
+        try {
+          unsubscribeSnapshot();
+        } catch {}
+        listeners.gastos = listeners.gastos.filter(cb => cb !== updateFromLocal);
+      };
+    }
+
+    const update = () => {
+      const list = getLocalStorageItem<Gasto[]>("gastos", []);
+      onUpdate(list);
+    };
+    update();
+    listeners.gastos.push(update);
+    return () => {
+      listeners.gastos = listeners.gastos.filter(cb => cb !== update);
+    };
+  },
+
+  getGastosPaginatedLocal: (options: {
+    pageSize?: number;
+    lastDoc?: any;
+    categoriaFilter?: string;
+    warehouseFilter?: string;
+    metodoPagoFilter?: string;
+    startDate?: string;
+    endDate?: string;
+    searchTerm?: string;
+  } = {}): {
+    items: Gasto[];
+    lastDoc: any;
+    hasMore: boolean;
+    totalLoaded: number;
+  } => {
+    const pageSize = options.pageSize || 50;
+    let list = getLocalStorageItem<Gasto[]>("gastos", []);
+    list = list.map(g => ({
+      ...g,
+      fecha: g.fecha instanceof Date ? g.fecha : new Date(typeof g.fecha === "string" ? g.fecha : (g.fecha as any).seconds * 1000),
+      creado_at: g.creado_at instanceof Date ? g.creado_at : new Date(typeof g.creado_at === "string" ? g.creado_at : (g.creado_at as any).seconds * 1000),
+      actualizado_at: g.actualizado_at instanceof Date ? g.actualizado_at : new Date(typeof g.actualizado_at === "string" ? g.actualizado_at : (g.actualizado_at as any).seconds * 1000)
+    }));
+
+    list.sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
+
+    if (options.categoriaFilter && options.categoriaFilter !== "all") {
+      list = list.filter(g => g.categoria === options.categoriaFilter);
+    }
+    if (options.warehouseFilter && options.warehouseFilter !== "all") {
+      list = list.filter(g => g.almacen_id === options.warehouseFilter);
+    }
+    if (options.metodoPagoFilter && options.metodoPagoFilter !== "all") {
+      list = list.filter(g => g.metodo_pago === options.metodoPagoFilter);
+    }
+    if (options.startDate) {
+      list = list.filter(g => g.fecha_str >= options.startDate!);
+    }
+    if (options.endDate) {
+      list = list.filter(g => g.fecha_str <= options.endDate!);
+    }
+    if (options.searchTerm) {
+      const term = options.searchTerm.toLowerCase().trim();
+      list = list.filter(g =>
+        g.concepto.toLowerCase().includes(term) ||
+        (g.proveedor && g.proveedor.toLowerCase().includes(term)) ||
+        (g.referencia && g.referencia.toLowerCase().includes(term)) ||
+        (g.notas && g.notas.toLowerCase().includes(term))
+      );
+    }
+
+    const startIndex = typeof options.lastDoc === "number" ? options.lastDoc : 0;
+    const pageItems = list.slice(startIndex, startIndex + pageSize);
+    const nextIndex = startIndex + pageItems.length;
+    const hasMore = nextIndex < list.length;
+
+    return {
+      items: pageItems,
+      lastDoc: nextIndex,
+      hasMore,
+      totalLoaded: pageItems.length
+    };
+  },
+
+  getGastosPaginated: async (options: {
+    pageSize?: number;
+    lastDoc?: any;
+    categoriaFilter?: string;
+    warehouseFilter?: string;
+    metodoPagoFilter?: string;
+    startDate?: string;
+    endDate?: string;
+    searchTerm?: string;
+  } = {}): Promise<{
+    items: Gasto[];
+    lastDoc: any;
+    hasMore: boolean;
+    totalLoaded: number;
+  }> => {
+    const pageSize = options.pageSize || 50;
+
+    if (isConfigured && realDb) {
+      try {
+        let qConstraints: any[] = [orderBy("fecha", "desc"), limit(pageSize + 1)];
+
+        if (options.categoriaFilter && options.categoriaFilter !== "all") {
+          qConstraints.unshift(where("categoria", "==", options.categoriaFilter));
+        }
+        if (options.warehouseFilter && options.warehouseFilter !== "all") {
+          qConstraints.unshift(where("almacen_id", "==", options.warehouseFilter));
+        }
+        if (options.metodoPagoFilter && options.metodoPagoFilter !== "all") {
+          qConstraints.unshift(where("metodo_pago", "==", options.metodoPagoFilter));
+        }
+
+        if (options.lastDoc) {
+          qConstraints.push(startAfter(options.lastDoc));
+        }
+
+        const q = query(collection(realDb, "gastos"), ...qConstraints);
+        const snap = await getDocs(q);
+
+        const docs = snap.docs;
+        const hasMore = docs.length > pageSize;
+        const itemsToProcess = hasMore ? docs.slice(0, pageSize) : docs;
+        const nextLastDoc = itemsToProcess.length > 0 ? itemsToProcess[itemsToProcess.length - 1] : null;
+
+        let list: Gasto[] = itemsToProcess.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            concepto: data.concepto || "",
+            categoria: data.categoria || "Otros",
+            monto: Number(data.monto) || 0,
+            fecha: data.fecha ? (data.fecha.toDate ? data.fecha.toDate() : new Date(data.fecha)) : new Date(),
+            fecha_str: data.fecha_str || getLocalDateString(data.fecha || new Date()),
+            metodo_pago: data.metodo_pago || "Efectivo",
+            almacen_id: data.almacen_id || undefined,
+            almacen_nombre: data.almacen_nombre || undefined,
+            proveedor: data.proveedor || undefined,
+            referencia: data.referencia || undefined,
+            notas: data.notas || undefined,
+            creado_por: data.creado_por || "sistema",
+            creado_at: data.creado_at ? (data.creado_at.toDate ? data.creado_at.toDate() : data.creado_at) : new Date(),
+            actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date()
+          };
+        });
+
+        // Filtrado adicional en memoria para rangos y búsqueda de texto
+        if (options.startDate) {
+          list = list.filter(g => g.fecha_str >= options.startDate!);
+        }
+        if (options.endDate) {
+          list = list.filter(g => g.fecha_str <= options.endDate!);
+        }
+        if (options.searchTerm) {
+          const term = options.searchTerm.toLowerCase().trim();
+          list = list.filter(g =>
+            g.concepto.toLowerCase().includes(term) ||
+            (g.proveedor && g.proveedor.toLowerCase().includes(term)) ||
+            (g.referencia && g.referencia.toLowerCase().includes(term)) ||
+            (g.notas && g.notas.toLowerCase().includes(term))
+          );
+        }
+
+        return {
+          items: list,
+          lastDoc: nextLastDoc,
+          hasMore,
+          totalLoaded: list.length
+        };
+      } catch (err: any) {
+        const isPermission = err?.code === "permission-denied" || (err?.message && (err.message.includes("permission") || err.message.includes("Missing or insufficient")));
+        if (isPermission) {
+          console.warn("Firestore gastos: Consulta sin permisos para /gastos. Usando persistencia local segura.");
+          return firestoreService.getGastosPaginatedLocal(options);
+        }
+
+        console.warn("Consulta indexada de gastos en Firestore no disponible, aplicando fallback simple:", err?.message || err);
+        try {
+          // Fallback simple por límite sin índices compuestos
+          const qFallback = query(collection(realDb, "gastos"), limit(pageSize * 2));
+          const snap = await getDocs(qFallback);
+          let list: Gasto[] = snap.docs.map(d => {
+            const data = d.data();
+            return {
+              id: d.id,
+              concepto: data.concepto || "",
+              categoria: data.categoria || "Otros",
+              monto: Number(data.monto) || 0,
+              fecha: data.fecha ? (data.fecha.toDate ? data.fecha.toDate() : new Date(data.fecha)) : new Date(),
+              fecha_str: data.fecha_str || getLocalDateString(data.fecha || new Date()),
+              metodo_pago: data.metodo_pago || "Efectivo",
+              almacen_id: data.almacen_id || undefined,
+              almacen_nombre: data.almacen_nombre || undefined,
+              proveedor: data.proveedor || undefined,
+              referencia: data.referencia || undefined,
+              notas: data.notas || undefined,
+              creado_por: data.creado_por || "sistema",
+              creado_at: data.creado_at ? (data.creado_at.toDate ? data.creado_at.toDate() : data.creado_at) : new Date(),
+              actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date()
+            };
+          });
+
+          list.sort((a, b) => {
+            const tA = a.fecha instanceof Date ? a.fecha.getTime() : (a.fecha as any)?.seconds ? (a.fecha as any).seconds * 1000 : 0;
+            const tB = b.fecha instanceof Date ? b.fecha.getTime() : (b.fecha as any)?.seconds ? (b.fecha as any).seconds * 1000 : 0;
+            return tB - tA;
+          });
+
+          if (options.categoriaFilter && options.categoriaFilter !== "all") {
+            list = list.filter(g => g.categoria === options.categoriaFilter);
+          }
+          if (options.warehouseFilter && options.warehouseFilter !== "all") {
+            list = list.filter(g => g.almacen_id === options.warehouseFilter);
+          }
+          if (options.metodoPagoFilter && options.metodoPagoFilter !== "all") {
+            list = list.filter(g => g.metodo_pago === options.metodoPagoFilter);
+          }
+          if (options.startDate) {
+            list = list.filter(g => g.fecha_str >= options.startDate!);
+          }
+          if (options.endDate) {
+            list = list.filter(g => g.fecha_str <= options.endDate!);
+          }
+          if (options.searchTerm) {
+            const term = options.searchTerm.toLowerCase().trim();
+            list = list.filter(g =>
+              g.concepto.toLowerCase().includes(term) ||
+              (g.proveedor && g.proveedor.toLowerCase().includes(term)) ||
+              (g.referencia && g.referencia.toLowerCase().includes(term)) ||
+              (g.notas && g.notas.toLowerCase().includes(term))
+            );
+          }
+
+          return {
+            items: list.slice(0, pageSize),
+            lastDoc: null,
+            hasMore: list.length > pageSize,
+            totalLoaded: list.slice(0, pageSize).length
+          };
+        } catch (fallbackErr: any) {
+          console.warn("Fallback de consulta de Firestore no disponible, usando almacenamiento local:", fallbackErr?.message || fallbackErr);
+          return firestoreService.getGastosPaginatedLocal(options);
+        }
+      }
+    }
+
+    // Modo local
+    return firestoreService.getGastosPaginatedLocal(options);
+  },
+
+  getGastoById: async (id: string): Promise<Gasto | null> => {
+    if (!id) return null;
+
+    if (isConfigured && realDb) {
+      try {
+        const docSnap = await getDoc(doc(realDb, "gastos", id));
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            concepto: data.concepto || "",
+            categoria: data.categoria || "Otros",
+            monto: Number(data.monto) || 0,
+            fecha: data.fecha ? (data.fecha.toDate ? data.fecha.toDate() : new Date(data.fecha)) : new Date(),
+            fecha_str: data.fecha_str || getLocalDateString(data.fecha || new Date()),
+            metodo_pago: data.metodo_pago || "Efectivo",
+            almacen_id: data.almacen_id || undefined,
+            almacen_nombre: data.almacen_nombre || undefined,
+            proveedor: data.proveedor || undefined,
+            referencia: data.referencia || undefined,
+            notas: data.notas || undefined,
+            creado_por: data.creado_por || "sistema",
+            creado_at: data.creado_at ? (data.creado_at.toDate ? data.creado_at.toDate() : data.creado_at) : new Date(),
+            actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date()
+          };
+        }
+      } catch (err) {
+        console.warn("Error al obtener gasto de Firestore:", err);
+      }
+    }
+
+    const list = getLocalStorageItem<Gasto[]>("gastos", []);
+    const found = list.find(g => g.id === id);
+    if (!found) return null;
+
+    return {
+      ...found,
+      fecha: found.fecha instanceof Date ? found.fecha : new Date(typeof found.fecha === "string" ? found.fecha : (found.fecha as any).seconds * 1000),
+      creado_at: found.creado_at instanceof Date ? found.creado_at : new Date(typeof found.creado_at === "string" ? found.creado_at : (found.creado_at as any).seconds * 1000),
+      actualizado_at: found.actualizado_at instanceof Date ? found.actualizado_at : new Date(typeof found.actualizado_at === "string" ? found.actualizado_at : (found.actualizado_at as any).seconds * 1000)
+    };
+  },
+
+  addGasto: async (gastoData: {
+    concepto: string;
+    categoria: CategoriaGasto | string;
+    monto: number;
+    fecha: Date;
+    fecha_str?: string;
+    metodo_pago: MetodoPagoGasto | string;
+    almacen_id?: string;
+    almacen_nombre?: string;
+    proveedor?: string;
+    referencia?: string;
+    notas?: string;
+  }): Promise<Gasto> => {
+    const user = authService.getCurrentUser();
+    const cleanConcepto = (gastoData.concepto || "").trim();
+    if (!cleanConcepto) {
+      throw new Error("El concepto o descripción del gasto es obligatorio.");
+    }
+    if (!gastoData.categoria) {
+      throw new Error("La categoría del gasto es obligatoria.");
+    }
+    const monto = Number(gastoData.monto);
+    if (isNaN(monto) || monto <= 0) {
+      throw new Error("El monto del gasto debe ser un número mayor a cero.");
+    }
+    if (!gastoData.fecha || isNaN(gastoData.fecha.getTime())) {
+      throw new Error("La fecha del gasto es obligatoria.");
+    }
+    if (!gastoData.metodo_pago) {
+      throw new Error("El método de pago es obligatorio.");
+    }
+
+    const fecha_str = gastoData.fecha_str || getLocalDateString(gastoData.fecha);
+    const userEmail = user?.email || "sistema@dorsalclub.com";
+
+    const payload: any = {
+      concepto: cleanConcepto,
+      categoria: gastoData.categoria,
+      monto,
+      fecha: Timestamp.fromDate(gastoData.fecha),
+      fecha_str,
+      metodo_pago: gastoData.metodo_pago,
+      creado_por: userEmail,
+      creado_at: Timestamp.now(),
+      actualizado_at: Timestamp.now()
+    };
+
+    if (gastoData.almacen_id && gastoData.almacen_id.trim()) {
+      payload.almacen_id = gastoData.almacen_id.trim();
+    }
+    if (gastoData.almacen_nombre && gastoData.almacen_nombre.trim()) {
+      payload.almacen_nombre = gastoData.almacen_nombre.trim();
+    }
+    if (gastoData.proveedor && gastoData.proveedor.trim()) {
+      payload.proveedor = gastoData.proveedor.trim();
+    }
+    if (gastoData.referencia && gastoData.referencia.trim()) {
+      payload.referencia = gastoData.referencia.trim();
+    }
+    if (gastoData.notas && gastoData.notas.trim()) {
+      payload.notas = gastoData.notas.trim();
+    }
+
+    if (isConfigured && realDb) {
+      try {
+        const docRef = doc(collection(realDb, "gastos"));
+        await setDoc(docRef, payload);
+
+        const createdGasto: Gasto = {
+          id: docRef.id,
+          concepto: cleanConcepto,
+          categoria: gastoData.categoria,
+          monto,
+          fecha: gastoData.fecha,
+          fecha_str,
+          metodo_pago: gastoData.metodo_pago,
+          almacen_id: payload.almacen_id,
+          almacen_nombre: payload.almacen_nombre,
+          proveedor: payload.proveedor,
+          referencia: payload.referencia,
+          notas: payload.notas,
+          creado_por: userEmail,
+          creado_at: new Date(),
+          actualizado_at: new Date()
+        };
+
+        const list = getLocalStorageItem<Gasto[]>("gastos", []);
+        list.unshift(createdGasto);
+        setLocalStorageItem("gastos", list);
+        notifyListeners("gastos", list);
+
+        return createdGasto;
+      } catch (err) {
+        console.warn("Error al guardar gasto en Firestore, almacenando localmente:", err);
+      }
+    }
+
+    const newId = "gas_" + Math.random().toString(36).substr(2, 9);
+    const createdLocal: Gasto = {
+      id: newId,
+      concepto: cleanConcepto,
+      categoria: gastoData.categoria,
+      monto,
+      fecha: gastoData.fecha,
+      fecha_str,
+      metodo_pago: gastoData.metodo_pago,
+      almacen_id: payload.almacen_id,
+      almacen_nombre: payload.almacen_nombre,
+      proveedor: payload.proveedor,
+      referencia: payload.referencia,
+      notas: payload.notas,
+      creado_por: userEmail,
+      creado_at: new Date(),
+      actualizado_at: new Date()
+    };
+
+    const list = getLocalStorageItem<Gasto[]>("gastos", []);
+    list.unshift(createdLocal);
+    setLocalStorageItem("gastos", list);
+    notifyListeners("gastos", list);
+
+    return createdLocal;
+  },
+
+  updateGasto: async (id: string, gastoData: {
+    concepto?: string;
+    categoria?: CategoriaGasto | string;
+    monto?: number;
+    fecha?: Date;
+    fecha_str?: string;
+    metodo_pago?: MetodoPagoGasto | string;
+    almacen_id?: string;
+    almacen_nombre?: string;
+    proveedor?: string;
+    referencia?: string;
+    notas?: string;
+  }): Promise<void> => {
+    if (!id) throw new Error("ID de gasto no proporcionado.");
+
+    const updatePayload: any = {
+      actualizado_at: isConfigured && realDb ? Timestamp.now() : new Date()
+    };
+
+    if (gastoData.concepto !== undefined) {
+      const cleanConcepto = gastoData.concepto.trim();
+      if (!cleanConcepto) throw new Error("El concepto no puede estar vacío.");
+      updatePayload.concepto = cleanConcepto;
+    }
+    if (gastoData.categoria !== undefined) {
+      if (!gastoData.categoria) throw new Error("La categoría no puede estar vacía.");
+      updatePayload.categoria = gastoData.categoria;
+    }
+    if (gastoData.monto !== undefined) {
+      const m = Number(gastoData.monto);
+      if (isNaN(m) || m <= 0) throw new Error("El monto debe ser un número positivo mayor a cero.");
+      updatePayload.monto = m;
+    }
+    if (gastoData.fecha !== undefined) {
+      if (isNaN(gastoData.fecha.getTime())) throw new Error("Fecha inválida.");
+      updatePayload.fecha = isConfigured && realDb ? Timestamp.fromDate(gastoData.fecha) : gastoData.fecha;
+      updatePayload.fecha_str = gastoData.fecha_str || getLocalDateString(gastoData.fecha);
+    }
+    if (gastoData.metodo_pago !== undefined) {
+      if (!gastoData.metodo_pago) throw new Error("El método de pago no puede estar vacío.");
+      updatePayload.metodo_pago = gastoData.metodo_pago;
+    }
+    if (gastoData.almacen_id !== undefined) {
+      updatePayload.almacen_id = gastoData.almacen_id ? gastoData.almacen_id.trim() : null;
+    }
+    if (gastoData.almacen_nombre !== undefined) {
+      updatePayload.almacen_nombre = gastoData.almacen_nombre ? gastoData.almacen_nombre.trim() : null;
+    }
+    if (gastoData.proveedor !== undefined) {
+      updatePayload.proveedor = gastoData.proveedor ? gastoData.proveedor.trim() : null;
+    }
+    if (gastoData.referencia !== undefined) {
+      updatePayload.referencia = gastoData.referencia ? gastoData.referencia.trim() : null;
+    }
+    if (gastoData.notas !== undefined) {
+      updatePayload.notas = gastoData.notas ? gastoData.notas.trim() : null;
+    }
+
+    if (isConfigured && realDb) {
+      try {
+        const docRef = doc(realDb, "gastos", id);
+        await setDoc(docRef, updatePayload, { merge: true });
+      } catch (err) {
+        console.warn("Error al actualizar gasto en Firestore:", err);
+      }
+    }
+
+    const list = getLocalStorageItem<Gasto[]>("gastos", []);
+    const idx = list.findIndex(g => g.id === id);
+    if (idx !== -1) {
+      const existing = list[idx];
+      const parsedUpdate: any = { ...updatePayload };
+      if (updatePayload.fecha && typeof updatePayload.fecha.toDate === "function") {
+        parsedUpdate.fecha = updatePayload.fecha.toDate();
+      }
+      if (updatePayload.actualizado_at && typeof updatePayload.actualizado_at.toDate === "function") {
+        parsedUpdate.actualizado_at = updatePayload.actualizado_at.toDate();
+      }
+      list[idx] = { ...existing, ...parsedUpdate };
+      setLocalStorageItem("gastos", list);
+      notifyListeners("gastos", list);
+    }
+  },
+
+  deleteGasto: async (id: string): Promise<void> => {
+    if (!id) return;
+
+    if (isConfigured && realDb) {
+      try {
+        const docRef = doc(realDb, "gastos", id);
+        await deleteDoc(docRef);
+      } catch (err) {
+        console.warn("Error al eliminar gasto en Firestore:", err);
+      }
+    }
+
+    const list = getLocalStorageItem<Gasto[]>("gastos", []);
+    const updated = list.filter(g => g.id !== id);
+    setLocalStorageItem("gastos", updated);
+    notifyListeners("gastos", updated);
   }
 };
