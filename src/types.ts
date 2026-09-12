@@ -331,5 +331,46 @@ export interface Gasto {
   } | Date;
 }
 
+export interface CategoriaGastoDesglose {
+  categoria: string;
+  monto: number;
+  porcentaje: number;
+}
+
+export interface FinanzasDiaPunto {
+  dia: number;
+  diaLabel: string;
+  fechaStr: string;
+  ingresos: number;
+  egresos: number;
+  compras: number;
+  otrosGastos: number;
+}
+
+export interface DatosFinancierosMensuales {
+  year: number;
+  month: number;
+  // Totales
+  ingresosVentas: number;
+  comprasTotales: number;
+  mercanciaNeta: number;
+  gastosAsociadosCompras: number;
+  descuentosCompras: number;
+  otrosGastos: number;
+  egresosTotales: number;
+  balanceNetoFlujo: number;
+  // Indicadores secundarios
+  numVentas: number;
+  unidadesVendidas: number;
+  numCompras: number;
+  unidadesCompradas: number;
+  numGastos: number;
+  ventasSinImporte: number;
+  // Desglose de otros gastos por categoría
+  gastosPorCategoria: CategoriaGastoDesglose[];
+  // Puntos diarios para la gráfica
+  dailyData: FinanzasDiaPunto[];
+}
+
 
 

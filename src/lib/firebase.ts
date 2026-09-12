@@ -57,7 +57,9 @@ import {
   EstadoCliente,
   Gasto,
   CategoriaGasto,
-  MetodoPagoGasto
+  MetodoPagoGasto,
+  DatosFinancierosMensuales,
+  FinanzasDiaPunto
 } from "../types";
 
 // Silence non-critical network retry noise from Firestore client
@@ -4002,5 +4004,326 @@ export const firestoreService = {
     const updated = list.filter(g => g.id !== id);
     setLocalStorageItem("gastos", updated);
     notifyListeners("gastos", updated);
+  },
+
+  // --- DASHBOARD FINANCIERO MENSUAL (FLUJO DE DINERO) ---
+  getDatosFinancierosMensuales: async (
+    year: number,
+    month: number,
+    forceRefresh: boolean = false
+  ): Promise<DatosFinancierosMensuales> => {
+    const cacheKey = `${year}-${String(month).padStart(2, "0")}`;
+    if (!forceRefresh && finanzasMonthlyCache.has(cacheKey)) {
+      return finanzasMonthlyCache.get(cacheKey)!;
+    }
+
+    // Calcular intervalo exacto de mes en hora local de México:
+    // inicioMes a las 00:00:00.000
+    // inicioMesSiguiente a las 00:00:00.000
+    const startOfMonth = new Date(year, month - 1, 1, 0, 0, 0, 0);
+    const startOfNextMonth = new Date(year, month, 1, 0, 0, 0, 0);
+
+    let rawVentas: Movimiento[] = [];
+    let rawCompras: Compra[] = [];
+    let rawGastos: Gasto[] = [];
+
+    if (isConfigured && realDb) {
+      try {
+        const startTimestamp = Timestamp.fromDate(startOfMonth);
+        const endTimestamp = Timestamp.fromDate(startOfNextMonth);
+
+        // 1. Consulta de Ventas (tipo == "salida", fecha >= start, fecha < end)
+        const qVentas = query(
+          collection(realDb, "movimientos"),
+          where("tipo", "==", "salida"),
+          where("fecha", ">=", startTimestamp),
+          where("fecha", "<", endTimestamp),
+          orderBy("fecha", "desc")
+        );
+
+        // 2. Consulta de Compras (fecha >= start, fecha < end)
+        const qCompras = query(
+          collection(realDb, "compras"),
+          where("fecha", ">=", startTimestamp),
+          where("fecha", "<", endTimestamp),
+          orderBy("fecha", "desc")
+        );
+
+        // 3. Consulta de Gastos (fecha >= start, fecha < end)
+        const qGastos = query(
+          collection(realDb, "gastos"),
+          where("fecha", ">=", startTimestamp),
+          where("fecha", "<", endTimestamp),
+          orderBy("fecha", "desc")
+        );
+
+        // Ejecutar las tres consultas independientes mediante Promise.all()
+        const [snapVentas, snapCompras, snapGastos] = await Promise.all([
+          getDocs(qVentas),
+          getDocs(qCompras),
+          getDocs(qGastos)
+        ]);
+
+        rawVentas = snapVentas.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            folio: data.folio,
+            sku: data.sku,
+            almacen_id: data.almacen_id,
+            tipo: data.tipo,
+            cantidad: Number(data.cantidad) || 0,
+            referencia: data.referencia,
+            usuario: data.usuario,
+            fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
+            almacen_destino_id: data.almacen_destino_id,
+            compra_id: data.compra_id,
+            lote_id: data.lote_id,
+            costo_unitario: typeof data.costo_unitario === "number" ? data.costo_unitario : undefined,
+            cliente_id: data.cliente_id,
+            cliente_nombre: data.cliente_nombre,
+            cliente_tipo: data.cliente_tipo,
+            precio_unitario_venta: typeof data.precio_unitario_venta === "number" ? data.precio_unitario_venta : undefined,
+            total_venta: typeof data.total_venta === "number" ? data.total_venta : undefined,
+            estado: data.estado || "activo",
+            anulado_at: data.anulado_at ? (data.anulado_at as Timestamp).toDate() : undefined,
+            anulado_por: data.anulado_por,
+            motivo_anulacion: data.motivo_anulacion
+          };
+        });
+
+        rawCompras = snapCompras.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            folio: data.folio,
+            proveedor: data.proveedor,
+            fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
+            fecha_str: data.fecha_str,
+            almacen_id: data.almacen_id,
+            items: data.items || [],
+            total_unidades: Number(data.total_unidades) || 0,
+            subtotal: Number(data.subtotal) || 0,
+            costo_envio: Number(data.costo_envio) || 0,
+            comisiones: Number(data.comisiones) || 0,
+            descuentos: Number(data.descuentos) || 0,
+            total: Number(data.total) || 0,
+            referencia: data.referencia || "",
+            notas: data.notas || "",
+            creado_por: data.creado_por || "",
+            creado_at: data.creado_at ? (data.creado_at as Timestamp).toDate() : new Date(),
+            estado: data.estado || "completada"
+          };
+        });
+
+        rawGastos = snapGastos.docs.map(d => {
+          const data = d.data();
+          const item: Gasto = {
+            id: d.id,
+            concepto: data.concepto || "",
+            categoria: data.categoria || "Otros",
+            monto: Number(data.monto) || 0,
+            fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
+            fecha_str: data.fecha_str || "",
+            creado_por: data.creado_por || "",
+            creado_at: data.creado_at ? (data.creado_at as Timestamp).toDate() : new Date(),
+            actualizado_at: data.actualizado_at ? (data.actualizado_at as Timestamp).toDate() : new Date()
+          };
+          if (data.metodo_pago) item.metodo_pago = data.metodo_pago;
+          if (data.almacen_id) item.almacen_id = data.almacen_id;
+          if (data.almacen_nombre) item.almacen_nombre = data.almacen_nombre;
+          if (data.proveedor) item.proveedor = data.proveedor;
+          if (data.referencia) item.referencia = data.referencia;
+          if (data.notas) item.notas = data.notas;
+          return item;
+        });
+      } catch (err: any) {
+        console.error("Error al consultar datos financieros mensuales de Firestore:", err);
+        // NO usar localStorage como fallback si Firebase está configurado y devuelve error
+        throw err;
+      }
+    } else {
+      // Modo emulador local: filtrar únicamente los registros del intervalo solicitado
+      const startTime = startOfMonth.getTime();
+      const endTime = startOfNextMonth.getTime();
+
+      const allMovs = getLocalStorageItem<Movimiento[]>("movimientos", []);
+      rawVentas = allMovs.filter(m => {
+        if (m.tipo !== "salida") return false;
+        const d = m.fecha instanceof Date ? m.fecha : new Date(typeof m.fecha === "string" ? m.fecha : (m.fecha as any).seconds * 1000);
+        const t = d.getTime();
+        return t >= startTime && t < endTime;
+      });
+
+      const allCompras = getLocalStorageItem<Compra[]>("compras", []);
+      rawCompras = allCompras.filter(c => {
+        const d = c.fecha instanceof Date ? c.fecha : new Date(typeof c.fecha === "string" ? c.fecha : (c.fecha as any).seconds * 1000);
+        const t = d.getTime();
+        return t >= startTime && t < endTime;
+      });
+
+      const allGastos = getLocalStorageItem<Gasto[]>("gastos", []);
+      rawGastos = allGastos.filter(g => {
+        const d = g.fecha instanceof Date ? g.fecha : new Date(typeof g.fecha === "string" ? g.fecha : (g.fecha as any).seconds * 1000);
+        const t = d.getTime();
+        return t >= startTime && t < endTime;
+      });
+    }
+
+    // 1. Filtrar ventas activas (no anuladas)
+    const activeVentas = rawVentas.filter(m => (m.estado || "activo") !== "anulado");
+    let ingresosVentas = 0;
+    let unidadesVendidas = 0;
+    let ventasSinImporte = 0;
+
+    for (const v of activeVentas) {
+      const qty = Number(v.cantidad) || 0;
+      unidadesVendidas += qty;
+
+      if (typeof v.total_venta === "number" && !isNaN(v.total_venta)) {
+        ingresosVentas += v.total_venta;
+      } else if (typeof v.precio_unitario_venta === "number" && !isNaN(v.precio_unitario_venta)) {
+        ingresosVentas += v.precio_unitario_venta * qty;
+      } else {
+        ventasSinImporte += 1;
+      }
+    }
+
+    // 2. Filtrar compras activas (no anuladas)
+    const activeCompras = rawCompras.filter(c => (c.estado || "completada") !== "anulada");
+    let comprasTotales = 0;
+    let subtotalCompras = 0;
+    let descuentosCompras = 0;
+    let costoEnvioCompras = 0;
+    let comisionesCompras = 0;
+    let unidadesCompradas = 0;
+
+    for (const c of activeCompras) {
+      comprasTotales += Number(c.total) || 0;
+      subtotalCompras += Number(c.subtotal) || 0;
+      descuentosCompras += Number(c.descuentos) || 0;
+      costoEnvioCompras += Number(c.costo_envio) || 0;
+      comisionesCompras += Number(c.comisiones) || 0;
+      const units = Number(c.total_unidades) || (Array.isArray(c.items) ? c.items.reduce((acc, it) => acc + (Number(it.cantidad) || 0), 0) : 0);
+      unidadesCompradas += units;
+    }
+
+    const mercanciaNeta = Math.max(0, subtotalCompras - descuentosCompras);
+    const gastosAsociadosCompras = costoEnvioCompras + comisionesCompras;
+
+    // 3. Otros gastos
+    let otrosGastos = 0;
+    const catMap: Record<string, number> = {};
+
+    for (const g of rawGastos) {
+      const m = Number(g.monto) || 0;
+      otrosGastos += m;
+      const cat = (g.categoria || "Otros").trim();
+      catMap[cat] = (catMap[cat] || 0) + m;
+    }
+
+    const gastosPorCategoria = Object.entries(catMap)
+      .map(([categoria, monto]) => ({
+        categoria,
+        monto,
+        porcentaje: otrosGastos > 0 ? (monto / otrosGastos) * 100 : 0
+      }))
+      .sort((a, b) => b.monto - a.monto);
+
+    // 4. Totales y balance
+    const egresosTotales = comprasTotales + otrosGastos;
+    const balanceNetoFlujo = ingresosVentas - egresosTotales;
+
+    // 5. Agrupación diaria
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const dailyData: FinanzasDiaPunto[] = Array.from({ length: daysInMonth }, (_, i) => {
+      const dia = i + 1;
+      const fechaStr = `${year}-${String(month).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
+      return {
+        dia,
+        diaLabel: String(dia),
+        fechaStr,
+        ingresos: 0,
+        egresos: 0,
+        compras: 0,
+        otrosGastos: 0
+      };
+    });
+
+    const getDayFromItemDate = (itemDate: any): number => {
+      if (!itemDate) return 0;
+      const d = itemDate instanceof Date 
+        ? itemDate 
+        : (typeof itemDate.toDate === "function" ? itemDate.toDate() : (itemDate.seconds ? new Date(itemDate.seconds * 1000) : new Date(itemDate)));
+      if (isNaN(d.getTime())) return 0;
+      return d.getDate();
+    };
+
+    for (const v of activeVentas) {
+      const day = getDayFromItemDate(v.fecha);
+      if (day >= 1 && day <= daysInMonth) {
+        let val = 0;
+        if (typeof v.total_venta === "number" && !isNaN(v.total_venta)) {
+          val = v.total_venta;
+        } else if (typeof v.precio_unitario_venta === "number" && !isNaN(v.precio_unitario_venta)) {
+          val = v.precio_unitario_venta * (Number(v.cantidad) || 0);
+        }
+        dailyData[day - 1].ingresos += val;
+      }
+    }
+
+    for (const c of activeCompras) {
+      const day = getDayFromItemDate(c.fecha);
+      if (day >= 1 && day <= daysInMonth) {
+        const val = Number(c.total) || 0;
+        dailyData[day - 1].compras += val;
+        dailyData[day - 1].egresos += val;
+      }
+    }
+
+    for (const g of rawGastos) {
+      const day = getDayFromItemDate(g.fecha);
+      if (day >= 1 && day <= daysInMonth) {
+        const val = Number(g.monto) || 0;
+        dailyData[day - 1].otrosGastos += val;
+        dailyData[day - 1].egresos += val;
+      }
+    }
+
+    const result: DatosFinancierosMensuales = {
+      year,
+      month,
+      ingresosVentas,
+      comprasTotales,
+      mercanciaNeta,
+      gastosAsociadosCompras,
+      descuentosCompras,
+      otrosGastos,
+      egresosTotales,
+      balanceNetoFlujo,
+      numVentas: activeVentas.length,
+      unidadesVendidas,
+      numCompras: activeCompras.length,
+      unidadesCompradas,
+      numGastos: rawGastos.length,
+      ventasSinImporte,
+      gastosPorCategoria,
+      dailyData
+    };
+
+    finanzasMonthlyCache.set(cacheKey, result);
+    return result;
+  }
+};
+
+// Cache en memoria por sesión para el dashboard mensual de finanzas
+const finanzasMonthlyCache = new Map<string, DatosFinancierosMensuales>();
+
+export const clearFinanzasCache = (year?: number, month?: number) => {
+  if (year && month) {
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    finanzasMonthlyCache.delete(key);
+  } else {
+    finanzasMonthlyCache.clear();
   }
 };

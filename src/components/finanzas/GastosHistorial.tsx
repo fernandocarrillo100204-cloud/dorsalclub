@@ -474,6 +474,11 @@ export default function GastosHistorial({
               <strong className="font-semibold text-[#172033] dark:text-[#F8FAFC]">{gastos.length}</strong> registros cargados
             </span>
           )}
+          {hasMore && (
+            <span className="block sm:inline sm:ml-2 text-slate-500 dark:text-slate-400 font-normal">
+              • Los filtros se aplican a los registros cargados. Carga más para consultar gastos anteriores.
+            </span>
+          )}
         </div>
         <div className="flex items-center space-x-1.5">
           <span>Total en vista:</span>
@@ -517,16 +522,20 @@ export default function GastosHistorial({
               ) : filteredGastos.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-12 px-4 text-center">
-                    <div className="max-w-sm mx-auto space-y-3">
+                    <div className="max-w-md mx-auto space-y-3">
                       <div className="h-10 w-10 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[#64748B]">
                         <Receipt className="h-5 w-5" />
                       </div>
                       <p className="text-sm font-semibold text-[#172033] dark:text-[#F8FAFC]">
-                        No se encontraron registros de gastos
+                        {hasActiveFilters && hasMore
+                          ? "No hay coincidencias entre los registros cargados. Puede haber resultados anteriores."
+                          : "No se encontraron registros de gastos"}
                       </p>
                       <p className="text-xs text-[#64748B] dark:text-[#94A3B8]">
                         {hasActiveFilters
-                          ? "Intenta cambiar o limpiar los filtros seleccionados para ver más resultados."
+                          ? hasMore
+                            ? "Carga más registros para consultar gastos anteriores o ajusta los criterios de búsqueda."
+                            : "Intenta cambiar o limpiar los filtros seleccionados para ver más resultados."
                           : "Comienza registrando el primer egreso operativo de la empresa."}
                       </p>
                       {hasActiveFilters ? (
@@ -547,7 +556,7 @@ export default function GastosHistorial({
                               className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-[#172033] dark:text-[#F8FAFC] border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
                             >
                               <ChevronDown className="h-3.5 w-3.5 text-[#64748B] dark:text-[#94A3B8]" />
-                              <span>Cargar más de Firestore</span>
+                              <span>Cargar más</span>
                             </button>
                           )}
                         </div>
@@ -555,7 +564,7 @@ export default function GastosHistorial({
                         <button
                           type="button"
                           onClick={onNuevoGasto}
-                          className="mt-2 inline-flex items-center space-x-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-[#059669] text-white hover:bg-[#047857] shadow-xs"
+                          className="mt-2 inline-flex items-center space-x-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-[#059669] text-white hover:bg-[#047857] shadow-xs cursor-pointer"
                         >
                           <Plus className="h-3.5 w-3.5" />
                           <span>Registrar gasto</span>

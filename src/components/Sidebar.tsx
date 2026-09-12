@@ -74,10 +74,10 @@ const NAV_ITEMS: NavItem[] = [
     matchActive: (curr) => curr === "historial"
   },
   { 
-    id: "finanzas_gastos", 
+    id: "finanzas", 
     label: "Finanzas", 
     icon: Receipt,
-    matchActive: (curr) => curr === "finanzas_gastos" || curr === "finanzas_gastos_nuevo" || curr === "finanzas_gastos_editar" || curr === "finanzas"
+    matchActive: (curr) => curr === "finanzas" || curr === "finanzas_gastos" || curr === "finanzas_gastos_nuevo" || curr === "finanzas_gastos_editar"
   },
   { 
     id: "dashboard", 

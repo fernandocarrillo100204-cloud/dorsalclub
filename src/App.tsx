@@ -35,8 +35,11 @@ const getTabFromPath = (path: string): NavigationTab => {
   if (/^\/finanzas\/gastos\/[^/]+\/editar$/.test(normalized)) {
     return "finanzas_gastos_editar";
   }
-  if (normalized === "/finanzas/gastos" || normalized === "/finanzas") {
+  if (normalized === "/finanzas/gastos") {
     return "finanzas_gastos";
+  }
+  if (normalized === "/finanzas") {
+    return "finanzas";
   }
   if (normalized === "/clientes") {
     return "clientes";
@@ -101,6 +104,7 @@ const getPathFromTab = (tab: NavigationTab): string => {
     case "clientes":
       return "/clientes";
     case "finanzas":
+      return "/finanzas";
     case "finanzas_gastos":
       return "/finanzas/gastos";
     case "finanzas_gastos_nuevo":
@@ -500,8 +504,8 @@ export default function App() {
                   </motion.div>
                 )}
 
-                {/* Finanzas: Gastos e Historial */}
-                {(activeTab === "finanzas_gastos" || activeTab === "finanzas_gastos_nuevo" || activeTab === "finanzas_gastos_editar" || activeTab === "finanzas") && (
+                {/* Finanzas: Resumen y Gastos */}
+                {(activeTab === "finanzas" || activeTab === "finanzas_gastos" || activeTab === "finanzas_gastos_nuevo" || activeTab === "finanzas_gastos_editar") && (
                   <motion.div
                     key="finanzas"
                     initial={{ opacity: 0, y: 15 }}
@@ -516,12 +520,17 @@ export default function App() {
                           ? "nuevo"
                           : activeTab === "finanzas_gastos_editar"
                           ? "editar"
-                          : "list"
+                          : activeTab === "finanzas_gastos"
+                          ? "gastos"
+                          : "resumen"
                       }
                       gastoId={preselectedGastoId}
+                      onNavigateToResumen={() => navigateTo("finanzas")}
                       onNavigateToGastos={() => navigateTo("finanzas_gastos")}
                       onNavigateToNuevoGasto={() => navigateTo("finanzas_gastos_nuevo")}
                       onNavigateToEditarGasto={(id) => navigateTo("finanzas_gastos_editar", { gastoId: id })}
+                      onNavigateToVentas={() => navigateTo("analisis_ventas")}
+                      onNavigateToCompras={() => navigateTo("compras")}
                     />
                   </motion.div>
                 )}
