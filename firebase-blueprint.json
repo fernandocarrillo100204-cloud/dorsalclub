@@ -135,7 +135,7 @@
         "creado_at": { "type": "string" },
         "actualizado_at": { "type": "string" }
       },
-      "required": ["concepto", "categoria", "monto", "fecha_str", "metodo_pago"]
+      "required": ["concepto", "categoria", "monto", "fecha_str"]
     }
   },
   "firestore": {

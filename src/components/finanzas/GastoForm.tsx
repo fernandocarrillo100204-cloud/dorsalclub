@@ -125,11 +125,6 @@ export default function GastoForm({
       return;
     }
 
-    if (!metodoPago) {
-      setErrorMessage("Debes seleccionar un método de pago.");
-      return;
-    }
-
     const selectedAlm = almacenes.find(a => a.id === almacenId);
     const almacenNombre = selectedAlm ? selectedAlm.nombre : undefined;
 
@@ -142,7 +137,7 @@ export default function GastoForm({
           monto: numMonto,
           fecha: parsedFecha,
           fecha_str: fecha,
-          metodo_pago: metodoPago as MetodoPagoGasto,
+          metodo_pago: metodoPago.trim() ? (metodoPago.trim() as MetodoPagoGasto) : undefined,
           almacen_id: almacenId ? almacenId : undefined,
           almacen_nombre: almacenNombre,
           proveedor: proveedor.trim() ? proveedor.trim() : undefined,
@@ -156,12 +151,12 @@ export default function GastoForm({
           monto: numMonto,
           fecha: parsedFecha,
           fecha_str: fecha,
-          metodo_pago: metodoPago as MetodoPagoGasto,
-          almacen_id: almacenId ? almacenId : undefined,
-          almacen_nombre: almacenNombre,
-          proveedor: proveedor.trim() ? proveedor.trim() : undefined,
-          referencia: referencia.trim() ? referencia.trim() : undefined,
-          notas: notas.trim() ? notas.trim() : undefined
+          metodo_pago: metodoPago.trim() ? (metodoPago.trim() as MetodoPagoGasto) : "",
+          almacen_id: almacenId ? almacenId : "",
+          almacen_nombre: almacenNombre ? almacenNombre : "",
+          proveedor: proveedor.trim(),
+          referencia: referencia.trim(),
+          notas: notas.trim()
         });
       }
 
@@ -378,7 +373,7 @@ export default function GastoForm({
                 htmlFor="gasto-metodo-pago"
                 className="block text-xs font-semibold uppercase tracking-wider text-[#475569] dark:text-[#94A3B8] mb-1.5"
               >
-                Método de Pago <span className="text-rose-500 font-bold">*</span>
+                Método de Pago <span className="text-[#94A3B8] font-normal lowercase">(opcional)</span>
               </label>
               <div className="relative">
                 <select
@@ -387,7 +382,7 @@ export default function GastoForm({
                   onChange={(e) => setMetodoPago(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] text-[#172033] dark:text-[#F8FAFC] text-sm focus:outline-none focus:ring-2 focus:ring-[#059669] focus:border-transparent transition-all cursor-pointer"
                 >
-                  <option value="">-- Seleccionar método de pago --</option>
+                  <option value="">-- Seleccionar método de pago (opcional) --</option>
                   {METODOS_PAGO_GASTO.map((met) => (
                     <option key={met} value={met}>
                       {met}

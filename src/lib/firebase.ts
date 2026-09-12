@@ -23,7 +23,8 @@ import {
   orderBy,
   limit,
   startAfter,
-  Timestamp
+  Timestamp,
+  deleteField
 } from "firebase/firestore";
 import { 
   getAuth, 
@@ -3612,23 +3613,24 @@ export const firestoreService = {
 
         const list: Gasto[] = itemsToProcess.map(d => {
           const data = d.data();
-          return {
+          const item: Gasto = {
             id: d.id,
             concepto: data.concepto || "",
             categoria: data.categoria || "Otros",
             monto: Number(data.monto) || 0,
             fecha: data.fecha ? (data.fecha.toDate ? data.fecha.toDate() : new Date(data.fecha)) : new Date(),
             fecha_str: data.fecha_str || getLocalDateString(data.fecha || new Date()),
-            metodo_pago: data.metodo_pago || "Efectivo",
-            almacen_id: data.almacen_id || undefined,
-            almacen_nombre: data.almacen_nombre || undefined,
-            proveedor: data.proveedor || undefined,
-            referencia: data.referencia || undefined,
-            notas: data.notas || undefined,
             creado_por: data.creado_por || "sistema",
             creado_at: data.creado_at ? (data.creado_at.toDate ? data.creado_at.toDate() : data.creado_at) : new Date(),
             actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date()
           };
+          if (data.metodo_pago) item.metodo_pago = data.metodo_pago;
+          if (data.almacen_id) item.almacen_id = data.almacen_id;
+          if (data.almacen_nombre) item.almacen_nombre = data.almacen_nombre;
+          if (data.proveedor) item.proveedor = data.proveedor;
+          if (data.referencia) item.referencia = data.referencia;
+          if (data.notas) item.notas = data.notas;
+          return item;
         });
 
         return {
@@ -3675,23 +3677,24 @@ export const firestoreService = {
         const docSnap = await getDoc(doc(realDb, "gastos", id));
         if (docSnap.exists()) {
           const data = docSnap.data();
-          return {
+          const item: Gasto = {
             id: docSnap.id,
             concepto: data.concepto || "",
             categoria: data.categoria || "Otros",
             monto: Number(data.monto) || 0,
             fecha: data.fecha ? (data.fecha.toDate ? data.fecha.toDate() : new Date(data.fecha)) : new Date(),
             fecha_str: data.fecha_str || getLocalDateString(data.fecha || new Date()),
-            metodo_pago: data.metodo_pago || "Efectivo",
-            almacen_id: data.almacen_id || undefined,
-            almacen_nombre: data.almacen_nombre || undefined,
-            proveedor: data.proveedor || undefined,
-            referencia: data.referencia || undefined,
-            notas: data.notas || undefined,
             creado_por: data.creado_por || "sistema",
             creado_at: data.creado_at ? (data.creado_at.toDate ? data.creado_at.toDate() : data.creado_at) : new Date(),
             actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date()
           };
+          if (data.metodo_pago) item.metodo_pago = data.metodo_pago;
+          if (data.almacen_id) item.almacen_id = data.almacen_id;
+          if (data.almacen_nombre) item.almacen_nombre = data.almacen_nombre;
+          if (data.proveedor) item.proveedor = data.proveedor;
+          if (data.referencia) item.referencia = data.referencia;
+          if (data.notas) item.notas = data.notas;
+          return item;
         }
         return null;
       } catch (err: any) {
@@ -3718,7 +3721,7 @@ export const firestoreService = {
     monto: number;
     fecha: Date;
     fecha_str?: string;
-    metodo_pago: MetodoPagoGasto | string;
+    metodo_pago?: MetodoPagoGasto | string;
     almacen_id?: string;
     almacen_nombre?: string;
     proveedor?: string;
@@ -3740,9 +3743,6 @@ export const firestoreService = {
     if (!gastoData.fecha || isNaN(gastoData.fecha.getTime())) {
       throw new Error("La fecha del gasto es obligatoria.");
     }
-    if (!gastoData.metodo_pago) {
-      throw new Error("El método de pago es obligatorio.");
-    }
 
     const fecha_str = gastoData.fecha_str || getLocalDateString(gastoData.fecha);
     const userEmail = user?.email || "sistema@dorsalclub.com";
@@ -3753,12 +3753,14 @@ export const firestoreService = {
       monto,
       fecha: isConfigured && realDb ? Timestamp.fromDate(gastoData.fecha) : gastoData.fecha,
       fecha_str,
-      metodo_pago: gastoData.metodo_pago,
       creado_por: userEmail,
       creado_at: isConfigured && realDb ? Timestamp.now() : new Date(),
       actualizado_at: isConfigured && realDb ? Timestamp.now() : new Date()
     };
 
+    if (gastoData.metodo_pago && typeof gastoData.metodo_pago === "string" && gastoData.metodo_pago.trim()) {
+      payload.metodo_pago = gastoData.metodo_pago.trim();
+    }
     if (gastoData.almacen_id && gastoData.almacen_id.trim()) {
       payload.almacen_id = gastoData.almacen_id.trim();
     }
@@ -3787,16 +3789,16 @@ export const firestoreService = {
           monto,
           fecha: gastoData.fecha,
           fecha_str,
-          metodo_pago: gastoData.metodo_pago,
-          almacen_id: payload.almacen_id,
-          almacen_nombre: payload.almacen_nombre,
-          proveedor: payload.proveedor,
-          referencia: payload.referencia,
-          notas: payload.notas,
           creado_por: userEmail,
           creado_at: new Date(),
           actualizado_at: new Date()
         };
+        if (payload.metodo_pago) createdGasto.metodo_pago = payload.metodo_pago;
+        if (payload.almacen_id) createdGasto.almacen_id = payload.almacen_id;
+        if (payload.almacen_nombre) createdGasto.almacen_nombre = payload.almacen_nombre;
+        if (payload.proveedor) createdGasto.proveedor = payload.proveedor;
+        if (payload.referencia) createdGasto.referencia = payload.referencia;
+        if (payload.notas) createdGasto.notas = payload.notas;
 
         return createdGasto;
       } catch (err: any) {
@@ -3813,16 +3815,16 @@ export const firestoreService = {
       monto,
       fecha: gastoData.fecha,
       fecha_str,
-      metodo_pago: gastoData.metodo_pago,
-      almacen_id: payload.almacen_id,
-      almacen_nombre: payload.almacen_nombre,
-      proveedor: payload.proveedor,
-      referencia: payload.referencia,
-      notas: payload.notas,
       creado_por: userEmail,
       creado_at: new Date(),
       actualizado_at: new Date()
     };
+    if (payload.metodo_pago) createdLocal.metodo_pago = payload.metodo_pago;
+    if (payload.almacen_id) createdLocal.almacen_id = payload.almacen_id;
+    if (payload.almacen_nombre) createdLocal.almacen_nombre = payload.almacen_nombre;
+    if (payload.proveedor) createdLocal.proveedor = payload.proveedor;
+    if (payload.referencia) createdLocal.referencia = payload.referencia;
+    if (payload.notas) createdLocal.notas = payload.notas;
 
     const list = getLocalStorageItem<Gasto[]>("gastos", []);
     list.unshift(createdLocal);
@@ -3838,21 +3840,22 @@ export const firestoreService = {
     monto?: number;
     fecha?: Date;
     fecha_str?: string;
-    metodo_pago?: MetodoPagoGasto | string;
-    almacen_id?: string;
-    almacen_nombre?: string;
-    proveedor?: string;
-    referencia?: string;
-    notas?: string;
+    metodo_pago?: MetodoPagoGasto | string | null;
+    almacen_id?: string | null;
+    almacen_nombre?: string | null;
+    proveedor?: string | null;
+    referencia?: string | null;
+    notas?: string | null;
   }): Promise<void> => {
     if (!id) throw new Error("ID de gasto no proporcionado.");
 
     const updatePayload: any = {
       actualizado_at: isConfigured && realDb ? Timestamp.now() : new Date()
     };
+    const fieldsToDeleteInLocal: string[] = [];
 
     if (gastoData.concepto !== undefined) {
-      const cleanConcepto = gastoData.concepto.trim();
+      const cleanConcepto = (gastoData.concepto || "").trim();
       if (!cleanConcepto) throw new Error("El concepto no puede estar vacío.");
       updatePayload.concepto = cleanConcepto;
     }
@@ -3870,24 +3873,81 @@ export const firestoreService = {
       updatePayload.fecha = isConfigured && realDb ? Timestamp.fromDate(gastoData.fecha) : gastoData.fecha;
       updatePayload.fecha_str = gastoData.fecha_str || getLocalDateString(gastoData.fecha);
     }
+
+    // Método de pago (opcional)
     if (gastoData.metodo_pago !== undefined) {
-      if (!gastoData.metodo_pago) throw new Error("El método de pago no puede estar vacío.");
-      updatePayload.metodo_pago = gastoData.metodo_pago;
+      const cleanMetodo = typeof gastoData.metodo_pago === "string" ? gastoData.metodo_pago.trim() : "";
+      if (cleanMetodo) {
+        updatePayload.metodo_pago = cleanMetodo;
+      } else {
+        if (isConfigured && realDb) {
+          updatePayload.metodo_pago = deleteField();
+        }
+        fieldsToDeleteInLocal.push("metodo_pago");
+      }
     }
+
+    // Almacén y nombre de almacén
+    // Si se elimina el almacén, elimina conjuntamente almacen_id y almacen_nombre
     if (gastoData.almacen_id !== undefined) {
-      updatePayload.almacen_id = gastoData.almacen_id ? gastoData.almacen_id.trim() : null;
+      const cleanAlmId = typeof gastoData.almacen_id === "string" ? gastoData.almacen_id.trim() : "";
+      if (cleanAlmId) {
+        updatePayload.almacen_id = cleanAlmId;
+        const cleanNombre = typeof gastoData.almacen_nombre === "string" ? gastoData.almacen_nombre.trim() : "";
+        if (cleanNombre) {
+          updatePayload.almacen_nombre = cleanNombre;
+        } else {
+          if (isConfigured && realDb) {
+            updatePayload.almacen_nombre = deleteField();
+          }
+          fieldsToDeleteInLocal.push("almacen_nombre");
+        }
+      } else {
+        if (isConfigured && realDb) {
+          updatePayload.almacen_id = deleteField();
+          updatePayload.almacen_nombre = deleteField();
+        }
+        fieldsToDeleteInLocal.push("almacen_id", "almacen_nombre");
+      }
     }
-    if (gastoData.almacen_nombre !== undefined) {
-      updatePayload.almacen_nombre = gastoData.almacen_nombre ? gastoData.almacen_nombre.trim() : null;
-    }
+
+    // Proveedor (opcional)
     if (gastoData.proveedor !== undefined) {
-      updatePayload.proveedor = gastoData.proveedor ? gastoData.proveedor.trim() : null;
+      const cleanVal = typeof gastoData.proveedor === "string" ? gastoData.proveedor.trim() : "";
+      if (cleanVal) {
+        updatePayload.proveedor = cleanVal;
+      } else {
+        if (isConfigured && realDb) {
+          updatePayload.proveedor = deleteField();
+        }
+        fieldsToDeleteInLocal.push("proveedor");
+      }
     }
+
+    // Referencia (opcional)
     if (gastoData.referencia !== undefined) {
-      updatePayload.referencia = gastoData.referencia ? gastoData.referencia.trim() : null;
+      const cleanVal = typeof gastoData.referencia === "string" ? gastoData.referencia.trim() : "";
+      if (cleanVal) {
+        updatePayload.referencia = cleanVal;
+      } else {
+        if (isConfigured && realDb) {
+          updatePayload.referencia = deleteField();
+        }
+        fieldsToDeleteInLocal.push("referencia");
+      }
     }
+
+    // Notas (opcional)
     if (gastoData.notas !== undefined) {
-      updatePayload.notas = gastoData.notas ? gastoData.notas.trim() : null;
+      const cleanVal = typeof gastoData.notas === "string" ? gastoData.notas.trim() : "";
+      if (cleanVal) {
+        updatePayload.notas = cleanVal;
+      } else {
+        if (isConfigured && realDb) {
+          updatePayload.notas = deleteField();
+        }
+        fieldsToDeleteInLocal.push("notas");
+      }
     }
 
     if (isConfigured && realDb) {
@@ -3904,8 +3964,14 @@ export const firestoreService = {
     const list = getLocalStorageItem<Gasto[]>("gastos", []);
     const idx = list.findIndex(g => g.id === id);
     if (idx !== -1) {
-      const existing = list[idx];
+      const existing = { ...list[idx] };
       const parsedUpdate: any = { ...updatePayload };
+
+      for (const field of fieldsToDeleteInLocal) {
+        delete (existing as any)[field];
+        delete parsedUpdate[field];
+      }
+
       if (updatePayload.fecha && typeof updatePayload.fecha.toDate === "function") {
         parsedUpdate.fecha = updatePayload.fecha.toDate();
       }

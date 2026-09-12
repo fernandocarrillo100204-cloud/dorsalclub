@@ -314,7 +314,7 @@ export interface Gasto {
     nanoseconds: number;
   } | Date;
   fecha_str: string; // YYYY-MM-DD
-  metodo_pago: MetodoPagoGasto | string;
+  metodo_pago?: MetodoPagoGasto | string;
   almacen_id?: string;
   almacen_nombre?: string;
   proveedor?: string;

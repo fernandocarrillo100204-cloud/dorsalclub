@@ -154,8 +154,12 @@ export default function GastosHistorial({
         }
       }
       // Payment method
-      if (selectedMetodoPago !== "all" && g.metodo_pago !== selectedMetodoPago) {
-        return false;
+      if (selectedMetodoPago !== "all") {
+        if (selectedMetodoPago === "sin_especificar") {
+          if (g.metodo_pago) return false;
+        } else if (g.metodo_pago !== selectedMetodoPago) {
+          return false;
+        }
       }
       // Date range
       if (startDate && g.fecha_str < startDate) {
@@ -331,7 +335,7 @@ export default function GastosHistorial({
             <input
               type="text"
               id="filtro-gasto-buscar"
-              placeholder="Buscar concepto, proveedor, folio..."
+              placeholder="Buscar en registros cargados…"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9 pr-3 py-2 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] text-xs sm:text-sm text-[#172033] dark:text-[#F8FAFC] placeholder-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#059669] focus:border-transparent transition-all"
@@ -378,6 +382,7 @@ export default function GastosHistorial({
                   {m}
                 </option>
               ))}
+              <option value="sin_especificar">Sin especificar</option>
             </select>
           </div>
 
@@ -458,8 +463,17 @@ export default function GastosHistorial({
       {/* Filtered Summary strip */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-[#64748B] dark:text-[#94A3B8]">
         <div>
-          Mostrando <span className="font-semibold text-[#172033] dark:text-[#F8FAFC]">{filteredGastos.length}</span> {filteredGastos.length === 1 ? "gasto" : "gastos"}
-          {hasActiveFilters && " (filtrados)"}
+          {hasActiveFilters ? (
+            <span>
+              Mostrando <strong className="font-semibold text-[#172033] dark:text-[#F8FAFC]">{filteredGastos.length}</strong> de{" "}
+              <strong className="font-semibold text-[#172033] dark:text-[#F8FAFC]">{gastos.length}</strong> registros cargados (filtrados)
+            </span>
+          ) : (
+            <span>
+              Mostrando <strong className="font-semibold text-[#172033] dark:text-[#F8FAFC]">{filteredGastos.length}</strong> de{" "}
+              <strong className="font-semibold text-[#172033] dark:text-[#F8FAFC]">{gastos.length}</strong> registros cargados
+            </span>
+          )}
         </div>
         <div className="flex items-center space-x-1.5">
           <span>Total en vista:</span>
@@ -516,14 +530,27 @@ export default function GastosHistorial({
                           : "Comienza registrando el primer egreso operativo de la empresa."}
                       </p>
                       {hasActiveFilters ? (
-                        <button
-                          type="button"
-                          onClick={handleResetFilters}
-                          className="mt-2 inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-[#059669] hover:text-[#047857] hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg transition-colors"
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                          <span>Restablecer filtros</span>
-                        </button>
+                        <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
+                          <button
+                            type="button"
+                            onClick={handleResetFilters}
+                            className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-[#059669] hover:text-[#047857] hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            <span>Restablecer filtros</span>
+                          </button>
+                          {hasMore && (
+                            <button
+                              type="button"
+                              onClick={handleLoadMore}
+                              disabled={loadingMore}
+                              className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-[#172033] dark:text-[#F8FAFC] border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                              <ChevronDown className="h-3.5 w-3.5 text-[#64748B] dark:text-[#94A3B8]" />
+                              <span>Cargar más de Firestore</span>
+                            </button>
+                          )}
+                        </div>
                       ) : (
                         <button
                           type="button"
@@ -569,7 +596,7 @@ export default function GastosHistorial({
 
                     {/* Método de Pago */}
                     <td className="py-3 px-4 text-xs text-[#64748B] dark:text-[#94A3B8] whitespace-nowrap">
-                      {gasto.metodo_pago}
+                      {gasto.metodo_pago || <span className="italic text-slate-400 dark:text-slate-500">Sin especificar</span>}
                     </td>
 
                     {/* Almacén */}
@@ -638,14 +665,18 @@ export default function GastosHistorial({
         <div className="px-4 py-3 border-t border-[#E2E8F0] dark:border-[#263449] bg-slate-50/75 dark:bg-[#182235]/50 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#64748B] dark:text-[#94A3B8]">
           <div className="flex items-center space-x-2">
             <span>
-              Mostrando <strong className="text-[#172033] dark:text-[#F8FAFC]">{filteredGastos.length}</strong> de{" "}
-              <strong className="text-[#172033] dark:text-[#F8FAFC]">{gastos.length}</strong> {gastos.length === 1 ? "registro cargado" : "registros cargados"}
+              {hasActiveFilters ? (
+                <>
+                  Mostrando <strong className="text-[#172033] dark:text-[#F8FAFC]">{filteredGastos.length}</strong> de{" "}
+                  <strong className="text-[#172033] dark:text-[#F8FAFC]">{gastos.length}</strong> registros cargados (filtrados)
+                </>
+              ) : (
+                <>
+                  Mostrando <strong className="text-[#172033] dark:text-[#F8FAFC]">{filteredGastos.length}</strong> de{" "}
+                  <strong className="text-[#172033] dark:text-[#F8FAFC]">{gastos.length}</strong> registros cargados
+                </>
+              )}
             </span>
-            {hasActiveFilters && filteredGastos.length !== gastos.length && (
-              <span className="text-slate-400 dark:text-slate-500">
-                (filtrados en memoria)
-              </span>
-            )}
           </div>
 
           <div className="flex items-center space-x-3">
@@ -746,7 +777,7 @@ export default function GastosHistorial({
                 <div>
                   <span className="text-[10px] font-medium text-[#64748B] dark:text-[#94A3B8] uppercase">Método de Pago</span>
                   <p className="font-medium text-[#172033] dark:text-[#F8FAFC] mt-0.5">
-                    {selectedGastoDetail.metodo_pago}
+                    {selectedGastoDetail.metodo_pago || <span className="italic text-slate-400 dark:text-slate-500">Sin especificar</span>}
                   </p>
                 </div>
 
