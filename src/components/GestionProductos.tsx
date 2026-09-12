@@ -76,21 +76,6 @@ function generateBaseId(brand: string, name: string): string {
   return `${cleanBrand}-${cleanName}-${rand}`;
 }
 
-// Generate suggested SKU helper
-function generateSku(marca: string, nombre: string, color: string, talla: string): string {
-  const pMarca = (marca || "DC").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3) || "DC";
-  const pNombre = (nombre || "PROD")
-    .toUpperCase()
-    .split(/\s+/)
-    .map(w => w.slice(0, 3))
-    .join("")
-    .slice(0, 6) || "PRD";
-  const pColor = (color || "GEN").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3) || "GEN";
-  const pTalla = (talla || "U").toUpperCase().replace(/[^A-Z0-9.]/g, "") || "U";
-  
-  return `${pMarca}-${pNombre}-${pColor}-${pTalla}`;
-}
-
 export default function GestionProductos({ 
   almacenes: propAlmacenes, 
   productos: propProductos,
@@ -136,19 +121,32 @@ export default function GestionProductos({
   const [editingBaseId, setEditingBaseId] = useState<string | null>(null);
   const [editingSingleProductId, setEditingSingleProductId] = useState<string | null>(null);
   const [formNombre, setFormNombre] = useState("");
-  const [formMarca, setFormMarca] = useState("dorsalclub");
-  const [formCategoria, setFormCategoria] = useState("Camisetas");
-  const [formTipoTalla, setFormTipoTalla] = useState<"ropa" | "calzado" | "unica">("ropa");
+  const [formMarca, setFormMarca] = useState("");
+  const [formCategoria, setFormCategoria] = useState("");
+  const [formTipoTalla, setFormTipoTalla] = useState<"" | "ropa" | "calzado" | "unica">("");
   const [formUnidad, setFormUnidad] = useState("pieza");
+  const [formSubmitted, setFormSubmitted] = useState(false);
+
+  const createEmptyVariantRow = (currentTipoTalla: string = ""): VariantFormRow => ({
+    id: Math.random().toString(36).substring(2, 9),
+    color: "",
+    talla: currentTipoTalla === "unica" ? "Única" : "",
+    sku: "",
+    codigo_barras: "",
+    precio_venta_sugerido: "",
+    stock_minimo_almacenes: {},
+    stock_minimo: "",
+    activo: false
+  });
   
   // Variants rows in form
-  const [variantRows, setVariantRows] = useState<VariantFormRow[]>([]);
+  const [variantRows, setVariantRows] = useState<VariantFormRow[]>([createEmptyVariantRow()]);
 
   // Matrix generation drawer inside form
   const [matrixColors, setMatrixColors] = useState<string[]>([]);
   const [matrixSizes, setMatrixSizes] = useState<string[]>([]);
-  const [matrixPrice, setMatrixPrice] = useState<number | string>(799);
-  const [matrixMinStock, setMatrixMinStock] = useState<number | string>(3);
+  const [matrixPrice, setMatrixPrice] = useState<number | string>("");
+  const [matrixMinStock, setMatrixMinStock] = useState<number | string>("");
   const [isMatrixOpen, setIsMatrixOpen] = useState(false);
 
   // Form submission feedback
@@ -300,41 +298,34 @@ export default function GestionProductos({
     }, 0);
   };
 
-  // Helper to open creation modal
-  const handleOpenCreateModal = () => {
+  // Helper to completely reset form to empty state
+  const resetFormToEmpty = () => {
     setEditingBaseId(null);
     setEditingSingleProductId(null);
     setFormNombre("");
-    setFormMarca(catalogMarcas[0]?.nombre || "dorsalclub");
-    setFormCategoria(catalogCategorias[0]?.nombre || "Camisetas");
-    setFormTipoTalla("ropa");
+    setFormMarca("");
+    setFormCategoria("");
+    setFormTipoTalla("");
     setFormUnidad("pieza");
+    setFormSubmitted(false);
     setFormErrors({});
     setGeneralError(null);
     setIsMatrixOpen(false);
+    setMatrixColors([]);
+    setMatrixSizes([]);
+    setMatrixPrice("");
+    setMatrixMinStock("");
+    setVariantRows([createEmptyVariantRow()]);
+  };
 
-    // Initial default variant
-    const defaultColor = catalogColores[0]?.nombre || "Negro Lavado";
-    const defaultTalla = catalogTallasRopa[0]?.nombre || "M";
-    const initialSku = generateSku("dorsalclub", "Modelo", defaultColor, defaultTalla);
+  const handleCloseModal = () => {
+    setIsFormOpen(false);
+    resetFormToEmpty();
+  };
 
-    const initialMinMap: Record<string, number | string> = {};
-    almacenes.forEach(alm => {
-      initialMinMap[alm.id] = 3;
-    });
-
-    setVariantRows([{
-      id: Math.random().toString(36).substring(2, 9),
-      color: defaultColor,
-      talla: defaultTalla,
-      sku: initialSku,
-      codigo_barras: "",
-      precio_venta_sugerido: 799,
-      stock_minimo_almacenes: initialMinMap,
-      stock_minimo: 3,
-      activo: true
-    }]);
-
+  // Helper to open creation modal
+  const handleOpenCreateModal = () => {
+    resetFormToEmpty();
     setIsFormOpen(true);
   };
 
@@ -347,60 +338,43 @@ export default function GestionProductos({
     setFormCategoria(group.categoria);
     setFormTipoTalla(group.tipo_talla);
     setFormUnidad(group.unidad);
+    setFormSubmitted(false);
     setFormErrors({});
     setGeneralError(null);
     setIsMatrixOpen(false);
+    setMatrixColors([]);
+    setMatrixSizes([]);
+    setMatrixPrice("");
+    setMatrixMinStock("");
 
     const rows: VariantFormRow[] = group.variants.map(v => {
       const minMap: Record<string, number | string> = {};
       almacenes.forEach(alm => {
-        minMap[alm.id] = v.stock_minimo_almacenes?.[alm.id] ?? v.stock_minimo ?? 3;
+        minMap[alm.id] = v.stock_minimo_almacenes?.[alm.id] ?? v.stock_minimo ?? "";
       });
 
       return {
         id: v.id || v.sku,
-        color: v.color || "Sin especificar",
-        talla: v.talla || "Sin especificar",
+        color: v.color || "",
+        talla: v.talla || "",
         sku: v.sku,
         codigo_barras: v.codigo_barras || "",
-        precio_venta_sugerido: v.precio_venta_sugerido ?? 0,
+        precio_venta_sugerido: v.precio_venta_sugerido ?? "",
         stock_minimo_almacenes: minMap,
-        stock_minimo: v.stock_minimo ?? 3,
+        stock_minimo: v.stock_minimo ?? "",
         activo: v.activo !== false
       };
     });
 
-    setVariantRows(rows);
+    setVariantRows(rows.length > 0 ? rows : [createEmptyVariantRow(group.tipo_talla)]);
     setIsFormOpen(true);
   };
 
-  // Add single variant row to form
+  // Add single variant row to form - creates a completely empty row
   const handleAddVariantRow = () => {
-    const availableColor = catalogColores[0]?.nombre || "Negro";
-    const availableTalla = formTipoTalla === "calzado" 
-      ? (catalogTallasCalzado[0]?.nombre || "27") 
-      : (catalogTallasRopa[0]?.nombre || "M");
-    
-    const suggestedSku = generateSku(formMarca, formNombre, availableColor, availableTalla);
-
-    const minMap: Record<string, number | string> = {};
-    almacenes.forEach(alm => {
-      minMap[alm.id] = 3;
-    });
-
     setVariantRows(prev => [
       ...prev,
-      {
-        id: Math.random().toString(36).substring(2, 9),
-        color: availableColor,
-        talla: availableTalla,
-        sku: suggestedSku,
-        codigo_barras: "",
-        precio_venta_sugerido: variantRows[0]?.precio_venta_sugerido || 799,
-        stock_minimo_almacenes: minMap,
-        stock_minimo: 3,
-        activo: true
-      }
+      createEmptyVariantRow(formTipoTalla)
     ]);
   };
 
@@ -413,24 +387,15 @@ export default function GestionProductos({
     setVariantRows(prev => prev.filter(r => r.id !== rowId));
   };
 
-  // Update variant row field
+  // Update variant row field - no automatic SKU generation
   const handleUpdateVariantField = (rowId: string, field: keyof VariantFormRow, value: any) => {
     setVariantRows(prev => prev.map(row => {
       if (row.id !== rowId) return row;
-      const updated = { ...row, [field]: value };
-      
-      // Auto-update SKU suggestion if color or talla changes and user hasn't heavily customized SKU
-      if (field === "color" || field === "talla") {
-        if (!editingBaseId) {
-          const autoSku = generateSku(formMarca, formNombre, updated.color, updated.talla);
-          updated.sku = autoSku;
-        }
-      }
-      return updated;
+      return { ...row, [field]: value };
     }));
   };
 
-  // Apply quick matrix generation
+  // Apply quick matrix generation - leaves SKU empty for manual entry
   const handleGenerateMatrix = () => {
     if (matrixColors.length === 0 || matrixSizes.length === 0) {
       setGeneralError("Selecciona al menos un color y una talla para generar combinaciones.");
@@ -438,24 +403,19 @@ export default function GestionProductos({
     }
 
     const newRows: VariantFormRow[] = [];
-    const minMap: Record<string, number | string> = {};
-    almacenes.forEach(alm => {
-      minMap[alm.id] = matrixMinStock;
-    });
 
     matrixColors.forEach(col => {
       matrixSizes.forEach(sz => {
-        const sku = generateSku(formMarca, formNombre, col, sz);
         newRows.push({
           id: Math.random().toString(36).substring(2, 9),
           color: col,
           talla: sz,
-          sku: sku,
+          sku: "", // Manual capture required, completely empty
           codigo_barras: "",
-          precio_venta_sugerido: Number(matrixPrice) || 0,
-          stock_minimo_almacenes: { ...minMap },
-          stock_minimo: Number(matrixMinStock) || 0,
-          activo: true
+          precio_venta_sugerido: matrixPrice,
+          stock_minimo_almacenes: {},
+          stock_minimo: matrixMinStock,
+          activo: false
         });
       });
     });
@@ -465,33 +425,82 @@ export default function GestionProductos({
     setGeneralError(null);
   };
 
+  // Check if all required fields are complete to enable the button
+  const isFormValid = useMemo(() => {
+    if (!formNombre.trim()) return false;
+    if (!formMarca.trim()) return false;
+    if (!formCategoria.trim()) return false;
+    if (!formTipoTalla.trim()) return false;
+    if (variantRows.length === 0) return false;
+
+    for (const row of variantRows) {
+      if (!row.color || !row.color.trim()) return false;
+      if (formTipoTalla !== "unica" && (!row.talla || !row.talla.trim())) return false;
+      if (!row.sku || !row.sku.trim()) return false;
+      if (row.precio_venta_sugerido === "" || isNaN(Number(row.precio_venta_sugerido)) || Number(row.precio_venta_sugerido) < 0) return false;
+      if (row.stock_minimo === "" || isNaN(Number(row.stock_minimo)) || Number(row.stock_minimo) < 0) return false;
+    }
+
+    return true;
+  }, [formNombre, formMarca, formCategoria, formTipoTalla, variantRows]);
+
   // Form submission: Validate and save batch
   const handleSubmitForm = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormSubmitted(true);
     setGeneralError(null);
     setFormErrors({});
 
+    const errors: Record<string, string> = {};
     if (!formNombre.trim()) {
-      setFormErrors(prev => ({ ...prev, nombre: "El nombre del producto es obligatorio" }));
+      errors.nombre = "El nombre comercial del modelo es obligatorio.";
+    }
+    if (!formMarca.trim()) {
+      errors.marca = "Debes seleccionar una marca.";
+    }
+    if (!formCategoria.trim()) {
+      errors.categoria = "Debes seleccionar una categoría.";
+    }
+    if (!formTipoTalla.trim()) {
+      errors.tipo_talla = "Debes seleccionar el tipo de talla.";
+    }
+
+    if (variantRows.length === 0) {
+      setGeneralError("El producto debe tener al menos una variante.");
+      setFormErrors(errors);
       return;
     }
 
     // Validation for variants
     const skusSet = new Set<string>();
     const comboSet = new Set<string>();
-    let hasDupes = false;
 
     for (let i = 0; i < variantRows.length; i++) {
       const row = variantRows[i];
+      const rowNum = i + 1;
+
+      if (!row.color.trim()) {
+        setGeneralError(`La variante en la fila ${rowNum} no tiene un color seleccionado.`);
+        setFormErrors(errors);
+        return;
+      }
+
+      if (formTipoTalla !== "unica" && !row.talla.trim()) {
+        setGeneralError(`La variante en la fila ${rowNum} no tiene una talla seleccionada.`);
+        setFormErrors(errors);
+        return;
+      }
+
       const cleanSku = (row.sku || "").trim().toUpperCase();
-      
       if (!cleanSku) {
-        setGeneralError(`La variante en la fila ${i + 1} no tiene un SKU válido.`);
+        setGeneralError(`La variante en la fila ${rowNum} no tiene un SKU válido.`);
+        setFormErrors(errors);
         return;
       }
 
       if (skusSet.has(cleanSku)) {
         setGeneralError(`SKU duplicado "${cleanSku}" detectado en múltiples variantes.`);
+        setFormErrors(errors);
         return;
       }
       skusSet.add(cleanSku);
@@ -502,16 +511,37 @@ export default function GestionProductos({
         // If not editing this same product variant, it's a conflict
         if (!editingBaseId || existingWithSameSku.producto_base_id !== editingBaseId) {
           setGeneralError(`El SKU "${cleanSku}" ya está registrado en otro producto.`);
+          setFormErrors(errors);
           return;
         }
       }
 
-      const combo = `${row.color.trim().toLowerCase()}_${row.talla.trim().toLowerCase()}`;
+      const comboTalla = formTipoTalla === "unica" ? "unica" : row.talla.trim().toLowerCase();
+      const combo = `${row.color.trim().toLowerCase()}_${comboTalla}`;
       if (comboSet.has(combo)) {
-        setGeneralError(`Combinación de color "${row.color}" y talla "${row.talla}" repetida.`);
+        setGeneralError(`Combinación de color "${row.color}" y talla "${row.talla || 'Única'}" repetida.`);
+        setFormErrors(errors);
         return;
       }
       comboSet.add(combo);
+
+      if (row.precio_venta_sugerido === "" || isNaN(Number(row.precio_venta_sugerido)) || Number(row.precio_venta_sugerido) < 0) {
+        setGeneralError(`La variante en la fila ${rowNum} debe tener un precio válido en MXN.`);
+        setFormErrors(errors);
+        return;
+      }
+
+      if (row.stock_minimo === "" || isNaN(Number(row.stock_minimo)) || Number(row.stock_minimo) < 0) {
+        setGeneralError(`La variante en la fila ${rowNum} debe tener un stock mínimo válido.`);
+        setFormErrors(errors);
+        return;
+      }
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      setGeneralError("Por favor completa todos los campos obligatorios del modelo.");
+      return;
     }
 
     setSubmitLoading(true);
@@ -519,24 +549,32 @@ export default function GestionProductos({
       const baseId = editingBaseId || generateBaseId(formMarca, formNombre);
 
       const productsToSave: Omit<Producto, "id">[] = variantRows.map(row => {
-        const minStockNum = Number(row.stock_minimo) || 0;
-        const priceNum = Number(row.precio_venta_sugerido) || 0;
+        const minStockNum = Number(row.stock_minimo);
+        const priceNum = Number(row.precio_venta_sugerido);
+
+        const minStockMap: Record<string, number> = {};
+        almacenes.forEach(alm => {
+          const customVal = row.stock_minimo_almacenes?.[alm.id];
+          minStockMap[alm.id] = customVal !== undefined && customVal !== "" && !isNaN(Number(customVal))
+            ? Number(customVal)
+            : minStockNum;
+        });
 
         return {
           producto_base_id: baseId,
           nombre: formNombre.trim(),
           marca: formMarca.trim(),
           categoria: formCategoria.trim(),
-          tipo_talla: formTipoTalla,
-          unidad: formUnidad.trim(),
+          tipo_talla: (formTipoTalla as "ropa" | "calzado" | "unica") || "ropa",
+          unidad: formUnidad.trim() || "pieza",
           color: row.color.trim(),
-          talla: row.talla.trim(),
+          talla: formTipoTalla === "unica" ? "Única" : row.talla.trim(),
           sku: row.sku.trim().toUpperCase(),
           codigo_barras: (row.codigo_barras || "").trim(),
           precio_venta_sugerido: priceNum >= 0 ? priceNum : 0,
-          stock_minimo: minStockNum,
-          stock_minimo_almacenes: row.stock_minimo_almacenes as Record<string, number>,
-          activo: row.activo
+          stock_minimo: minStockNum >= 0 ? minStockNum : 0,
+          stock_minimo_almacenes: minStockMap,
+          activo: Boolean(row.activo)
         };
       });
 
@@ -556,7 +594,7 @@ export default function GestionProductos({
       }
 
       setIsFormOpen(false);
-      setEditingBaseId(null);
+      resetFormToEmpty();
       
       // Prompt user if they want to register initial stock for the first created variant
       if (!editingBaseId && productsToSave.length > 0) {
@@ -1003,7 +1041,7 @@ export default function GestionProductos({
                 </div>
               </div>
               <button
-                onClick={() => setIsFormOpen(false)}
+                onClick={handleCloseModal}
                 className="p-2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800"
               >
                 <X className="w-5 h-5" />
@@ -1034,14 +1072,18 @@ export default function GestionProductos({
                     </label>
                     <input
                       type="text"
-                      required
                       placeholder="Ej. Heavyweight Boxy Tee, Cargo Pants..."
                       value={formNombre}
-                      onChange={(e) => setFormNombre(e.target.value)}
-                      className="w-full px-3.5 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white text-zinc-900 dark:text-white font-medium"
+                      onChange={(e) => {
+                        setFormNombre(e.target.value);
+                        if (formErrors.nombre) setFormErrors(prev => ({ ...prev, nombre: "" }));
+                      }}
+                      className={`w-full px-3.5 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border ${
+                        (formErrors.nombre || (formSubmitted && !formNombre.trim())) ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"
+                      } rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white text-zinc-900 dark:text-white font-medium`}
                     />
-                    {formErrors.nombre && (
-                      <p className="text-[11px] text-rose-600 mt-1">{formErrors.nombre}</p>
+                    {(formErrors.nombre || (formSubmitted && !formNombre.trim())) && (
+                      <p className="text-[11px] text-rose-600 mt-1">{formErrors.nombre || "El nombre comercial del modelo es obligatorio"}</p>
                     )}
                   </div>
 
@@ -1052,14 +1094,22 @@ export default function GestionProductos({
                     </label>
                     <select
                       value={formMarca}
-                      onChange={(e) => setFormMarca(e.target.value)}
-                      className="w-full px-3.5 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:outline-none text-zinc-900 dark:text-white font-medium"
+                      onChange={(e) => {
+                        setFormMarca(e.target.value);
+                        if (formErrors.marca) setFormErrors(prev => ({ ...prev, marca: "" }));
+                      }}
+                      className={`w-full px-3.5 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border ${
+                        (formErrors.marca || (formSubmitted && !formMarca.trim())) ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"
+                      } rounded-xl focus:outline-none text-zinc-900 dark:text-white font-medium`}
                     >
+                      <option value="">-- Seleccionar marca --</option>
                       {catalogMarcas.map(m => (
                         <option key={m.id} value={m.nombre}>{m.nombre}</option>
                       ))}
-                      {catalogMarcas.length === 0 && <option value="dorsalclub">dorsalclub</option>}
                     </select>
+                    {(formErrors.marca || (formSubmitted && !formMarca.trim())) && (
+                      <p className="text-[11px] text-rose-600 mt-1">{formErrors.marca || "Debes seleccionar una marca"}</p>
+                    )}
                   </div>
 
                   {/* Categoria */}
@@ -1069,30 +1119,53 @@ export default function GestionProductos({
                     </label>
                     <select
                       value={formCategoria}
-                      onChange={(e) => setFormCategoria(e.target.value)}
-                      className="w-full px-3.5 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:outline-none text-zinc-900 dark:text-white font-medium"
+                      onChange={(e) => {
+                        setFormCategoria(e.target.value);
+                        if (formErrors.categoria) setFormErrors(prev => ({ ...prev, categoria: "" }));
+                      }}
+                      className={`w-full px-3.5 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border ${
+                        (formErrors.categoria || (formSubmitted && !formCategoria.trim())) ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"
+                      } rounded-xl focus:outline-none text-zinc-900 dark:text-white font-medium`}
                     >
+                      <option value="">-- Seleccionar categoría --</option>
                       {catalogCategorias.map(c => (
                         <option key={c.id} value={c.nombre}>{c.nombre}</option>
                       ))}
-                      {catalogCategorias.length === 0 && <option value="Camisetas">Camisetas</option>}
                     </select>
+                    {(formErrors.categoria || (formSubmitted && !formCategoria.trim())) && (
+                      <p className="text-[11px] text-rose-600 mt-1">{formErrors.categoria || "Debes seleccionar una categoría"}</p>
+                    )}
                   </div>
 
                   {/* Tipo de Talla */}
                   <div>
                     <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                      Tipo de Talla
+                      Tipo de Talla *
                     </label>
                     <select
                       value={formTipoTalla}
-                      onChange={(e: any) => setFormTipoTalla(e.target.value)}
-                      className="w-full px-3.5 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:outline-none text-zinc-900 dark:text-white font-medium"
+                      onChange={(e: any) => {
+                        const val = e.target.value;
+                        setFormTipoTalla(val);
+                        if (formErrors.tipo_talla) setFormErrors(prev => ({ ...prev, tipo_talla: "" }));
+                        if (val === "unica") {
+                          setVariantRows(prev => prev.map(r => ({ ...r, talla: "Única" })));
+                        } else if (val === "") {
+                          setVariantRows(prev => prev.map(r => ({ ...r, talla: "" })));
+                        }
+                      }}
+                      className={`w-full px-3.5 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border ${
+                        (formErrors.tipo_talla || (formSubmitted && !formTipoTalla.trim())) ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"
+                      } rounded-xl focus:outline-none text-zinc-900 dark:text-white font-medium`}
                     >
+                      <option value="">-- Seleccionar tipo de talla --</option>
                       <option value="ropa">Ropa (XS, S, M, L, XL...)</option>
                       <option value="calzado">Calzado (25, 26, 27, 28...)</option>
                       <option value="unica">Talla Única (Accesorios/Gorras)</option>
                     </select>
+                    {(formErrors.tipo_talla || (formSubmitted && !formTipoTalla.trim())) && (
+                      <p className="text-[11px] text-rose-600 mt-1">{formErrors.tipo_talla || "Debes seleccionar el tipo de talla"}</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1265,31 +1338,41 @@ export default function GestionProductos({
                             <select
                               value={row.color}
                               onChange={(e) => handleUpdateVariantField(row.id, "color", e.target.value)}
-                              className="w-full px-2.5 py-1 text-xs bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-white font-medium"
+                              className={`w-full px-2.5 py-1 text-xs bg-zinc-50 dark:bg-zinc-800 border ${
+                                formSubmitted && !row.color ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"
+                              } rounded-lg text-zinc-900 dark:text-white font-medium`}
                             >
+                              <option value="">-- Seleccionar color --</option>
                               {catalogColores.map(c => (
                                 <option key={c.id} value={c.nombre}>{c.nombre}</option>
                               ))}
-                              {catalogColores.length === 0 && <option value="Negro">Negro</option>}
                             </select>
                           </td>
 
                           {/* Talla select */}
                           <td className="py-2.5 px-3">
                             {formTipoTalla === "unica" ? (
-                              <span className="text-xs font-semibold px-2 py-1 bg-zinc-100 dark:bg-zinc-800 rounded text-zinc-700 dark:text-zinc-300">
+                              <span className="text-xs font-semibold px-2 py-1 bg-zinc-100 dark:bg-zinc-800 rounded text-zinc-700 dark:text-zinc-300 block text-center">
                                 Única
                               </span>
                             ) : (
                               <select
                                 value={row.talla}
                                 onChange={(e) => handleUpdateVariantField(row.id, "talla", e.target.value)}
-                                className="w-full px-2.5 py-1 text-xs bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-white font-semibold"
+                                className={`w-full px-2.5 py-1 text-xs bg-zinc-50 dark:bg-zinc-800 border ${
+                                  formSubmitted && !row.talla ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"
+                                } rounded-lg text-zinc-900 dark:text-white font-semibold`}
                               >
-                                {(formTipoTalla === "calzado" ? catalogTallasCalzado : catalogTallasRopa).map(t => (
+                                <option value="">-- Seleccionar talla --</option>
+                                {formTipoTalla === "calzado" && catalogTallasCalzado.map(t => (
                                   <option key={t.id} value={t.nombre}>{t.nombre}</option>
                                 ))}
-                                {catalogTallasRopa.length === 0 && <option value="M">M</option>}
+                                {formTipoTalla === "ropa" && catalogTallasRopa.map(t => (
+                                  <option key={t.id} value={t.nombre}>{t.nombre}</option>
+                                ))}
+                                {!formTipoTalla && (
+                                  <option value="" disabled>Selecciona tipo de talla arriba</option>
+                                )}
                               </select>
                             )}
                           </td>
@@ -1298,10 +1381,12 @@ export default function GestionProductos({
                           <td className="py-2.5 px-3 font-mono">
                             <input
                               type="text"
-                              required
+                              placeholder="Ej. DC-TEE-NEG-M"
                               value={row.sku}
                               onChange={(e) => handleUpdateVariantField(row.id, "sku", e.target.value.toUpperCase().replace(/\s+/g, "-"))}
-                              className="w-full px-2.5 py-1 text-xs uppercase bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-white font-bold tracking-tight focus:outline-none"
+                              className={`w-full px-2.5 py-1 text-xs uppercase bg-white dark:bg-zinc-900 border ${
+                                formSubmitted && !row.sku.trim() ? "border-rose-500" : "border-zinc-300 dark:border-zinc-700"
+                              } rounded-lg text-zinc-900 dark:text-white font-bold tracking-tight focus:outline-none`}
                             />
                           </td>
 
@@ -1322,9 +1407,12 @@ export default function GestionProductos({
                               type="number"
                               min="0"
                               step="1"
+                              placeholder="Ej. 799"
                               value={row.precio_venta_sugerido}
-                              onChange={(e) => handleUpdateVariantField(row.id, "precio_venta_sugerido", Number(e.target.value))}
-                              className="w-24 px-2 py-1 text-xs bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-white font-semibold focus:outline-none"
+                              onChange={(e) => handleUpdateVariantField(row.id, "precio_venta_sugerido", e.target.value)}
+                              className={`w-24 px-2 py-1 text-xs bg-white dark:bg-zinc-900 border ${
+                                formSubmitted && (row.precio_venta_sugerido === "" || isNaN(Number(row.precio_venta_sugerido))) ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"
+                              } rounded-lg text-zinc-900 dark:text-white font-semibold focus:outline-none`}
                             />
                           </td>
 
@@ -1333,9 +1421,12 @@ export default function GestionProductos({
                             <input
                               type="number"
                               min="0"
+                              placeholder="Ej. 3"
                               value={row.stock_minimo}
-                              onChange={(e) => handleUpdateVariantField(row.id, "stock_minimo", Number(e.target.value))}
-                              className="w-20 px-2 py-1 text-xs bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-white focus:outline-none"
+                              onChange={(e) => handleUpdateVariantField(row.id, "stock_minimo", e.target.value)}
+                              className={`w-20 px-2 py-1 text-xs bg-white dark:bg-zinc-900 border ${
+                                formSubmitted && (row.stock_minimo === "" || isNaN(Number(row.stock_minimo))) ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"
+                              } rounded-lg text-zinc-900 dark:text-white focus:outline-none`}
                             />
                           </td>
 
@@ -1372,7 +1463,7 @@ export default function GestionProductos({
               <div className="border-t border-zinc-200 dark:border-zinc-800 pt-5 flex items-center justify-between">
                 <button
                   type="button"
-                  onClick={() => setIsFormOpen(false)}
+                  onClick={handleCloseModal}
                   className="px-4 py-2 text-xs font-semibold rounded-xl border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                 >
                   Cancelar
@@ -1380,15 +1471,15 @@ export default function GestionProductos({
 
                 <button
                   type="submit"
-                  disabled={submitLoading}
-                  className="px-6 py-2.5 text-xs font-bold rounded-xl bg-zinc-900 dark:bg-white hover:bg-black dark:hover:bg-zinc-100 text-white dark:text-zinc-900 transition-colors shadow-sm disabled:opacity-50 flex items-center gap-2"
+                  disabled={submitLoading || !isFormValid}
+                  className="px-6 py-2.5 text-xs font-bold rounded-xl bg-zinc-900 dark:bg-white hover:bg-black dark:hover:bg-zinc-100 text-white dark:text-zinc-900 transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {submitLoading ? (
                     <span>Guardando...</span>
                   ) : (
                     <>
                       <Check className="w-4 h-4" />
-                      <span>{editingBaseId ? "Guardar Cambios" : `Crear Modelo y ${variantRows.length} Variantes`}</span>
+                      <span>{editingBaseId ? "Guardar Cambios" : `Crear Modelo y ${variantRows.length} ${variantRows.length === 1 ? 'Variante' : 'Variantes'}`}</span>
                     </>
                   )}
                 </button>
