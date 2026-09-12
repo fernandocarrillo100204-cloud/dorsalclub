@@ -2057,36 +2057,75 @@ export const firestoreService = {
       const startTimestamp = Timestamp.fromDate(startDate);
       const endTimestamp = Timestamp.fromDate(endDate);
 
-      const q = query(
-        collection(realDb, "movimientos"),
-        where("tipo", "==", "salida"),
-        where("fecha", ">=", startTimestamp),
-        where("fecha", "<=", endTimestamp),
-        orderBy("fecha", "desc")
-      );
+      try {
+        // Consultar por rango de fechas sin filtro de tipo en Firestore para no requerir índice compuesto
+        const q = query(
+          collection(realDb, "movimientos"),
+          where("fecha", ">=", startTimestamp),
+          where("fecha", "<=", endTimestamp)
+        );
 
-      const snap = await getDocs(q);
-      const list: Movimiento[] = [];
+        const snap = await getDocs(q);
+        const list: Movimiento[] = [];
 
-      snap.forEach(d => {
-        const data = d.data();
-        if (data.estado === "anulado") return;
+        snap.forEach(d => {
+          const data = d.data();
+          if (data.tipo !== "salida" || data.estado === "anulado") return;
 
-        list.push({
-          id: d.id,
-          folio: data.folio,
-          sku: data.sku,
-          almacen_id: data.almacen_id,
-          tipo: "salida",
-          cantidad: Number(data.cantidad) || 0,
-          referencia: data.referencia,
-          usuario: data.usuario,
-          fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
-          estado: data.estado || "activo"
+          const docDate = data.fecha ? (data.fecha as Timestamp).toDate ? (data.fecha as Timestamp).toDate() : new Date(data.fecha) : new Date();
+          const docTime = docDate.getTime();
+          if (docTime < startMs || docTime > endMs) return;
+
+          list.push({
+            id: d.id,
+            folio: data.folio,
+            sku: data.sku,
+            almacen_id: data.almacen_id,
+            tipo: "salida",
+            cantidad: Number(data.cantidad) || 0,
+            referencia: data.referencia,
+            usuario: data.usuario,
+            fecha: docDate,
+            estado: data.estado || "activo"
+          });
         });
-      });
 
-      return list;
+        list.sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
+        return list;
+      } catch (err: any) {
+        const isIndexErr =
+          err?.code === "failed-precondition" ||
+          (err?.message && (err.message.includes("index") || err.message.includes("indexes")));
+
+        if (isIndexErr) {
+          console.warn("Aviso de índice en getVentasByDateRange, usando rescate directo:", err);
+          const snapAll = await getDocs(collection(realDb, "movimientos"));
+          const list: Movimiento[] = [];
+          snapAll.forEach(d => {
+            const data = d.data();
+            if (data.tipo !== "salida" || data.estado === "anulado") return;
+            const docDate = data.fecha ? (data.fecha as Timestamp).toDate ? (data.fecha as Timestamp).toDate() : new Date(data.fecha) : new Date();
+            const docTime = docDate.getTime();
+            if (docTime >= startMs && docTime <= endMs) {
+              list.push({
+                id: d.id,
+                folio: data.folio,
+                sku: data.sku,
+                almacen_id: data.almacen_id,
+                tipo: "salida",
+                cantidad: Number(data.cantidad) || 0,
+                referencia: data.referencia,
+                usuario: data.usuario,
+                fecha: docDate,
+                estado: data.estado || "activo"
+              });
+            }
+          });
+          list.sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
+          return list;
+        }
+        throw err;
+      }
     }
 
     const movs = getLocalStorageItem<Movimiento[]>("movimientos", []);
@@ -4056,42 +4095,63 @@ export const firestoreService = {
       try {
         const startTimestamp = Timestamp.fromDate(startOfMonth);
         const endTimestamp = Timestamp.fromDate(startOfNextMonth);
+        const startTimeMs = startOfMonth.getTime();
+        const endTimeMs = startOfNextMonth.getTime();
 
-        // 1. Consulta de Ventas (tipo == "salida", fecha >= start, fecha < end)
-        const qVentas = query(
-          collection(realDb, "movimientos"),
-          where("tipo", "==", "salida"),
-          where("fecha", ">=", startTimestamp),
-          where("fecha", "<", endTimestamp),
-          orderBy("fecha", "desc")
-        );
+        // Helper para consultar colecciones de forma segura sin requerir índices compuestos
+        const fetchMonthlyCollection = async (
+          collectionName: "movimientos" | "compras" | "gastos"
+        ) => {
+          try {
+            // Intentar primero con la consulta directa por rango de fecha (índice automático de campo único)
+            const qDateRange = query(
+              collection(realDb, collectionName),
+              where("fecha", ">=", startTimestamp),
+              where("fecha", "<", endTimestamp)
+            );
+            return await getDocs(qDateRange);
+          } catch (err: any) {
+            const isIndexErr =
+              err?.code === "failed-precondition" ||
+              (err?.message && (err.message.includes("index") || err.message.includes("indexes")));
 
-        // 2. Consulta de Compras (fecha >= start, fecha < end)
-        const qCompras = query(
-          collection(realDb, "compras"),
-          where("fecha", ">=", startTimestamp),
-          where("fecha", "<", endTimestamp),
-          orderBy("fecha", "desc")
-        );
-
-        // 3. Consulta de Gastos (fecha >= start, fecha < end)
-        const qGastos = query(
-          collection(realDb, "gastos"),
-          where("fecha", ">=", startTimestamp),
-          where("fecha", "<", endTimestamp),
-          orderBy("fecha", "desc")
-        );
+            if (isIndexErr) {
+              console.warn(
+                `Aviso de índice en Firestore para colección ${collectionName} (está creándose o pendiente). Ejecutando rescate:`,
+                err
+              );
+              // Consulta de rescate: obtener documentos y filtrar en memoria por rango de fecha
+              const qAll = query(collection(realDb, collectionName));
+              return await getDocs(qAll);
+            }
+            throw err;
+          }
+        };
 
         // Ejecutar las tres consultas independientes mediante Promise.all()
-        const [snapVentas, snapCompras, snapGastos] = await Promise.all([
-          getDocs(qVentas),
-          getDocs(qCompras),
-          getDocs(qGastos)
+        const [snapMovimientos, snapCompras, snapGastos] = await Promise.all([
+          fetchMonthlyCollection("movimientos"),
+          fetchMonthlyCollection("compras"),
+          fetchMonthlyCollection("gastos")
         ]);
 
-        rawVentas = snapVentas.docs.map(d => {
+        rawVentas = [];
+        snapMovimientos.docs.forEach(d => {
           const data = d.data();
-          return {
+          // Filtrar por tipo salida y estado activo
+          if (data.tipo !== "salida") return;
+
+          const docDate: Date = data.fecha
+            ? (data.fecha as Timestamp).toDate
+              ? (data.fecha as Timestamp).toDate()
+              : new Date(typeof data.fecha === "string" ? data.fecha : (data.fecha as any).seconds * 1000)
+            : new Date();
+
+          const docTime = docDate.getTime();
+          // Asegurar que pertenezca al mes evaluado (crucial tanto para rescate como para rango)
+          if (docTime < startTimeMs || docTime >= endTimeMs) return;
+
+          rawVentas.push({
             id: d.id,
             folio: data.folio,
             sku: data.sku,
@@ -4100,7 +4160,7 @@ export const firestoreService = {
             cantidad: Number(data.cantidad) || 0,
             referencia: data.referencia,
             usuario: data.usuario,
-            fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
+            fecha: docDate,
             almacen_destino_id: data.almacen_destino_id,
             compra_id: data.compra_id,
             lote_id: data.lote_id,
@@ -4111,19 +4171,34 @@ export const firestoreService = {
             precio_unitario_venta: typeof data.precio_unitario_venta === "number" ? data.precio_unitario_venta : undefined,
             total_venta: typeof data.total_venta === "number" ? data.total_venta : undefined,
             estado: data.estado || "activo",
-            anulado_at: data.anulado_at ? (data.anulado_at as Timestamp).toDate() : undefined,
+            anulado_at: data.anulado_at
+              ? (data.anulado_at as Timestamp).toDate
+                ? (data.anulado_at as Timestamp).toDate()
+                : new Date(data.anulado_at)
+              : undefined,
             anulado_por: data.anulado_por,
             motivo_anulacion: data.motivo_anulacion
-          };
+          });
         });
+        rawVentas.sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
 
-        rawCompras = snapCompras.docs.map(d => {
+        rawCompras = [];
+        snapCompras.docs.forEach(d => {
           const data = d.data();
-          return {
+          const docDate: Date = data.fecha
+            ? (data.fecha as Timestamp).toDate
+              ? (data.fecha as Timestamp).toDate()
+              : new Date(typeof data.fecha === "string" ? data.fecha : (data.fecha as any).seconds * 1000)
+            : new Date();
+
+          const docTime = docDate.getTime();
+          if (docTime < startTimeMs || docTime >= endTimeMs) return;
+
+          rawCompras.push({
             id: d.id,
             folio: data.folio,
             proveedor: data.proveedor,
-            fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
+            fecha: docDate,
             fecha_str: data.fecha_str,
             almacen_id: data.almacen_id,
             items: data.items || [],
@@ -4136,23 +4211,46 @@ export const firestoreService = {
             referencia: data.referencia || "",
             notas: data.notas || "",
             creado_por: data.creado_por || "",
-            creado_at: data.creado_at ? (data.creado_at as Timestamp).toDate() : new Date(),
+            creado_at: data.creado_at
+              ? (data.creado_at as Timestamp).toDate
+                ? (data.creado_at as Timestamp).toDate()
+                : new Date(data.creado_at)
+              : new Date(),
             estado: data.estado || "completada"
-          };
+          });
         });
+        rawCompras.sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
 
-        rawGastos = snapGastos.docs.map(d => {
+        rawGastos = [];
+        snapGastos.docs.forEach(d => {
           const data = d.data();
+          const docDate: Date = data.fecha
+            ? (data.fecha as Timestamp).toDate
+              ? (data.fecha as Timestamp).toDate()
+              : new Date(typeof data.fecha === "string" ? data.fecha : (data.fecha as any).seconds * 1000)
+            : new Date();
+
+          const docTime = docDate.getTime();
+          if (docTime < startTimeMs || docTime >= endTimeMs) return;
+
           const item: Gasto = {
             id: d.id,
             concepto: data.concepto || "",
             categoria: data.categoria || "Otros",
             monto: Number(data.monto) || 0,
-            fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
+            fecha: docDate,
             fecha_str: data.fecha_str || "",
             creado_por: data.creado_por || "",
-            creado_at: data.creado_at ? (data.creado_at as Timestamp).toDate() : new Date(),
-            actualizado_at: data.actualizado_at ? (data.actualizado_at as Timestamp).toDate() : new Date()
+            creado_at: data.creado_at
+              ? (data.creado_at as Timestamp).toDate
+                ? (data.creado_at as Timestamp).toDate()
+                : new Date(data.creado_at)
+              : new Date(),
+            actualizado_at: data.actualizado_at
+              ? (data.actualizado_at as Timestamp).toDate
+                ? (data.actualizado_at as Timestamp).toDate()
+                : new Date(data.actualizado_at)
+              : new Date()
           };
           if (data.metodo_pago) item.metodo_pago = data.metodo_pago;
           if (data.almacen_id) item.almacen_id = data.almacen_id;
@@ -4160,8 +4258,9 @@ export const firestoreService = {
           if (data.proveedor) item.proveedor = data.proveedor;
           if (data.referencia) item.referencia = data.referencia;
           if (data.notas) item.notas = data.notas;
-          return item;
+          rawGastos.push(item);
         });
+        rawGastos.sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
       } catch (err: any) {
         console.error("Error al consultar datos financieros mensuales de Firestore:", err);
         // NO usar localStorage como fallback si Firebase está configurado y devuelve error
