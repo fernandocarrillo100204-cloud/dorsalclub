@@ -172,8 +172,9 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
         return;
       }
       console.error("Error al cargar datos del resumen financiero:", err);
-      // En caso de error, nunca mostrar cifras falsas ni datos obsoletos
-      setData(null);
+      if (!isSamePeriodValid) {
+        setData(null);
+      }
 
       const rawMsg: string = err?.message || "";
       const isIndexError =
