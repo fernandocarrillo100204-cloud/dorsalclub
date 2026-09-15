@@ -8,19 +8,58 @@ import { authService, firestoreService } from "./lib/firebase";
 import { Usuario, Almacen, Producto, StockItem, NavigationTab } from "./types";
 import Sidebar from "./components/Sidebar";
 import Login from "./components/Login";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { motion, AnimatePresence } from "motion/react";
 
-const Dashboard = lazy(() => import("./components/Dashboard"));
-const Compras = lazy(() => import("./components/Compras"));
-const Ventas = lazy(() => import("./components/Ventas"));
-const Transferencias = lazy(() => import("./components/Transferencias"));
-const Historial = lazy(() => import("./components/Historial"));
-const GestionAlmacenes = lazy(() => import("./components/GestionAlmacenes"));
-const GestionProductos = lazy(() => import("./components/GestionProductos"));
-const AnalisisVentas = lazy(() => import("./components/AnalisisVentas"));
-const AnalisisClientes = lazy(() => import("./components/AnalisisClientes"));
-const Clientes = lazy(() => import("./components/Clientes"));
-const Finanzas = lazy(() => import("./components/Finanzas"));
+// Carga perezosa con reintento automático ante desincronización de chunks o recarga del servidor
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  componentImport: () => Promise<{ default: T }>
+) {
+  return lazy(async () => {
+    try {
+      const module = await componentImport();
+      // Limpiar indicador de recarga cuando la importación tiene éxito
+      sessionStorage.removeItem("dorsalclub_module_retry");
+      return module;
+    } catch (error: any) {
+      console.warn("Reintentando carga dinámica del módulo...", error);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const module = await componentImport();
+        sessionStorage.removeItem("dorsalclub_module_retry");
+        return module;
+      } catch (retryError: any) {
+        const isDynamicImportErr =
+          error?.message?.includes("dynamically imported module") ||
+          retryError?.message?.includes("dynamically imported module") ||
+          error?.name === "ChunkLoadError";
+
+        if (isDynamicImportErr) {
+          const sessionKey = "dorsalclub_module_retry";
+          const hasReloaded = sessionStorage.getItem(sessionKey);
+          if (!hasReloaded) {
+            sessionStorage.setItem(sessionKey, "true");
+            window.location.reload();
+            return new Promise<{ default: T }>(() => {});
+          }
+        }
+        throw retryError;
+      }
+    }
+  });
+}
+
+const Dashboard = lazyWithRetry(() => import("./components/Dashboard"));
+const Compras = lazyWithRetry(() => import("./components/Compras"));
+const Ventas = lazyWithRetry(() => import("./components/Ventas"));
+const Transferencias = lazyWithRetry(() => import("./components/Transferencias"));
+const Historial = lazyWithRetry(() => import("./components/Historial"));
+const GestionAlmacenes = lazyWithRetry(() => import("./components/GestionAlmacenes"));
+const GestionProductos = lazyWithRetry(() => import("./components/GestionProductos"));
+const AnalisisVentas = lazyWithRetry(() => import("./components/AnalisisVentas"));
+const AnalisisClientes = lazyWithRetry(() => import("./components/AnalisisClientes"));
+const Clientes = lazyWithRetry(() => import("./components/Clientes"));
+const Finanzas = lazyWithRetry(() => import("./components/Finanzas"));
 
 const getGastoIdFromPath = (path: string): string => {
   const match = path.match(/\/finanzas\/gastos\/([^/]+)\/editar\/?$/i);
@@ -305,15 +344,16 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0 md:pl-[224px]">
         <main className="flex-1 w-full relative min-h-screen overflow-x-hidden">
           <div className="w-full">
-            <Suspense
-              fallback={
-                <div className="min-h-[50vh] flex flex-col items-center justify-center text-zinc-400">
-                  <span className="h-7 w-7 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin mb-2" />
-                  <p className="text-xs">Cargando módulo...</p>
-                </div>
-              }
-            >
-              <AnimatePresence mode="wait">
+            <ErrorBoundary>
+              <Suspense
+                fallback={
+                  <div className="min-h-[50vh] flex flex-col items-center justify-center text-zinc-400">
+                    <span className="h-7 w-7 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin mb-2" />
+                    <p className="text-xs">Cargando módulo...</p>
+                  </div>
+                }
+              >
+                <AnimatePresence mode="wait">
                 {/* Compras: Historial y Formulario Lote */}
                 {(activeTab === "compras" || activeTab === "compras_nueva" || activeTab === "movimientos") && (
                   <motion.div
@@ -536,7 +576,8 @@ export default function App() {
                 )}
               </AnimatePresence>
             </Suspense>
-          </div>
+          </ErrorBoundary>
+        </div>
         </main>
       </div>
     </div>
