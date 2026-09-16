@@ -10,6 +10,10 @@ import {
   AlertTriangle,
   Info,
   Calendar,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
   ArrowRight,
   PieChart as PieIcon,
   BarChart3,
@@ -35,6 +39,7 @@ interface ResumenFinancieroProps {
   onNavigateToGastos: () => void;
   onNavigateToVentas?: () => void;
   onNavigateToCompras?: () => void;
+  navigationTabs?: React.ReactNode;
 }
 
 const MESES = [
@@ -75,16 +80,27 @@ const formatMoney = (val: number): string => {
 export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
   onNavigateToGastos,
   onNavigateToVentas,
-  onNavigateToCompras
+  onNavigateToCompras,
+  navigationTabs
 }) => {
   // Current calendar month and year (Local time)
   const now = useMemo(() => new Date(), []);
   const currentMonth = now.getMonth() + 1;
   const currentYear = now.getFullYear();
 
-  // Selected period
-  const [selectedMonth, setSelectedMonth] = useState<number>(currentMonth);
-  const [selectedYear, setSelectedYear] = useState<number>(currentYear);
+  // Selected period state
+  const [period, setPeriod] = useState<{ month: number; year: number }>({
+    month: currentMonth,
+    year: currentYear
+  });
+  const selectedMonth = period.month;
+  const selectedYear = period.year;
+
+  // Popover state
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [popoverYear, setPopoverYear] = useState<number>(currentYear);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const periodButtonRef = useRef<HTMLButtonElement>(null);
 
   // Data state
   const [data, setData] = useState<DatosFinancierosMensuales | null>(null);
@@ -108,6 +124,36 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
     return () => observer.disconnect();
   }, []);
 
+  // Popover click outside and Escape handling
+  useEffect(() => {
+    if (!isPopoverOpen) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(e.target as Node) &&
+        periodButtonRef.current &&
+        !periodButtonRef.current.contains(e.target as Node)
+      ) {
+        setIsPopoverOpen(false);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsPopoverOpen(false);
+        periodButtonRef.current?.focus();
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isPopoverOpen]);
+
   // Available years list (from 2020 up to currentYear + 1)
   const availableYears = useMemo(() => {
     const years: number[] = [];
@@ -118,6 +164,33 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
   }, [currentYear]);
 
   const isCurrentMonthSelected = selectedMonth === currentMonth && selectedYear === currentYear;
+
+  // Change period atomically to prevent double Firestore queries
+  const changePeriod = useCallback((newMonth: number, newYear: number) => {
+    if (newMonth === selectedMonth && newYear === selectedYear) return;
+    setData(null);
+    setPeriod({ month: newMonth, year: newYear });
+  }, [selectedMonth, selectedYear]);
+
+  // Previous month handler (wrap Jan -> Dec of previous year, capped at 2020)
+  const handlePrevMonth = () => {
+    if (selectedYear <= 2020 && selectedMonth <= 1) return;
+    if (selectedMonth === 1) {
+      changePeriod(12, selectedYear - 1);
+    } else {
+      changePeriod(selectedMonth - 1, selectedYear);
+    }
+  };
+
+  // Next month handler (wrap Dec -> Jan of next year, capped at currentYear + 1)
+  const handleNextMonth = () => {
+    if (selectedYear >= currentYear + 1 && selectedMonth >= 12) return;
+    if (selectedMonth === 12) {
+      changePeriod(1, selectedYear + 1);
+    } else {
+      changePeriod(selectedMonth + 1, selectedYear);
+    }
+  };
 
   // Request ID counter to protect against out-of-order responses
   const requestIdRef = useRef<number>(0);
@@ -203,11 +276,7 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
   }, [fetchData]);
 
   const handleResetToCurrentMonth = () => {
-    if (selectedMonth !== currentMonth || selectedYear !== currentYear) {
-      setData(null);
-      setSelectedMonth(currentMonth);
-      setSelectedYear(currentYear);
-    }
+    changePeriod(currentMonth, currentYear);
   };
 
   const monthLabel = useMemo(() => {
@@ -237,94 +306,164 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Header & Month Selector */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-[#172033] dark:text-[#F8FAFC]">
-            Resumen Financiero
-          </h1>
-          <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8] mt-0.5">
-            Entradas y salidas de dinero registradas durante el periodo seleccionado.
-          </p>
+      {/* 1. Encabezado limpio en su propia fila */}
+      <div>
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#172033] dark:text-[#F8FAFC]">
+          Resumen financiero
+        </h1>
+        <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8] mt-1">
+          Entradas y salidas de dinero registradas durante el periodo seleccionado.
+        </p>
+      </div>
+
+      {/* 2. Barra única horizontal compacta y responsive: Pestañas a la izquierda, Periodo a la derecha */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-50/60 dark:bg-slate-900/40 p-1.5 sm:p-2 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-2xs">
+        {/* Pestañas de navegación */}
+        <div className="flex items-center">
+          {navigationTabs}
         </div>
 
-        {/* Controls: Month selector, Year selector, Current Month, Refresh */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Month select */}
-          <div className="relative">
-            <select
-              id="select-finanzas-mes"
-              value={selectedMonth}
-              onChange={(e) => {
-                const newMonth = Number(e.target.value);
-                if (newMonth !== selectedMonth) {
-                  setData(null);
-                  setSelectedMonth(newMonth);
-                }
-              }}
-              disabled={initialLoading && !data}
-              className="px-3 py-2 pr-8 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#111827] text-xs sm:text-sm font-medium text-[#172033] dark:text-[#F8FAFC] focus:outline-none focus:ring-2 focus:ring-[#059669] focus:border-transparent transition-all cursor-pointer shadow-2xs"
-            >
-              {MESES.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </div>
+        {/* Controles de Periodo */}
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 relative">
+          <span className="text-xs font-semibold text-[#64748B] dark:text-[#94A3B8] px-1 select-none">
+            Periodo
+          </span>
 
-          {/* Year select */}
-          <div className="relative">
-            <select
-              id="select-finanzas-anio"
-              value={selectedYear}
-              onChange={(e) => {
-                const newYear = Number(e.target.value);
-                if (newYear !== selectedYear) {
-                  setData(null);
-                  setSelectedYear(newYear);
-                }
-              }}
-              disabled={initialLoading && !data}
-              className="px-3 py-2 pr-8 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#111827] text-xs sm:text-sm font-medium text-[#172033] dark:text-[#F8FAFC] focus:outline-none focus:ring-2 focus:ring-[#059669] focus:border-transparent transition-all cursor-pointer shadow-2xs"
-            >
-              {availableYears.map((y) => (
-                <option key={y} value={y}>
-                  {y}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Botón: Mes anterior */}
+          <button
+            type="button"
+            id="btn-periodo-anterior"
+            onClick={handlePrevMonth}
+            disabled={(selectedYear <= 2020 && selectedMonth <= 1) || (initialLoading && !data)}
+            aria-label="Mes anterior"
+            title="Mes anterior"
+            className="h-10 w-10 flex items-center justify-center rounded-xl bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-700/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition-colors shadow-2xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
 
-          {/* "Mes actual" button: only shown when not current month */}
-          {!isCurrentMonthSelected && (
+          {/* Selector central de periodo (Abre popover) */}
+          <div className="relative">
             <button
               type="button"
-              id="btn-finanzas-mes-actual"
-              onClick={handleResetToCurrentMonth}
-              disabled={initialLoading || refreshing}
-              className="inline-flex items-center space-x-1.5 px-3 py-2 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[#475569] dark:text-[#CBD5E1] hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors shadow-2xs cursor-pointer"
+              id="btn-selector-periodo"
+              ref={periodButtonRef}
+              onClick={() => {
+                setPopoverYear(selectedYear);
+                setIsPopoverOpen((prev) => !prev);
+              }}
+              aria-expanded={isPopoverOpen}
+              aria-haspopup="dialog"
+              aria-label={`Periodo actual: ${monthLabel} ${selectedYear}. Haz clic para cambiar mes o año`}
+              className="h-10 px-3 sm:px-3.5 flex items-center space-x-2 rounded-xl bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-700/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-[#172033] dark:text-[#F8FAFC] text-xs sm:text-sm font-semibold transition-colors shadow-2xs cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
             >
-              <Calendar className="h-3.5 w-3.5 text-[#059669]" />
-              <span>Mes actual</span>
+              <CalendarDays className="h-4 w-4 text-[#059669] shrink-0" />
+              <span className="capitalize">{monthLabel} {selectedYear}</span>
+              <ChevronDown
+                className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-150 ${
+                  isPopoverOpen ? "rotate-180" : ""
+                }`}
+              />
             </button>
-          )}
 
-          {/* "Actualizar" button */}
+            {/* Popover compacto de selección de periodo */}
+            {isPopoverOpen && (
+              <div
+                ref={popoverRef}
+                role="dialog"
+                aria-label="Selector de periodo mensual"
+                aria-modal="true"
+                className="absolute right-0 top-full mt-2 z-50 w-72 sm:w-80 max-w-[calc(100vw-2rem)] p-3 bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl transition-all"
+              >
+                {/* Encabezado del Popover: Navegación de Año */}
+                <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setPopoverYear((prev) => Math.max(2020, prev - 1))}
+                    disabled={popoverYear <= 2020}
+                    aria-label="Año anterior"
+                    title="Año anterior"
+                    className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+
+                  <span className="text-sm font-bold text-[#172033] dark:text-[#F8FAFC]">
+                    {popoverYear}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => setPopoverYear((prev) => Math.min(currentYear + 1, prev + 1))}
+                    disabled={popoverYear >= currentYear + 1}
+                    aria-label="Año siguiente"
+                    title="Año siguiente"
+                    className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {/* Cuadrícula de 12 meses */}
+                <div className="grid grid-cols-3 gap-1.5">
+                  {MESES.map((m) => {
+                    const isSelected = popoverYear === selectedYear && m.value === selectedMonth;
+                    const isCurrentCal = popoverYear === currentYear && m.value === currentMonth;
+
+                    return (
+                      <button
+                        key={m.value}
+                        type="button"
+                        onClick={() => {
+                          changePeriod(m.value, popoverYear);
+                          setIsPopoverOpen(false);
+                        }}
+                        className={`min-h-[38px] px-2 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669] ${
+                          isSelected
+                            ? "bg-[#059669] text-white shadow-xs"
+                            : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80"
+                        }`}
+                      >
+                        <span>{m.label}</span>
+                        {isCurrentCal && !isSelected && (
+                          <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#059669]" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Botón: Mes siguiente */}
+          <button
+            type="button"
+            id="btn-periodo-siguiente"
+            onClick={handleNextMonth}
+            disabled={(selectedYear >= currentYear + 1 && selectedMonth >= 12) || (initialLoading && !data)}
+            aria-label="Mes siguiente"
+            title="Mes siguiente"
+            className="h-10 w-10 flex items-center justify-center rounded-xl bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-700/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition-colors shadow-2xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+
+          {/* Botón compacto: Actualizar datos */}
           <button
             type="button"
             id="btn-finanzas-actualizar"
             onClick={() => fetchData(true)}
             disabled={initialLoading || refreshing}
-            className="inline-flex items-center space-x-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-white dark:bg-[#111827] hover:bg-slate-50 dark:hover:bg-[#182235] text-[#172033] dark:text-[#F8FAFC] border border-[#CBD5E1] dark:border-[#334155] transition-all shadow-2xs cursor-pointer disabled:opacity-50"
-            title="Recargar datos desde la base de datos"
+            aria-label="Actualizar datos"
+            title="Actualizar datos"
+            className="h-10 w-10 flex items-center justify-center rounded-xl bg-white dark:bg-[#111827] hover:bg-slate-50 dark:hover:bg-slate-800 text-[#172033] dark:text-[#F8FAFC] border border-slate-200 dark:border-slate-700/80 transition-colors shadow-2xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
           >
             <RefreshCw
-              className={`h-3.5 w-3.5 text-[#059669] ${
-                refreshing ? "animate-spin" : ""
+              className={`h-4 w-4 text-slate-600 dark:text-slate-300 ${
+                refreshing ? "animate-spin text-[#059669]" : ""
               }`}
             />
-            <span>{refreshing ? "Actualizando..." : "Actualizar"}</span>
           </button>
         </div>
       </div>

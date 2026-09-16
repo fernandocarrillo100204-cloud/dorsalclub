@@ -257,7 +257,7 @@ export default function GastosHistorial({
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-4 p-3 sm:p-6" id="finanzas-gastos-page">
+    <div className="w-full space-y-6" id="finanzas-gastos-page">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-xl p-4 sm:p-5 shadow-xs">
         <div className="flex items-center space-x-3">
