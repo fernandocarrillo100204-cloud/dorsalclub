@@ -347,6 +347,20 @@ export interface FinanzasDiaPunto {
   otrosGastos: number;
 }
 
+export interface PeriodoFinancieroIndex {
+  periodo: string; // "YYYY-MM"
+  anio: number;
+  mes: number;
+  ventasActivas: number;
+  comprasActivas: number;
+  gastosActivos: number;
+  totalRegistrosActivos: number;
+  actualizadoEn?: {
+    seconds: number;
+    nanoseconds: number;
+  } | Date;
+}
+
 export interface DatosFinancierosMensuales {
   year: number;
   month: number;

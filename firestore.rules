@@ -176,5 +176,20 @@ service cloud.firestore {
     match /configuracion/{configId} {
       allow read, write: if isSignedIn();
     }
+
+    // Periodos Financieros Collection (Índice liviano para selector de periodos reales)
+    match /periodos_financieros/{periodoKey} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(periodoKey)
+        && incoming().periodo is string && incoming().periodo.size() == 7
+        && incoming().anio is number && incoming().anio >= 2000 && incoming().anio <= 2100
+        && incoming().mes is number && incoming().mes >= 1 && incoming().mes <= 12
+        && incoming().ventasActivas is number && incoming().ventasActivas >= 0
+        && incoming().comprasActivas is number && incoming().comprasActivas >= 0
+        && incoming().gastosActivos is number && incoming().gastosActivos >= 0
+        && incoming().totalRegistrosActivos is number && incoming().totalRegistrosActivos >= 0;
+      allow delete: if isSignedIn();
+    }
   }
 }

@@ -59,8 +59,18 @@ import {
   CategoriaGasto,
   MetodoPagoGasto,
   DatosFinancierosMensuales,
-  FinanzasDiaPunto
+  FinanzasDiaPunto,
+  PeriodoFinancieroIndex
 } from "../types";
+import {
+  getPeriodoKey,
+  getPeriodContribution,
+  computeNewPeriodIndexData,
+  applyPeriodIndexDeltas,
+  getPeriodosFinancierosDisponibles,
+  clearPeriodosFinancierosCache,
+  rebuildPeriodosFinancierosIndex
+} from "./periodosFinancieros";
 
 // Silence non-critical network retry noise from Firestore client
 try {
@@ -161,7 +171,7 @@ export function getLocalDateString(date: Date | { seconds: number; nanoseconds: 
 // --- LOCAL STORAGE HIGH-FIDELITY EMULATOR (SOLO CUANDO FIREBASE NO ESTÁ CONFIGURADO) ---
 const STORAGE_PREFIX = "inventario_mvp_";
 
-const getLocalStorageItem = <T>(key: string, defaultValue: T): T => {
+export const getLocalStorageItem = <T>(key: string, defaultValue: T): T => {
   const value = localStorage.getItem(STORAGE_PREFIX + key);
   if (!value) return defaultValue;
   try {
@@ -172,7 +182,7 @@ const getLocalStorageItem = <T>(key: string, defaultValue: T): T => {
   }
 };
 
-const setLocalStorageItem = <T>(key: string, value: T): void => {
+export const setLocalStorageItem = <T>(key: string, value: T): void => {
   try {
     localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
   } catch (e) {
@@ -256,6 +266,7 @@ const initializeLocalEmulator = () => {
 initializeLocalEmulator();
 
 export const isRealFirebase = isConfigured;
+export const getRealDb = () => realDb;
 
 // --- SERVICIO DE AUTENTICACIÓN ---
 export const authService = {
@@ -412,6 +423,7 @@ export function clearFinanzasCache(year?: number, month?: number): void {
     finanzasMonthlyCache.delete(key);
   } else {
     finanzasMonthlyCache.clear();
+    clearPeriodosFinancierosCache();
   }
 }
 
@@ -419,6 +431,12 @@ export function clearFinanzasCache(year?: number, month?: number): void {
 export const firestoreService = {
   isConfigured: () => isConfigured,
   clearFinanzasCache,
+  getPeriodosFinancierosDisponibles,
+  clearPeriodosFinancierosCache,
+  rebuildPeriodosFinancierosIndex,
+  getPeriodoKey,
+  getPeriodContribution,
+  applyPeriodIndexDeltas,
 
   // --- ALMACENES ---
   getAlmacenes: async (): Promise<Almacen[]> => {
@@ -1253,6 +1271,10 @@ export const firestoreService = {
       const summaryKey = `${todayStr}_${cleanSku}_${originAlmId}`;
       const resumenDocRef = mov.tipo === "salida" ? doc(realDb, "resumen_ventas", summaryKey) : null;
 
+      // Índice de periodos financieros para ventas
+      const periodoKey = mov.tipo === "salida" ? getPeriodoKey(now) : null;
+      const periodRef = (mov.tipo === "salida" && periodoKey) ? doc(realDb, "periodos_financieros", periodoKey) : null;
+
       let generatedFolio = "";
 
       await runTransaction(realDb, async (transaction) => {
@@ -1309,20 +1331,26 @@ export const firestoreService = {
           }, { merge: true });
         }
 
-        // 4. Lectura y actualización de resumen de ventas si es salida
+        // 4. Lectura de resumen de ventas e índice de periodos si es salida
+        let prevResumenQty = 0;
+        let prevResumenTotal = 0;
         if (mov.tipo === "salida" && resumenDocRef) {
           const resumenSnap = await transaction.get(resumenDocRef);
-          const prevQty = resumenSnap.exists() ? (Number(resumenSnap.data()?.cantidad) || 0) : 0;
-          const prevTotal = resumenSnap.exists() ? (Number(resumenSnap.data()?.total_transacciones) || 0) : 0;
+          prevResumenQty = resumenSnap.exists() ? (Number(resumenSnap.data()?.cantidad) || 0) : 0;
+          prevResumenTotal = resumenSnap.exists() ? (Number(resumenSnap.data()?.total_transacciones) || 0) : 0;
+        }
 
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+
+        if (mov.tipo === "salida" && resumenDocRef) {
           transaction.set(resumenDocRef, {
             id: summaryKey,
             fecha_str: todayStr,
             fecha: Timestamp.now(),
             sku: cleanSku,
             almacen_id: originAlmId,
-            cantidad: prevQty + moveQty,
-            total_transacciones: prevTotal + 1,
+            cantidad: prevResumenQty + moveQty,
+            total_transacciones: prevResumenTotal + 1,
             actualizado: Timestamp.now()
           }, { merge: true });
         }
@@ -1364,9 +1392,22 @@ export const firestoreService = {
           ...(typeof mov.total_venta === "number" ? { total_venta: mov.total_venta } : {}),
           ...(destAlmId ? { almacen_destino_id: destAlmId } : {})
         });
+
+        // 8. Actualización atómica del índice de periodos financieros si es venta
+        if (periodRef && periodoKey) {
+          const updatedPeriod = computeNewPeriodIndexData(
+            periodSnap?.exists() ? periodSnap.data() : null,
+            periodoKey,
+            1,
+            0,
+            0
+          );
+          transaction.set(periodRef, updatedPeriod, { merge: true });
+        }
       });
 
       clearFinanzasCache();
+      clearPeriodosFinancierosCache();
       return { id: docId, folio: generatedFolio };
     }
 
@@ -1474,6 +1515,7 @@ export const firestoreService = {
     notifyListeners("movimientos", movimientos);
 
     clearFinanzasCache();
+    clearPeriodosFinancierosCache();
     return { id: docId, folio: generatedFolio };
   },
 
@@ -1587,6 +1629,11 @@ export const firestoreService = {
           }, { merge: true });
         }
 
+        // 3.5 Lectura de periodos_financieros si era una venta activa
+        const periodoKey = tipo === "salida" ? getPeriodoKey(movData.fecha) : null;
+        const periodRef = (tipo === "salida" && periodoKey) ? doc(realDb, "periodos_financieros", periodoKey) : null;
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+
         // 4. Marca el documento como anulado
         transaction.update(movRef, {
           estado: "anulado",
@@ -1594,9 +1641,22 @@ export const firestoreService = {
           anulado_por: usuarioEmail,
           motivo_anulacion: motivo
         });
+
+        // 5. Decrementar contador de ventas activas en el índice del periodo
+        if (periodRef && periodoKey) {
+          const updatedPeriod = computeNewPeriodIndexData(
+            periodSnap?.exists() ? periodSnap.data() : null,
+            periodoKey,
+            -1,
+            0,
+            0
+          );
+          transaction.set(periodRef, updatedPeriod, { merge: true });
+        }
       });
 
       clearFinanzasCache();
+      clearPeriodosFinancierosCache();
       return;
     }
 
@@ -1692,6 +1752,7 @@ export const firestoreService = {
     setLocalStorageItem("movimientos", movimientos);
     notifyListeners("movimientos", movimientos);
     clearFinanzasCache();
+    clearPeriodosFinancierosCache();
   },
 
   deleteMovimiento: async (id: string): Promise<void> => {
@@ -2198,6 +2259,9 @@ export const firestoreService = {
       const compraDocRef = doc(collection(realDb, "compras"));
       const compraDocId = compraDocRef.id;
 
+      const periodoKey = getPeriodoKey(purchaseDate);
+      const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+
       let generatedCompraFolio = "";
 
       await runTransaction(realDb, async (transaction) => {
@@ -2222,13 +2286,22 @@ export const firestoreService = {
           }
         }
 
-        // 3. Procesar stock y movimientos de cada partida
+        // 2.5 Lectura de stock de todas las partidas y del índice de periodos financieros
+        const stockSnaps: any[] = [];
         for (let i = 0; i < validItems.length; i++) {
           const item = validItems[i];
           const stockKey = `${item.sku}_${almacenId}`;
           const stockRef = doc(realDb, "stock", stockKey);
-          const stockSnap = await transaction.get(stockRef);
-          const currentQty = stockSnap.exists() ? (Number(stockSnap.data()?.cantidad) || 0) : 0;
+          const snap = await transaction.get(stockRef);
+          stockSnaps.push({ stockKey, stockRef, snap, item });
+        }
+
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+
+        // 3. Procesar stock y movimientos de cada partida
+        for (let i = 0; i < stockSnaps.length; i++) {
+          const { stockKey, stockRef, snap, item } = stockSnaps[i];
+          const currentQty = snap.exists() ? (Number(snap.data()?.cantidad) || 0) : 0;
           const newQty = currentQty + item.cantidad;
 
           // Actualizar stock
@@ -2296,9 +2369,22 @@ export const firestoreService = {
           creado_at: Timestamp.now(),
           estado: "completada"
         });
+
+        // 6. Actualización atómica de periodos_financieros
+        if (periodRef && periodoKey) {
+          const updatedPeriod = computeNewPeriodIndexData(
+            periodSnap?.exists() ? periodSnap.data() : null,
+            periodoKey,
+            0,
+            1,
+            0
+          );
+          transaction.set(periodRef, updatedPeriod, { merge: true });
+        }
       });
 
       clearFinanzasCache();
+      clearPeriodosFinancierosCache();
       return {
         id: compraDocId,
         folio: generatedCompraFolio,
@@ -2390,6 +2476,7 @@ export const firestoreService = {
     notifyListeners("compras", comprasList);
 
     clearFinanzasCache();
+    clearPeriodosFinancierosCache();
     return {
       id: compraDocId,
       folio: generatedCompraFolio,
@@ -3821,8 +3908,27 @@ export const firestoreService = {
     if (isConfigured && realDb) {
       try {
         const docRef = doc(collection(realDb, "gastos"));
-        await setDoc(docRef, payload);
+        const periodoKey = getPeriodoKey(gastoData.fecha);
+        const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+
+        await runTransaction(realDb, async (tx) => {
+          const periodSnap = periodRef ? await tx.get(periodRef) : null;
+          tx.set(docRef, payload);
+
+          if (periodRef && periodoKey) {
+            const updatedPeriod = computeNewPeriodIndexData(
+              periodSnap?.exists() ? periodSnap.data() : null,
+              periodoKey,
+              0,
+              0,
+              1
+            );
+            tx.set(periodRef, updatedPeriod, { merge: true });
+          }
+        });
+
         clearFinanzasCache();
+        clearPeriodosFinancierosCache();
 
         const createdGasto: Gasto = {
           id: docRef.id,
@@ -3873,7 +3979,7 @@ export const firestoreService = {
     setLocalStorageItem("gastos", list);
     notifyListeners("gastos", list);
     clearFinanzasCache();
-
+    clearPeriodosFinancierosCache();
     return createdLocal;
   },
 
@@ -3931,7 +4037,6 @@ export const firestoreService = {
     }
 
     // Almacén y nombre de almacén
-    // Si se elimina el almacén, elimina conjuntamente almacen_id y almacen_nombre
     if (gastoData.almacen_id !== undefined) {
       const cleanAlmId = typeof gastoData.almacen_id === "string" ? gastoData.almacen_id.trim() : "";
       if (cleanAlmId) {
@@ -3996,8 +4101,54 @@ export const firestoreService = {
     if (isConfigured && realDb) {
       try {
         const docRef = doc(realDb, "gastos", id);
-        await setDoc(docRef, updatePayload, { merge: true });
+
+        await runTransaction(realDb, async (tx) => {
+          const snap = await tx.get(docRef);
+          if (!snap.exists()) {
+            throw new Error("El gasto a actualizar no existe.");
+          }
+
+          const existingData = snap.data();
+          const oldPeriodKey = getPeriodoKey(existingData?.fecha);
+          const newPeriodKey = updatePayload.fecha !== undefined
+            ? getPeriodoKey(updatePayload.fecha)
+            : oldPeriodKey;
+
+          let oldPeriodSnap: any = null;
+          let newPeriodSnap: any = null;
+
+          if (oldPeriodKey && newPeriodKey && oldPeriodKey !== newPeriodKey) {
+            const oldPeriodRef = doc(realDb, "periodos_financieros", oldPeriodKey);
+            const newPeriodRef = doc(realDb, "periodos_financieros", newPeriodKey);
+            oldPeriodSnap = await tx.get(oldPeriodRef);
+            newPeriodSnap = await tx.get(newPeriodRef);
+
+            tx.set(docRef, updatePayload, { merge: true });
+
+            const updatedOld = computeNewPeriodIndexData(
+              oldPeriodSnap.exists() ? oldPeriodSnap.data() : null,
+              oldPeriodKey,
+              0,
+              0,
+              -1
+            );
+            tx.set(oldPeriodRef, updatedOld, { merge: true });
+
+            const updatedNew = computeNewPeriodIndexData(
+              newPeriodSnap.exists() ? newPeriodSnap.data() : null,
+              newPeriodKey,
+              0,
+              0,
+              1
+            );
+            tx.set(newPeriodRef, updatedNew, { merge: true });
+          } else {
+            tx.set(docRef, updatePayload, { merge: true });
+          }
+        });
+
         clearFinanzasCache();
+        clearPeriodosFinancierosCache();
         return;
       } catch (err: any) {
         console.error("Error al actualizar gasto en Firestore:", err);
@@ -4026,6 +4177,7 @@ export const firestoreService = {
       setLocalStorageItem("gastos", list);
       notifyListeners("gastos", list);
       clearFinanzasCache();
+      clearPeriodosFinancierosCache();
     }
   },
 
@@ -4035,8 +4187,36 @@ export const firestoreService = {
     if (isConfigured && realDb) {
       try {
         const docRef = doc(realDb, "gastos", id);
-        await deleteDoc(docRef);
+
+        await runTransaction(realDb, async (tx) => {
+          const snap = await tx.get(docRef);
+          if (snap.exists()) {
+            const data = snap.data();
+            const periodoKey = getPeriodoKey(data?.fecha);
+            let periodSnap: any = null;
+            let periodRef: any = null;
+            if (periodoKey) {
+              periodRef = doc(realDb, "periodos_financieros", periodoKey);
+              periodSnap = await tx.get(periodRef);
+            }
+
+            tx.delete(docRef);
+
+            if (periodRef && periodoKey) {
+              const updated = computeNewPeriodIndexData(
+                periodSnap?.exists() ? periodSnap.data() : null,
+                periodoKey,
+                0,
+                0,
+                -1
+              );
+              tx.set(periodRef, updated, { merge: true });
+            }
+          }
+        });
+
         clearFinanzasCache();
+        clearPeriodosFinancierosCache();
         return;
       } catch (err: any) {
         console.error("Error al eliminar gasto en Firestore:", err);
@@ -4049,6 +4229,7 @@ export const firestoreService = {
     setLocalStorageItem("gastos", updated);
     notifyListeners("gastos", updated);
     clearFinanzasCache();
+    clearPeriodosFinancierosCache();
   },
 
   // --- DASHBOARD FINANCIERO MENSUAL (FLUJO DE DINERO) ---

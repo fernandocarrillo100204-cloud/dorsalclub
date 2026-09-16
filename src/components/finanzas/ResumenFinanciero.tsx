@@ -32,8 +32,12 @@ import {
   Tooltip,
   Legend
 } from "recharts";
-import { DatosFinancierosMensuales } from "../../types";
+import { DatosFinancierosMensuales, PeriodoFinancieroIndex } from "../../types";
 import { firestoreService } from "../../lib/firebase";
+import {
+  getInitialSelectedPeriod,
+  getClosestValidPeriod
+} from "../../lib/periodosFinancieros";
 
 interface ResumenFinancieroProps {
   onNavigateToGastos: () => void;
@@ -87,6 +91,10 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
   const now = useMemo(() => new Date(), []);
   const currentMonth = now.getMonth() + 1;
   const currentYear = now.getFullYear();
+
+  // Available periods list from the lightweight index
+  const [availablePeriods, setAvailablePeriods] = useState<PeriodoFinancieroIndex[]>([]);
+  const [periodsLoaded, setPeriodsLoaded] = useState<boolean>(false);
 
   // Selected period state
   const [period, setPeriod] = useState<{ month: number; year: number }>({
@@ -154,43 +162,99 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
     };
   }, [isPopoverOpen]);
 
-  // Available years list (from 2020 up to currentYear + 1)
+  // Available years strictly derived from real records (no hardcoded fixed ranges)
   const availableYears = useMemo(() => {
-    const years: number[] = [];
-    for (let y = 2020; y <= currentYear + 1; y++) {
-      years.push(y);
+    const set = new Set<number>();
+    availablePeriods.forEach((p) => set.add(p.anio));
+    return Array.from(set).sort((a, b) => a - b);
+  }, [availablePeriods]);
+
+  // Sync popover year when popover opens
+  useEffect(() => {
+    if (isPopoverOpen) {
+      if (availableYears.includes(selectedYear)) {
+        setPopoverYear(selectedYear);
+      } else if (availableYears.length > 0) {
+        setPopoverYear(availableYears[availableYears.length - 1]);
+      }
     }
-    return years;
-  }, [currentYear]);
+  }, [isPopoverOpen, selectedYear, availableYears]);
 
-  const isCurrentMonthSelected = selectedMonth === currentMonth && selectedYear === currentYear;
-
-  // Change period atomically to prevent double Firestore queries
+  // Change period atomically to prevent double queries
   const changePeriod = useCallback((newMonth: number, newYear: number) => {
     if (newMonth === selectedMonth && newYear === selectedYear) return;
     setData(null);
     setPeriod({ month: newMonth, year: newYear });
   }, [selectedMonth, selectedYear]);
 
-  // Previous month handler (wrap Jan -> Dec of previous year, capped at 2020)
-  const handlePrevMonth = () => {
-    if (selectedYear <= 2020 && selectedMonth <= 1) return;
-    if (selectedMonth === 1) {
-      changePeriod(12, selectedYear - 1);
-    } else {
-      changePeriod(selectedMonth - 1, selectedYear);
+  // Navigation between real available periods (Jump between existing periods only)
+  const currentPeriodKey = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}`;
+  const currentPeriodIndex = availablePeriods.findIndex((p) => p.periodo === currentPeriodKey);
+
+  const hasValidCurrentPeriod = currentPeriodIndex !== -1;
+  const canPrevPeriod = hasValidCurrentPeriod && currentPeriodIndex > 0;
+  const canNextPeriod = hasValidCurrentPeriod && currentPeriodIndex < availablePeriods.length - 1;
+
+  const handlePrevPeriod = () => {
+    if (canPrevPeriod) {
+      const prev = availablePeriods[currentPeriodIndex - 1];
+      changePeriod(prev.mes, prev.anio);
     }
   };
 
-  // Next month handler (wrap Dec -> Jan of next year, capped at currentYear + 1)
-  const handleNextMonth = () => {
-    if (selectedYear >= currentYear + 1 && selectedMonth >= 12) return;
-    if (selectedMonth === 12) {
-      changePeriod(1, selectedYear + 1);
-    } else {
-      changePeriod(selectedMonth + 1, selectedYear);
+  const handleNextPeriod = () => {
+    if (canNextPeriod) {
+      const next = availablePeriods[currentPeriodIndex + 1];
+      changePeriod(next.mes, next.anio);
     }
   };
+
+  // Popover year navigation
+  const popoverYearIndex = availableYears.indexOf(popoverYear);
+  const canPrevPopoverYear = popoverYearIndex > 0;
+  const canNextPopoverYear = popoverYearIndex !== -1 && popoverYearIndex < availableYears.length - 1;
+
+  const handlePrevPopoverYear = () => {
+    if (canPrevPopoverYear) {
+      setPopoverYear(availableYears[popoverYearIndex - 1]);
+    }
+  };
+
+  const handleNextPopoverYear = () => {
+    if (canNextPopoverYear) {
+      setPopoverYear(availableYears[popoverYearIndex + 1]);
+    }
+  };
+
+  // Load available periods from Firestore/Local lightweight index
+  const loadAvailablePeriods = useCallback(async (forceRefresh: boolean = false): Promise<PeriodoFinancieroIndex[]> => {
+    try {
+      const periods = await firestoreService.getPeriodosFinancierosDisponibles(forceRefresh);
+      setAvailablePeriods(periods);
+      setPeriodsLoaded(true);
+
+      // Si el periodo actual no es válido en la nueva lista, seleccionar el periodo inicial adecuado
+      setPeriod((prev) => {
+        const key = `${prev.year}-${String(prev.month).padStart(2, "0")}`;
+        const exists = periods.some((p) => p.periodo === key);
+        if (exists) {
+          return prev;
+        }
+        const initial = getInitialSelectedPeriod(periods, currentYear, currentMonth);
+        return { month: initial.month, year: initial.year };
+      });
+
+      return periods;
+    } catch (err) {
+      console.error("Error al cargar periodos financieros disponibles:", err);
+      setPeriodsLoaded(true);
+      return [];
+    }
+  }, [currentYear, currentMonth]);
+
+  useEffect(() => {
+    loadAvailablePeriods(false);
+  }, [loadAvailablePeriods]);
 
   // Request ID counter to protect against out-of-order responses
   const requestIdRef = useRef<number>(0);
@@ -272,11 +336,34 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
   }, [selectedYear, selectedMonth]);
 
   useEffect(() => {
-    fetchData(false);
-  }, [fetchData]);
+    if (periodsLoaded) {
+      fetchData(false);
+    }
+  }, [fetchData, periodsLoaded]);
 
-  const handleResetToCurrentMonth = () => {
-    changePeriod(currentMonth, currentYear);
+  // Actualización manual y re-sincronización de periodos
+  const handleRefreshAll = async () => {
+    try {
+      setRefreshing(true);
+      const freshPeriods = await loadAvailablePeriods(true);
+      if (freshPeriods.length === 0) {
+        setData(null);
+        return;
+      }
+      const key = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}`;
+      const stillExists = freshPeriods.some((p) => p.periodo === key);
+      if (!stillExists) {
+        const closest = getClosestValidPeriod(selectedYear, selectedMonth, freshPeriods);
+        changePeriod(closest.month, closest.year);
+      } else {
+        await fetchData(true);
+      }
+    } catch (err) {
+      console.error("Error al refrescar finanzas:", err);
+      await fetchData(true);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const monthLabel = useMemo(() => {
@@ -329,15 +416,15 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
             Periodo
           </span>
 
-          {/* Botón: Mes anterior */}
+          {/* Botón: Periodo anterior */}
           <button
             type="button"
             id="btn-periodo-anterior"
-            onClick={handlePrevMonth}
-            disabled={(selectedYear <= 2020 && selectedMonth <= 1) || (initialLoading && !data)}
-            aria-label="Mes anterior"
-            title="Mes anterior"
-            className="h-10 w-10 flex items-center justify-center rounded-xl bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-700/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition-colors shadow-2xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
+            onClick={handlePrevPeriod}
+            disabled={!canPrevPeriod || initialLoading}
+            aria-label="Periodo anterior"
+            title={canPrevPeriod ? "Periodo anterior disponible" : "Primer periodo disponible"}
+            className="h-10 w-10 flex items-center justify-center rounded-xl bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-700/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition-colors shadow-2xs cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -349,25 +436,41 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
               id="btn-selector-periodo"
               ref={periodButtonRef}
               onClick={() => {
-                setPopoverYear(selectedYear);
-                setIsPopoverOpen((prev) => !prev);
+                if (availablePeriods.length > 0) {
+                  setIsPopoverOpen((prev) => !prev);
+                }
               }}
+              disabled={availablePeriods.length === 0}
               aria-expanded={isPopoverOpen}
               aria-haspopup="dialog"
-              aria-label={`Periodo actual: ${monthLabel} ${selectedYear}. Haz clic para cambiar mes o año`}
-              className="h-10 px-3 sm:px-3.5 flex items-center space-x-2 rounded-xl bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-700/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-[#172033] dark:text-[#F8FAFC] text-xs sm:text-sm font-semibold transition-colors shadow-2xs cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
+              aria-label={
+                availablePeriods.length === 0
+                  ? "Sin registros financieros en el sistema"
+                  : `Periodo actual: ${monthLabel} ${selectedYear}. Haz clic para ver los meses disponibles`
+              }
+              className={`h-10 px-3 sm:px-3.5 flex items-center space-x-2 rounded-xl bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-700/80 text-[#172033] dark:text-[#F8FAFC] text-xs sm:text-sm font-semibold transition-colors shadow-2xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669] ${
+                availablePeriods.length === 0
+                  ? "opacity-60 cursor-not-allowed"
+                  : "hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+              }`}
             >
               <CalendarDays className="h-4 w-4 text-[#059669] shrink-0" />
-              <span className="capitalize">{monthLabel} {selectedYear}</span>
-              <ChevronDown
-                className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-150 ${
-                  isPopoverOpen ? "rotate-180" : ""
-                }`}
-              />
+              <span className="capitalize">
+                {availablePeriods.length === 0
+                  ? `${monthLabel} ${selectedYear} (Sin registros)`
+                  : `${monthLabel} ${selectedYear}`}
+              </span>
+              {availablePeriods.length > 0 && (
+                <ChevronDown
+                  className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-150 ${
+                    isPopoverOpen ? "rotate-180" : ""
+                  }`}
+                />
+              )}
             </button>
 
-            {/* Popover compacto de selección de periodo */}
-            {isPopoverOpen && (
+            {/* Popover compacto de selección de periodo (Sólo con registros reales) */}
+            {isPopoverOpen && availablePeriods.length > 0 && (
               <div
                 ref={popoverRef}
                 role="dialog"
@@ -375,58 +478,77 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
                 aria-modal="true"
                 className="absolute right-0 top-full mt-2 z-50 w-72 sm:w-80 max-w-[calc(100vw-2rem)] p-3 bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl transition-all"
               >
-                {/* Encabezado del Popover: Navegación de Año */}
+                {/* Encabezado del Popover: Navegación de Años disponibles con registros */}
                 <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-slate-100 dark:border-slate-800">
                   <button
                     type="button"
-                    onClick={() => setPopoverYear((prev) => Math.max(2020, prev - 1))}
-                    disabled={popoverYear <= 2020}
-                    aria-label="Año anterior"
-                    title="Año anterior"
-                    className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
+                    onClick={handlePrevPopoverYear}
+                    disabled={!canPrevPopoverYear}
+                    aria-label="Año anterior con registros"
+                    title={canPrevPopoverYear ? "Año anterior con registros" : "Primer año con registros"}
+                    className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </button>
 
-                  <span className="text-sm font-bold text-[#172033] dark:text-[#F8FAFC]">
-                    {popoverYear}
-                  </span>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="text-sm font-bold text-[#172033] dark:text-[#F8FAFC]">
+                      {popoverYear}
+                    </span>
+                    <span className="text-[11px] text-[#64748B] dark:text-[#94A3B8] font-medium">
+                      ({availablePeriods.filter((p) => p.anio === popoverYear).length}{" "}
+                      {availablePeriods.filter((p) => p.anio === popoverYear).length === 1 ? "mes" : "meses"})
+                    </span>
+                  </div>
 
                   <button
                     type="button"
-                    onClick={() => setPopoverYear((prev) => Math.min(currentYear + 1, prev + 1))}
-                    disabled={popoverYear >= currentYear + 1}
-                    aria-label="Año siguiente"
-                    title="Año siguiente"
-                    className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
+                    onClick={handleNextPopoverYear}
+                    disabled={!canNextPopoverYear}
+                    aria-label="Año siguiente con registros"
+                    title={canNextPopoverYear ? "Año siguiente con registros" : "Último año con registros"}
+                    className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
                   >
                     <ChevronRight className="h-4 w-4" />
                   </button>
                 </div>
 
-                {/* Cuadrícula de 12 meses */}
+                {/* Cuadrícula de 12 meses: Solo seleccionables los que tienen registros */}
                 <div className="grid grid-cols-3 gap-1.5">
                   {MESES.map((m) => {
+                    const periodKey = `${popoverYear}-${String(m.value).padStart(2, "0")}`;
+                    const periodData = availablePeriods.find((p) => p.periodo === periodKey);
+                    const hasRecords = Boolean(periodData && periodData.totalRegistrosActivos > 0);
                     const isSelected = popoverYear === selectedYear && m.value === selectedMonth;
-                    const isCurrentCal = popoverYear === currentYear && m.value === currentMonth;
 
                     return (
                       <button
                         key={m.value}
                         type="button"
+                        disabled={!hasRecords}
                         onClick={() => {
-                          changePeriod(m.value, popoverYear);
-                          setIsPopoverOpen(false);
+                          if (hasRecords) {
+                            changePeriod(m.value, popoverYear);
+                            setIsPopoverOpen(false);
+                          }
                         }}
-                        className={`min-h-[38px] px-2 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669] ${
-                          isSelected
-                            ? "bg-[#059669] text-white shadow-xs"
-                            : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80"
+                        aria-disabled={!hasRecords}
+                        title={
+                          hasRecords
+                            ? `${m.label} ${popoverYear}: ${periodData?.totalRegistrosActivos} registro(s) activo(s)`
+                            : `${m.label} ${popoverYear}: Sin movimientos registrados`
+                        }
+                        className={`min-h-[38px] px-2 py-1.5 rounded-xl text-xs font-semibold transition-all relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669] ${
+                          !hasRecords
+                            ? "opacity-20 text-slate-400 dark:text-slate-600 bg-transparent cursor-not-allowed select-none"
+                            : isSelected
+                            ? "bg-[#059669] text-white shadow-xs cursor-pointer"
+                            : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 cursor-pointer"
                         }`}
                       >
                         <span>{m.label}</span>
-                        {isCurrentCal && !isSelected && (
-                          <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#059669]" />
+                        {hasRecords && !isSelected && (
+                          <span className="absolute bottom-1 right-2 w-1.5 h-1.5 rounded-full bg-[#059669]" />
                         )}
                       </button>
                     );
@@ -436,15 +558,15 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
             )}
           </div>
 
-          {/* Botón: Mes siguiente */}
+          {/* Botón: Periodo siguiente */}
           <button
             type="button"
             id="btn-periodo-siguiente"
-            onClick={handleNextMonth}
-            disabled={(selectedYear >= currentYear + 1 && selectedMonth >= 12) || (initialLoading && !data)}
-            aria-label="Mes siguiente"
-            title="Mes siguiente"
-            className="h-10 w-10 flex items-center justify-center rounded-xl bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-700/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition-colors shadow-2xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
+            onClick={handleNextPeriod}
+            disabled={!canNextPeriod || initialLoading}
+            aria-label="Periodo siguiente"
+            title={canNextPeriod ? "Periodo siguiente disponible" : "Último periodo disponible"}
+            className="h-10 w-10 flex items-center justify-center rounded-xl bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-700/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition-colors shadow-2xs cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
@@ -453,7 +575,7 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
           <button
             type="button"
             id="btn-finanzas-actualizar"
-            onClick={() => fetchData(true)}
+            onClick={handleRefreshAll}
             disabled={initialLoading || refreshing}
             aria-label="Actualizar datos"
             title="Actualizar datos"
@@ -503,7 +625,7 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
             <button
               type="button"
               id="btn-reintentar-finanzas"
-              onClick={() => fetchData(true)}
+              onClick={handleRefreshAll}
               className="inline-flex items-center space-x-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-rose-600 text-white hover:bg-rose-700 shadow-xs cursor-pointer transition-colors"
             >
               <RotateCcw className="h-3.5 w-3.5" />
@@ -513,8 +635,25 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
         </div>
       )}
 
+      {/* Empty state: No financial movements in the system */}
+      {availablePeriods.length === 0 && periodsLoaded && !initialLoading && !error && (
+        <div className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-2xl p-10 sm:p-14 text-center max-w-xl mx-auto shadow-2xs space-y-4">
+          <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 mx-auto flex items-center justify-center">
+            <CalendarDays className="w-6 h-6" />
+          </div>
+          <div className="space-y-1.5">
+            <h3 className="text-base font-semibold text-[#172033] dark:text-[#F8FAFC]">
+              Sin registros financieros en el sistema
+            </h3>
+            <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8] max-w-md mx-auto leading-relaxed">
+              Aún no existen ventas activas, compras ni gastos registrados. Los meses y años disponibles se habilitarán automáticamente a partir de tus movimientos contables reales.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Visualización de métricas y gráficas: se muestran skeletons en carga inicial o los datos válidos del periodo */}
-      {(initialLoading || isDataValidForPeriod) && (
+      {(initialLoading || (isDataValidForPeriod && availablePeriods.length > 0)) && (
         <>
           {/* Main Metric Cards (5 Cards) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
