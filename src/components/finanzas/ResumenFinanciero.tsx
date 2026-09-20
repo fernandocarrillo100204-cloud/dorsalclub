@@ -822,7 +822,6 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
                 {formatMoney(data?.comprasTotales || 0)}
               </div>
             )}
-            
             {/* Desglose pequeño */}
             <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800/80 space-y-0.5 text-[10.5px] text-[#64748B] dark:text-[#94A3B8]">
               <div className="flex justify-between">
@@ -1223,6 +1222,39 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
               </div>
             )}
           </div>
+
+          {/* Bloque compacto: Costos asociados a ventas */}
+          {!initialLoading && data && ((data.costosEnvioVentas || 0) > 0 || (data.otrosCostosVentas || 0) > 0) && (
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/80">
+              <h4 className="text-xs font-bold text-[#172033] dark:text-[#F8FAFC] uppercase tracking-wider mb-2">
+                Costos asociados a ventas
+              </h4>
+              <div className="space-y-1 text-xs text-[#64748B] dark:text-[#94A3B8] bg-slate-50 dark:bg-slate-800/40 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800">
+                {(data.costosEnvioVentas || 0) > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span>Envíos:</span>
+                    <span className="font-mono text-[#172033] dark:text-[#F8FAFC] font-medium">
+                      {formatMoney(data.costosEnvioVentas || 0)}
+                    </span>
+                  </div>
+                )}
+                {(data.otrosCostosVentas || 0) > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span>Otros costos:</span>
+                    <span className="font-mono text-[#172033] dark:text-[#F8FAFC] font-medium">
+                      {formatMoney(data.otrosCostosVentas || 0)}
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between pt-1 border-t border-slate-200 dark:border-slate-700 text-[#172033] dark:text-[#F8FAFC] font-semibold">
+                  <span>Total:</span>
+                  <span className="font-mono">
+                    {formatMoney((data.costosEnvioVentas || 0) + (data.otrosCostosVentas || 0))}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Desglose de gastos operativos por categoría (ordenado de mayor a menor) */}
           <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/80">

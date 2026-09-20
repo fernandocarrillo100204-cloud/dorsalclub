@@ -6,12 +6,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
 import { Movimiento, Almacen, Producto, Cliente, getTotalCobradoVenta, getSubtotalVenta, getTotalCostosVenta } from "../types";
-import { 
-  History, 
-  Search, 
-  ArrowRightLeft, 
-  TrendingUp, 
-  TrendingDown, 
+import {
+  History,
+  Search,
+  ArrowRightLeft,
+  TrendingUp,
+  TrendingDown,
   SlidersHorizontal,
   FileSpreadsheet,
   Layers,
@@ -40,10 +40,10 @@ interface HistorialProps {
   onNavigateToCliente?: (clienteId: string) => void;
 }
 
-export default function Historial({ 
-  almacenes, 
-  productos, 
-  preselectedSku = "", 
+export default function Historial({
+  almacenes,
+  productos,
+  preselectedSku = "",
   preselectedClienteId = "",
   onClearPreselectedSku,
   onNavigateToCliente
@@ -54,14 +54,14 @@ export default function Historial({
   const [tipoFilter, setTipoFilter] = useState("all");
   const [estadoFilter, setEstadoFilter] = useState("all"); // "all" | "activo" | "anulado"
   const [clienteFilter, setClienteFilter] = useState(preselectedClienteId || "all");
-  
+
   const [clientesList, setClientesList] = useState<Cliente[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [lastDocCursor, setLastDocCursor] = useState<any>(null);
   const [hasMore, setHasMore] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  
+
   const [movToAnular, setMovToAnular] = useState<Movimiento | null>(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
   const [isAnulando, setIsAnulando] = useState(false);
@@ -172,7 +172,7 @@ export default function Historial({
     setAnularError(null);
     try {
       await firestoreService.anularMovimiento(movToAnular.id, reason);
-      
+
       // Update local state item immediately
       setMovimientos(prev => prev.map(m => {
         if (m.id === movToAnular.id) {
@@ -267,8 +267,8 @@ export default function Historial({
             <span>
               Filtrando ventas asociadas a:{" "}
               <strong>
-                {clienteFilter === "mostrador" 
-                  ? "🏪 Venta sin cliente / Mostrador" 
+                {clienteFilter === "mostrador"
+                  ? "🏪 Venta sin cliente / Mostrador"
                   : activeClienteObj?.nombre_completo || clienteFilter}
               </strong>
             </span>
@@ -448,32 +448,32 @@ export default function Historial({
 
                   switch (mov.tipo) {
                     case "entrada":
-                      badgeColorClass = isAnulado 
-                        ? "bg-zinc-100 text-zinc-400" 
+                      badgeColorClass = isAnulado
+                        ? "bg-zinc-100 text-zinc-400"
                         : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800";
                       typeLabel = "Compra / Entrada";
                       qtyPrefix = "+";
                       qtyColorClass = isAnulado ? "text-zinc-400 line-through" : "text-emerald-600 dark:text-emerald-400 font-semibold";
                       break;
                     case "salida":
-                      badgeColorClass = isAnulado 
-                        ? "bg-zinc-100 text-zinc-400" 
+                      badgeColorClass = isAnulado
+                        ? "bg-zinc-100 text-zinc-400"
                         : "bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-400 border border-rose-200 dark:border-rose-800";
                       typeLabel = "Venta";
                       qtyPrefix = "-";
                       qtyColorClass = isAnulado ? "text-zinc-400 line-through" : "text-rose-600 dark:text-rose-400 font-semibold";
                       break;
                     case "transferencia":
-                      badgeColorClass = isAnulado 
-                        ? "bg-zinc-100 text-zinc-400" 
+                      badgeColorClass = isAnulado
+                        ? "bg-zinc-100 text-zinc-400"
                         : "bg-sky-50 text-sky-700 dark:bg-sky-950/50 dark:text-sky-400 border border-sky-200 dark:border-sky-800";
                       typeLabel = "Transferencia";
                       qtyPrefix = "⇆";
                       qtyColorClass = isAnulado ? "text-zinc-400 line-through" : "text-sky-600 dark:text-sky-400 font-semibold";
                       break;
                     case "ajuste":
-                      badgeColorClass = isAnulado 
-                        ? "bg-zinc-100 text-zinc-400" 
+                      badgeColorClass = isAnulado
+                        ? "bg-zinc-100 text-zinc-400"
                         : "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400 border border-amber-200 dark:border-amber-800";
                       typeLabel = "Ajuste";
                       qtyPrefix = "±";
@@ -492,11 +492,11 @@ export default function Historial({
                   const tieneAjustes = isSalida && (envioCobrado > 0 || otrosCargos > 0 || (totalCostos !== null && totalCostos > 0));
 
                   return (
-                    <tr 
-                      key={mov.id} 
+                    <tr
+                      key={mov.id}
                       className={`transition-colors ${
-                        isAnulado 
-                          ? "bg-rose-50/20 dark:bg-rose-950/10 opacity-70 hover:opacity-100" 
+                        isAnulado
+                          ? "bg-rose-50/20 dark:bg-rose-950/10 opacity-70 hover:opacity-100"
                           : "hover:bg-zinc-50/70 dark:hover:bg-zinc-800/40"
                       }`}
                     >
@@ -514,7 +514,7 @@ export default function Historial({
                       {/* Estado */}
                       <td className="py-3 px-3 whitespace-nowrap">
                         {isAnulado ? (
-                          <span 
+                          <span
                             className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/80 gap-1"
                             title={mov.motivo_anulacion ? `Motivo: ${mov.motivo_anulacion}` : "Movimiento Anulado"}
                           >
@@ -637,10 +637,16 @@ export default function Historial({
                                     <span className="font-mono font-medium">+${otrosCargos.toFixed(2)}</span>
                                   </div>
                                 )}
-                                {totalCostos !== null && totalCostos > 0 && (
-                                  <div className="flex items-center justify-between gap-2 text-zinc-400 dark:text-zinc-500 pt-0.5 border-t border-zinc-100 dark:border-zinc-800" title={`Costo envío $${costoEnvio.toFixed(2)}, Otros costos $${otrosCostos.toFixed(2)}`}>
-                                    <span>Costos venta:</span>
-                                    <span className="font-mono">-${totalCostos.toFixed(2)}</span>
+                                {costoEnvio > 0 && (
+                                  <div className="flex items-center justify-between gap-2 text-zinc-500 dark:text-zinc-400 pt-0.5 border-t border-zinc-100 dark:border-zinc-800">
+                                    <span>Costo de envío:</span>
+                                    <span className="font-mono text-zinc-700 dark:text-zinc-300">${costoEnvio.toFixed(2)}</span>
+                                  </div>
+                                )}
+                                {otrosCostos > 0 && (
+                                  <div className={`flex items-center justify-between gap-2 text-zinc-500 dark:text-zinc-400 ${costoEnvio === 0 ? "pt-0.5 border-t border-zinc-100 dark:border-zinc-800" : ""}`} title={mov.concepto_otros_costos}>
+                                    <span>Otros costos{mov.concepto_otros_costos ? ` (${mov.concepto_otros_costos})` : ""}:</span>
+                                    <span className="font-mono text-zinc-700 dark:text-zinc-300">${otrosCostos.toFixed(2)}</span>
                                   </div>
                                 )}
                               </div>
@@ -663,7 +669,7 @@ export default function Historial({
                           {mov.referencia || "—"}
                         </div>
                         {mov.comentarios_venta && (
-                          <div 
+                          <div
                             className="text-[11px] text-zinc-700 dark:text-zinc-300 mt-1 p-1.5 rounded-lg bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-100 dark:border-zinc-700/60 line-clamp-2"
                             title={`Comentarios: ${mov.comentarios_venta}`}
                           >
@@ -691,7 +697,7 @@ export default function Historial({
                       {/* Action Anular */}
                       <td className="py-3 px-3 text-right">
                         {isAnulado ? (
-                          <span 
+                          <span
                             className="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-400 py-1 px-2 cursor-not-allowed select-none"
                             title="Este movimiento ya fue anulado y su stock revertido"
                           >

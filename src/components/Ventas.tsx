@@ -317,8 +317,8 @@ export default function Ventas({
       const conceptoOtrosCostosFinal = otrosCostosFinal && conceptoOtrosCostos.trim() ? conceptoOtrosCostos.trim() : undefined;
 
       const totalCobradoFinal = Math.round((totalMercancia + envioCobradoValidated + otrosCargosValidated + Number.EPSILON) * 100) / 100;
-      const totalCostosVentaFinal = (costoEnvioValidated + otrosCostosValidated) > 0 
-        ? Math.round((costoEnvioValidated + otrosCostosValidated + Number.EPSILON) * 100) / 100 
+      const totalCostosVentaFinal = (costoEnvioValidated + otrosCostosValidated) > 0
+        ? Math.round((costoEnvioValidated + otrosCostosValidated + Number.EPSILON) * 100) / 100
         : undefined;
 
       const cleanComentarios = comentariosVenta.trim();
