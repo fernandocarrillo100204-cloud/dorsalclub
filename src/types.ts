@@ -79,6 +79,7 @@ export interface Movimiento {
   concepto_otros_costos?: string;
   total_cobrado?: number;
   total_costos_venta?: number;
+  comentarios_venta?: string; // Comentarios u observaciones opcionales de la venta
   estado?: "activo" | "anulado"; // Estado del movimiento (por defecto activo)
   anulado_at?: {
     seconds: number;
@@ -407,6 +408,119 @@ export interface DatosFinancierosMensuales {
   gastosPorCategoria: CategoriaGastoDesglose[];
   // Puntos diarios para la gráfica
   dailyData: FinanzasDiaPunto[];
+}
+
+/**
+ * Normaliza y valida de forma segura un valor monetario opcional.
+ * - Rechaza valores negativos, NaN, Infinity y -Infinity.
+ * - Trata campos vacíos o sólo espacios como 0.
+ * - Redondea a 2 decimales con precisión.
+ */
+export function normalizeOptionalMoney(value: string | number | undefined | null): number {
+  if (value === undefined || value === null) return 0;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error("Importe inválido");
+    }
+    return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+  const str = String(value).trim();
+  if (!str) return 0;
+
+  const parsed = Number(str.replace(/,/g, ""));
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error("Importe inválido");
+  }
+
+  return Math.round((parsed + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Obtiene el subtotal de mercancía de una venta.
+ * Regla: total_venta válido o precio_unitario_venta * cantidad o 0.
+ * Siempre finito y >= 0.
+ */
+export function getSubtotalVenta(movimiento: Partial<Movimiento> | null | undefined): number {
+  if (!movimiento) return 0;
+  if (
+    typeof movimiento.total_venta === "number" &&
+    Number.isFinite(movimiento.total_venta) &&
+    movimiento.total_venta >= 0
+  ) {
+    return Math.round((movimiento.total_venta + Number.EPSILON) * 100) / 100;
+  }
+  const pu =
+    typeof movimiento.precio_unitario_venta === "number" &&
+    Number.isFinite(movimiento.precio_unitario_venta) &&
+    movimiento.precio_unitario_venta >= 0
+      ? movimiento.precio_unitario_venta
+      : 0;
+  const cant =
+    typeof movimiento.cantidad === "number" &&
+    Number.isFinite(movimiento.cantidad) &&
+    movimiento.cantidad >= 0
+      ? movimiento.cantidad
+      : 0;
+  return Math.round((pu * cant + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Obtiene el total efectivamente cobrado al cliente en una venta.
+ * Regla: total_cobrado válido o subtotal + envio_cobrado_cliente + otros_cargos_cliente.
+ * Siempre finito y >= 0.
+ */
+export function getTotalCobradoVenta(movimiento: Partial<Movimiento> | null | undefined): number {
+  if (!movimiento) return 0;
+  if (
+    typeof movimiento.total_cobrado === "number" &&
+    Number.isFinite(movimiento.total_cobrado) &&
+    movimiento.total_cobrado >= 0
+  ) {
+    return Math.round((movimiento.total_cobrado + Number.EPSILON) * 100) / 100;
+  }
+  const subtotal = getSubtotalVenta(movimiento);
+  const envio =
+    typeof movimiento.envio_cobrado_cliente === "number" &&
+    Number.isFinite(movimiento.envio_cobrado_cliente) &&
+    movimiento.envio_cobrado_cliente >= 0
+      ? movimiento.envio_cobrado_cliente
+      : 0;
+  const otros =
+    typeof movimiento.otros_cargos_cliente === "number" &&
+    Number.isFinite(movimiento.otros_cargos_cliente) &&
+    movimiento.otros_cargos_cliente >= 0
+      ? movimiento.otros_cargos_cliente
+      : 0;
+  return Math.round((subtotal + envio + otros + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Obtiene los costos directos asociados a la venta asumidos por el negocio.
+ * Regla: total_costos_venta válido o costo_envio_venta + otros_costos_venta.
+ * Siempre finito y >= 0.
+ */
+export function getTotalCostosVenta(movimiento: Partial<Movimiento> | null | undefined): number {
+  if (!movimiento) return 0;
+  if (
+    typeof movimiento.total_costos_venta === "number" &&
+    Number.isFinite(movimiento.total_costos_venta) &&
+    movimiento.total_costos_venta >= 0
+  ) {
+    return Math.round((movimiento.total_costos_venta + Number.EPSILON) * 100) / 100;
+  }
+  const envio =
+    typeof movimiento.costo_envio_venta === "number" &&
+    Number.isFinite(movimiento.costo_envio_venta) &&
+    movimiento.costo_envio_venta >= 0
+      ? movimiento.costo_envio_venta
+      : 0;
+  const otros =
+    typeof movimiento.otros_costos_venta === "number" &&
+    Number.isFinite(movimiento.otros_costos_venta) &&
+    movimiento.otros_costos_venta >= 0
+      ? movimiento.otros_costos_venta
+      : 0;
+  return Math.round((envio + otros + Number.EPSILON) * 100) / 100;
 }
 
 

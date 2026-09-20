@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from "react";
-import { Cliente, Movimiento, TipoCliente, EstadoCliente } from "../types";
+import { Cliente, Movimiento, TipoCliente, EstadoCliente, getTotalCobradoVenta } from "../types";
 import { firestoreService } from "../lib/firebase";
 import ClienteModal from "./ClienteModal";
 import {
@@ -151,9 +151,7 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
     let latestDate: Date | null = null;
 
     activeMovs.forEach((m) => {
-      const saleTotal = typeof m.total_venta === "number" 
-        ? m.total_venta 
-        : (typeof m.precio_unitario_venta === "number" ? m.precio_unitario_venta * m.cantidad : 0);
+      const saleTotal = getTotalCobradoVenta(m);
       total += saleTotal;
 
       const dateObj = m.fecha instanceof Date 
@@ -817,9 +815,7 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
                 ) : (
                   <div className="border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden divide-y divide-zinc-200 dark:divide-zinc-800 text-xs">
                     {clienteMovimientos.map((m) => {
-                      const totalVal = typeof m.total_venta === "number"
-                        ? m.total_venta
-                        : (typeof m.precio_unitario_venta === "number" ? m.precio_unitario_venta * m.cantidad : 0);
+                      const totalVal = getTotalCobradoVenta(m);
 
                       return (
                         <div key={m.id || m.folio} className="p-3 bg-white dark:bg-zinc-900/60 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 flex items-center justify-between gap-3">

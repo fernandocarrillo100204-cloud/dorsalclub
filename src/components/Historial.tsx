@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
-import { Movimiento, Almacen, Producto, Cliente } from "../types";
+import { Movimiento, Almacen, Producto, Cliente, getTotalCobradoVenta, getSubtotalVenta, getTotalCostosVenta } from "../types";
 import { 
   History, 
   Search, 
@@ -417,7 +417,7 @@ export default function Historial({
                   <th className="py-3 px-3">Operación</th>
                   <th className="py-3 px-3">Cliente / Destino</th>
                   <th className="py-3 px-3 text-center">Cant.</th>
-                  <th className="py-3 px-3">Total Venta</th>
+                  <th className="py-3 px-3">Total Cobrado</th>
                   <th className="py-3 px-3">Referencia</th>
                   <th className="py-3 px-3">Usuario</th>
                   <th className="py-3 px-3 text-right">Acción</th>
@@ -481,9 +481,15 @@ export default function Historial({
                       break;
                   }
 
-                  const totalVentaVal = typeof mov.total_venta === "number"
-                    ? mov.total_venta
-                    : (typeof mov.precio_unitario_venta === "number" ? mov.precio_unitario_venta * mov.cantidad : null);
+                  const isSalida = mov.tipo === "salida";
+                  const totalCobrado = isSalida ? getTotalCobradoVenta(mov) : null;
+                  const subtotalMercancia = isSalida ? getSubtotalVenta(mov) : null;
+                  const totalCostos = isSalida ? getTotalCostosVenta(mov) : null;
+                  const envioCobrado = typeof mov.envio_cobrado_cliente === "number" ? mov.envio_cobrado_cliente : 0;
+                  const otrosCargos = typeof mov.otros_cargos_cliente === "number" ? mov.otros_cargos_cliente : 0;
+                  const costoEnvio = typeof mov.costo_envio_venta === "number" ? mov.costo_envio_venta : 0;
+                  const otrosCostos = typeof mov.otros_costos_venta === "number" ? mov.otros_costos_venta : 0;
+                  const tieneAjustes = isSalida && (envioCobrado > 0 || otrosCargos > 0 || (totalCostos !== null && totalCostos > 0));
 
                   return (
                     <tr 
@@ -608,37 +614,65 @@ export default function Historial({
                         {qtyPrefix} {mov.cantidad}
                       </td>
 
-                      {/* Total Venta */}
+                      {/* Total Cobrado / Importe */}
                       <td className="py-3 px-3 font-mono text-zinc-900 dark:text-white">
-                        {totalVentaVal !== null ? (
+                        {isSalida && totalCobrado !== null ? (
                           <div>
-                            <span className="font-bold">${totalVentaVal.toFixed(2)}</span>
-                            {mov.precio_unitario_venta && (
-                              <span className="text-[10px] text-zinc-400 block">
-                                (${mov.precio_unitario_venta.toFixed(2)} c/u)
-                              </span>
+                            <span className="font-bold text-sm block">${totalCobrado.toFixed(2)}</span>
+                            {tieneAjustes ? (
+                              <div className="text-[10px] space-y-0.5 mt-1 text-zinc-500 dark:text-zinc-400 font-sans leading-tight">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span>Mercancía:</span>
+                                  <span className="font-mono">${subtotalMercancia?.toFixed(2)}</span>
+                                </div>
+                                {envioCobrado > 0 && (
+                                  <div className="flex items-center justify-between gap-2 text-rose-600 dark:text-rose-400">
+                                    <span>+ Envío cobrado:</span>
+                                    <span className="font-mono font-medium">+${envioCobrado.toFixed(2)}</span>
+                                  </div>
+                                )}
+                                {otrosCargos > 0 && (
+                                  <div className="flex items-center justify-between gap-2 text-rose-600 dark:text-rose-400" title={mov.concepto_otros_cargos}>
+                                    <span>+ Otros cargos{mov.concepto_otros_cargos ? ` (${mov.concepto_otros_cargos})` : ""}:</span>
+                                    <span className="font-mono font-medium">+${otrosCargos.toFixed(2)}</span>
+                                  </div>
+                                )}
+                                {totalCostos !== null && totalCostos > 0 && (
+                                  <div className="flex items-center justify-between gap-2 text-zinc-400 dark:text-zinc-500 pt-0.5 border-t border-zinc-100 dark:border-zinc-800" title={`Costo envío $${costoEnvio.toFixed(2)}, Otros costos $${otrosCostos.toFixed(2)}`}>
+                                    <span>Costos venta:</span>
+                                    <span className="font-mono">-${totalCostos.toFixed(2)}</span>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              mov.precio_unitario_venta && (
+                                <span className="text-[10px] text-zinc-400 block font-sans">
+                                  (${mov.precio_unitario_venta.toFixed(2)} c/u)
+                                </span>
+                              )
                             )}
-                            {mov.total_cobrado !== undefined && mov.total_cobrado !== totalVentaVal && (
-                              <span className="text-[10px] text-rose-600 dark:text-rose-400 font-semibold block" title="Total cobrado al cliente con envío y cargos">
-                                Cobrado: ${mov.total_cobrado.toFixed(2)}
-                              </span>
-                            )}
-                            {(mov.costo_envio_venta || mov.otros_costos_venta) ? (
-                              <span className="text-[10px] text-zinc-400 block" title="Costos asumidos por el negocio">
-                                Costos: ${((mov.costo_envio_venta || 0) + (mov.otros_costos_venta || 0)).toFixed(2)}
-                              </span>
-                            ) : null}
                           </div>
                         ) : (
                           <span className="text-zinc-400 text-xs">—</span>
                         )}
                       </td>
 
-                      {/* Reference string */}
-                      <td className="py-3 px-3 text-zinc-500 text-xs max-w-xs truncate" title={mov.referencia}>
-                        {mov.referencia || "—"}
+                      {/* Reference string & Comments */}
+                      <td className="py-3 px-3 text-zinc-500 text-xs max-w-xs">
+                        <div className="truncate" title={mov.referencia}>
+                          {mov.referencia || "—"}
+                        </div>
+                        {mov.comentarios_venta && (
+                          <div 
+                            className="text-[11px] text-zinc-700 dark:text-zinc-300 mt-1 p-1.5 rounded-lg bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-100 dark:border-zinc-700/60 line-clamp-2"
+                            title={`Comentarios: ${mov.comentarios_venta}`}
+                          >
+                            <span className="font-semibold text-zinc-500 dark:text-zinc-400 mr-1 not-italic">💬</span>
+                            <span className="italic">{mov.comentarios_venta}</span>
+                          </div>
+                        )}
                         {isAnulado && mov.motivo_anulacion && (
-                          <span className="block not-italic text-[10px] text-rose-600 dark:text-rose-400 mt-0.5 truncate font-normal">
+                          <span className="block not-italic text-[10px] text-rose-600 dark:text-rose-400 mt-1 truncate font-normal">
                             Motivo: {mov.motivo_anulacion}
                           </span>
                         )}

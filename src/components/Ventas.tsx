@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
-import { Almacen, Producto, StockItem, Cliente, TipoCliente } from "../types";
+import { Almacen, Producto, StockItem, Cliente, TipoCliente, normalizeOptionalMoney } from "../types";
 import ClienteModal from "./ClienteModal";
 import {
   TrendingDown,
@@ -65,6 +65,7 @@ export default function Ventas({
   const [costoEnvioVenta, setCostoEnvioVenta] = useState<string>("");
   const [otrosCostosVenta, setOtrosCostosVenta] = useState<string>("");
   const [conceptoOtrosCostos, setConceptoOtrosCostos] = useState<string>("");
+  const [comentariosVenta, setComentariosVenta] = useState<string>("");
 
   // Client Selection State
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -172,10 +173,11 @@ export default function Ventas({
   const totalCalculado = totalMercancia; // total_venta: precio_unitario_venta * cantidad
 
   const parseNumField = (val: string): number => {
-    if (!val || !val.trim()) return 0;
-    const clean = val.replace(/,/g, "").trim();
-    const parsed = parseFloat(clean);
-    return isNaN(parsed) || parsed < 0 ? 0 : parsed;
+    try {
+      return normalizeOptionalMoney(val);
+    } catch {
+      return 0;
+    }
   };
 
   const envioCobradoNum = parseNumField(envioCobradoCliente);
@@ -257,21 +259,37 @@ export default function Ventas({
       return;
     }
 
-    // Validar importes y costos opcionales
-    if (envioCobradoCliente && (isNaN(Number(envioCobradoCliente)) || Number(envioCobradoCliente) < 0)) {
-      setFormError("El envío cobrado al cliente debe ser un número mayor o igual a cero.");
+    // Validar importes y costos opcionales con normalizeOptionalMoney
+    let envioCobradoValidated = 0;
+    let otrosCargosValidated = 0;
+    let costoEnvioValidated = 0;
+    let otrosCostosValidated = 0;
+
+    try {
+      envioCobradoValidated = normalizeOptionalMoney(envioCobradoCliente);
+    } catch {
+      setFormError("El envío cobrado al cliente debe ser un número válido mayor o igual a cero.");
       return;
     }
-    if (otrosCargosCliente && (isNaN(Number(otrosCargosCliente)) || Number(otrosCargosCliente) < 0)) {
-      setFormError("Los otros cargos cobrados al cliente deben ser un número mayor o igual a cero.");
+
+    try {
+      otrosCargosValidated = normalizeOptionalMoney(otrosCargosCliente);
+    } catch {
+      setFormError("Los otros cargos cobrados al cliente deben ser un número válido mayor o igual a cero.");
       return;
     }
-    if (costoEnvioVenta && (isNaN(Number(costoEnvioVenta)) || Number(costoEnvioVenta) < 0)) {
-      setFormError("El costo real del envío debe ser un número mayor o igual a cero.");
+
+    try {
+      costoEnvioValidated = normalizeOptionalMoney(costoEnvioVenta);
+    } catch {
+      setFormError("El costo real del envío debe ser un número válido mayor o igual a cero.");
       return;
     }
-    if (otrosCostosVenta && (isNaN(Number(otrosCostosVenta)) || Number(otrosCostosVenta) < 0)) {
-      setFormError("Los otros costos asociados deben ser un número mayor o igual a cero.");
+
+    try {
+      otrosCostosValidated = normalizeOptionalMoney(otrosCostosVenta);
+    } catch {
+      setFormError("Los otros costos asociados deben ser un número válido mayor o igual a cero.");
       return;
     }
 
@@ -290,16 +308,21 @@ export default function Ventas({
         .filter(Boolean)
         .join(" | ");
 
-      const envioCobradoFinal = envioCobradoNum > 0 ? Number(envioCobradoNum.toFixed(2)) : undefined;
-      const otrosCargosFinal = otrosCargosNum > 0 ? Number(otrosCargosNum.toFixed(2)) : undefined;
+      const envioCobradoFinal = envioCobradoValidated > 0 ? envioCobradoValidated : undefined;
+      const otrosCargosFinal = otrosCargosValidated > 0 ? otrosCargosValidated : undefined;
       const conceptoOtrosCargosFinal = otrosCargosFinal && conceptoOtrosCargos.trim() ? conceptoOtrosCargos.trim() : undefined;
 
-      const costoEnvioFinal = costoEnvioNum > 0 ? Number(costoEnvioNum.toFixed(2)) : undefined;
-      const otrosCostosFinal = otrosCostosNum > 0 ? Number(otrosCostosNum.toFixed(2)) : undefined;
+      const costoEnvioFinal = costoEnvioValidated > 0 ? costoEnvioValidated : undefined;
+      const otrosCostosFinal = otrosCostosValidated > 0 ? otrosCostosValidated : undefined;
       const conceptoOtrosCostosFinal = otrosCostosFinal && conceptoOtrosCostos.trim() ? conceptoOtrosCostos.trim() : undefined;
 
-      const totalCobradoFinal = Number(totalCobrado.toFixed(2));
-      const totalCostosVentaFinal = totalCostosVenta > 0 ? Number(totalCostosVenta.toFixed(2)) : undefined;
+      const totalCobradoFinal = Math.round((totalMercancia + envioCobradoValidated + otrosCargosValidated + Number.EPSILON) * 100) / 100;
+      const totalCostosVentaFinal = (costoEnvioValidated + otrosCostosValidated) > 0 
+        ? Math.round((costoEnvioValidated + otrosCostosValidated + Number.EPSILON) * 100) / 100 
+        : undefined;
+
+      const cleanComentarios = comentariosVenta.trim();
+      const comentariosVentaFinal = cleanComentarios ? cleanComentarios.slice(0, 500) : undefined;
 
       const res = await firestoreService.registerMovimientoTransaction({
         sku: cleanSku,
@@ -319,7 +342,8 @@ export default function Ventas({
         otros_costos_venta: otrosCostosFinal,
         concepto_otros_costos: conceptoOtrosCostosFinal,
         total_cobrado: totalCobradoFinal,
-        total_costos_venta: totalCostosVentaFinal
+        total_costos_venta: totalCostosVentaFinal,
+        comentarios_venta: comentariosVentaFinal
       });
 
       setFormSuccess(`¡Venta registrada con éxito! Folio generado: ${res.folio}. El stock ha sido descontado.`);
@@ -333,6 +357,7 @@ export default function Ventas({
       setCostoEnvioVenta("");
       setOtrosCostosVenta("");
       setConceptoOtrosCostos("");
+      setComentariosVenta("");
       setIsAjustesOpen(false);
 
       if (onSuccess) {
@@ -705,6 +730,30 @@ export default function Ventas({
               />
               <p className="text-[11px] text-zinc-400 mt-1">
                 Identificador de venta externa o canal de despacho.
+              </p>
+            </div>
+
+            {/* Comentarios de la venta */}
+            <div>
+              <div className="flex justify-between items-center mb-1.5">
+                <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                  Comentarios / Observaciones (Opcional)
+                </label>
+                <span className={`text-[11px] font-mono ${comentariosVenta.length >= 480 ? "text-amber-500 font-bold" : "text-zinc-400"}`}>
+                  {comentariosVenta.length}/500
+                </span>
+              </div>
+              <textarea
+                rows={2}
+                maxLength={500}
+                placeholder="Notas internas de la venta, condiciones acordadas, detalles de entrega..."
+                value={comentariosVenta}
+                onChange={(e) => setComentariosVenta(e.target.value)}
+                className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white resize-none"
+                id="comentarios-venta-textarea"
+              />
+              <p className="text-[11px] text-zinc-400 mt-1">
+                Observaciones visibles en el historial y detalle de la venta.
               </p>
             </div>
           </div>

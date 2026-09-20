@@ -869,11 +869,11 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
           )}
         </div>
 
-        {/* 3. Otros gastos */}
+        {/* 3. Otros egresos */}
         <div className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-xl p-4 shadow-2xs flex flex-col justify-between space-y-3">
           <div className="space-y-1">
             <div className="flex items-center justify-between text-[#64748B] dark:text-[#94A3B8]">
-              <span className="text-xs font-medium">Otros gastos</span>
+              <span className="text-xs font-medium">Otros egresos</span>
               <div className="p-1.5 rounded-lg bg-violet-50 dark:bg-violet-950/50 text-violet-600 dark:text-violet-400">
                 <Receipt className="h-4 w-4" />
               </div>
@@ -894,18 +894,32 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
                   {formatMoney(data?.gastosOperativos ?? data?.otrosGastos ?? 0)}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span>Costos de envío (ventas):</span>
-                <span className="font-mono text-[#172033] dark:text-[#F8FAFC]">
-                  {formatMoney(data?.costosEnvioVentas || 0)}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Otros costos directos:</span>
-                <span className="font-mono text-[#172033] dark:text-[#F8FAFC]">
-                  {formatMoney(data?.otrosCostosVentas || 0)}
-                </span>
-              </div>
+              {((data?.costosEnvioVentas || 0) > 0 || (data?.otrosCostosVentas || 0) > 0) && (
+                <>
+                  <div className="flex justify-between font-medium text-slate-700 dark:text-slate-300 pt-0.5">
+                    <span>Costos asociados a ventas:</span>
+                    <span className="font-mono text-[#172033] dark:text-[#F8FAFC]">
+                      {formatMoney((data?.costosEnvioVentas || 0) + (data?.otrosCostosVentas || 0))}
+                    </span>
+                  </div>
+                  {(data?.costosEnvioVentas || 0) > 0 && (
+                    <div className="flex justify-between pl-2 text-[10px]">
+                      <span>• Envíos:</span>
+                      <span className="font-mono text-[#172033] dark:text-[#F8FAFC]">
+                        {formatMoney(data?.costosEnvioVentas || 0)}
+                      </span>
+                    </div>
+                  )}
+                  {(data?.otrosCostosVentas || 0) > 0 && (
+                    <div className="flex justify-between pl-2 text-[10px]">
+                      <span>• Otros costos:</span>
+                      <span className="font-mono text-[#172033] dark:text-[#F8FAFC]">
+                        {formatMoney(data?.otrosCostosVentas || 0)}
+                      </span>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
 
             <div className="text-[11px] text-[#64748B] dark:text-[#94A3B8] pt-1">
@@ -925,7 +939,7 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
             onClick={onNavigateToGastos}
             className="inline-flex items-center space-x-1 text-xs font-medium text-violet-600 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300 pt-2 border-t border-slate-100 dark:border-slate-800/80 transition-colors cursor-pointer group"
           >
-            <span>Ver historial de gastos</span>
+            <span>Ver gastos operativos</span>
             <ArrowRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
           </button>
         </div>
@@ -1210,10 +1224,10 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
             )}
           </div>
 
-          {/* Desglose de otros gastos por categoría (ordenado de mayor a menor) */}
+          {/* Desglose de gastos operativos por categoría (ordenado de mayor a menor) */}
           <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/80">
             <h4 className="text-xs font-bold text-[#172033] dark:text-[#F8FAFC] uppercase tracking-wider mb-2">
-              Desglose de otros gastos por categoría
+              Desglose de gastos operativos por categoría
             </h4>
 
             {initialLoading ? (
@@ -1223,7 +1237,7 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
               </div>
             ) : !data || data.gastosPorCategoria.length === 0 ? (
               <p className="text-xs text-[#64748B] dark:text-[#94A3B8] italic">
-                Sin otros gastos registrados en este periodo.
+                Sin gastos operativos registrados en este periodo.
               </p>
             ) : (
               <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">

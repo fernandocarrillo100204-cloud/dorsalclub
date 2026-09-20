@@ -49,7 +49,9 @@ import {
   Movimiento, 
   Almacen, 
   Producto, 
-  TipoCliente 
+  TipoCliente,
+  getTotalCobradoVenta,
+  getSubtotalVenta
 } from "../types";
 import { firestoreService } from "../lib/firebase";
 import { useTheme } from "../context/ThemeContext";
@@ -320,10 +322,8 @@ export default function AnalisisClientes({
       items.forEach(item => {
         const qty = Number(item.cantidad) || 0;
         totalUnits += qty;
-        const itemTotal = typeof item.total_venta === "number"
-          ? item.total_venta
-          : (typeof item.precio_unitario_venta === "number" ? item.precio_unitario_venta * qty : 0);
-        totalMxn += itemTotal;
+        const itemCobrado = getTotalCobradoVenta(item);
+        totalMxn += itemCobrado;
 
         const d = normalizeDate(item.fecha);
         if (d > earliestDate) {
@@ -358,10 +358,8 @@ export default function AnalisisClientes({
       const qty = Number(m.cantidad) || 0;
       unidadesAdquiridas += qty;
 
-      const val = typeof m.total_venta === "number"
-        ? m.total_venta
-        : (typeof m.precio_unitario_venta === "number" ? m.precio_unitario_venta * qty : 0);
-      totalComprado += val;
+      const cobradoVal = getTotalCobradoVenta(m);
+      totalComprado += cobradoVal;
 
       const d = normalizeDate(m.fecha);
       if (!fechaUltimaCompra || d > fechaUltimaCompra) {
@@ -371,7 +369,7 @@ export default function AnalisisClientes({
       const skuKey = (m.sku || "").trim().toUpperCase();
       const existing = skuMap.get(skuKey) || { sku: skuKey, unidades: 0, totalMxn: 0 };
       existing.unidades += qty;
-      existing.totalMxn += val;
+      existing.totalMxn += getSubtotalVenta(m);
       skuMap.set(skuKey, existing);
     });
 
@@ -465,9 +463,7 @@ export default function AnalisisClientes({
         const bucket = bucketsMap.get(key);
         if (bucket) {
           const qty = Number(m.cantidad) || 0;
-          const val = typeof m.total_venta === "number" 
-            ? m.total_venta 
-            : (typeof m.precio_unitario_venta === "number" ? m.precio_unitario_venta * qty : 0);
+          const val = getTotalCobradoVenta(m);
           bucket.importe += val;
           bucket.unidades += qty;
           const saleId = m.folio || m.id || `${m.sku}_${d.getTime()}`;
@@ -499,9 +495,7 @@ export default function AnalisisClientes({
           bucketsMap.set(key, bucket);
         }
         const qty = Number(m.cantidad) || 0;
-        const val = typeof m.total_venta === "number" 
-          ? m.total_venta 
-          : (typeof m.precio_unitario_venta === "number" ? m.precio_unitario_venta * qty : 0);
+        const val = getTotalCobradoVenta(m);
         bucket.importe += val;
         bucket.unidades += qty;
         const saleId = m.folio || m.id || `${m.sku}_${d.getTime()}`;
@@ -528,9 +522,7 @@ export default function AnalisisClientes({
           bucketsMap.set(key, bucket);
         }
         const qty = Number(m.cantidad) || 0;
-        const val = typeof m.total_venta === "number" 
-          ? m.total_venta 
-          : (typeof m.precio_unitario_venta === "number" ? m.precio_unitario_venta * qty : 0);
+        const val = getTotalCobradoVenta(m);
         bucket.importe += val;
         bucket.unidades += qty;
         const saleId = m.folio || m.id || `${m.sku}_${d.getTime()}`;
@@ -1350,9 +1342,7 @@ export default function AnalisisClientes({
                             <div className="space-y-1 pt-1 border-t border-zinc-100 dark:border-zinc-800/40">
                               {v.items.map((item, i) => {
                                 const prod = productosMap.get(item.sku);
-                                const itemVal = typeof item.total_venta === "number"
-                                  ? item.total_venta
-                                  : (typeof item.precio_unitario_venta === "number" ? item.precio_unitario_venta * item.cantidad : 0);
+                                const itemVal = getSubtotalVenta(item);
 
                                 return (
                                   <div key={i} className="flex items-center justify-between text-[11px] text-zinc-600 dark:text-zinc-300">

@@ -1396,6 +1396,7 @@ export const firestoreService = {
           ...(mov.concepto_otros_costos ? { concepto_otros_costos: mov.concepto_otros_costos } : {}),
           ...(typeof mov.total_cobrado === "number" ? { total_cobrado: mov.total_cobrado } : {}),
           ...(typeof mov.total_costos_venta === "number" ? { total_costos_venta: mov.total_costos_venta } : {}),
+          ...(mov.comentarios_venta ? { comentarios_venta: mov.comentarios_venta } : {}),
           ...(destAlmId ? { almacen_destino_id: destAlmId } : {})
         });
 
@@ -1521,6 +1522,7 @@ export const firestoreService = {
       ...(mov.concepto_otros_costos ? { concepto_otros_costos: mov.concepto_otros_costos } : {}),
       ...(typeof mov.total_cobrado === "number" ? { total_cobrado: mov.total_cobrado } : {}),
       ...(typeof mov.total_costos_venta === "number" ? { total_costos_venta: mov.total_costos_venta } : {}),
+      ...(mov.comentarios_venta ? { comentarios_venta: mov.comentarios_venta } : {}),
       ...(destAlmId ? { almacen_destino_id: destAlmId } : {})
     };
 
@@ -1861,6 +1863,7 @@ export const firestoreService = {
             concepto_otros_costos: data.concepto_otros_costos || undefined,
             total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
             total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
+            comentarios_venta: data.comentarios_venta || undefined,
             estado: data.estado || "activo",
             anulado_at: data.anulado_at ? (data.anulado_at as Timestamp).toDate() : undefined,
             anulado_por: data.anulado_por,
@@ -1908,6 +1911,7 @@ export const firestoreService = {
               concepto_otros_costos: data.concepto_otros_costos || undefined,
               total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
               total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
+              comentarios_venta: data.comentarios_venta || undefined,
               estado: data.estado || "activo",
               anulado_at: data.anulado_at ? (data.anulado_at as Timestamp).toDate() : undefined,
               anulado_por: data.anulado_por,
@@ -1958,7 +1962,9 @@ export const firestoreService = {
       movs = movs.filter(m => 
         m.sku.toLowerCase().includes(s) || 
         (m.folio && m.folio.toLowerCase().includes(s)) ||
-        (m.referencia && m.referencia.toLowerCase().includes(s))
+        (m.referencia && m.referencia.toLowerCase().includes(s)) ||
+        (m.cliente_nombre && m.cliente_nombre.toLowerCase().includes(s)) ||
+        (m.comentarios_venta && m.comentarios_venta.toLowerCase().includes(s))
       );
     }
     if (options.warehouseFilter && options.warehouseFilter !== "all") {
@@ -2050,6 +2056,7 @@ export const firestoreService = {
             concepto_otros_costos: data.concepto_otros_costos || undefined,
             total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
             total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
+            comentarios_venta: data.comentarios_venta || undefined,
             estado: data.estado || "activo",
             anulado_at: data.anulado_at ? (data.anulado_at.toDate ? data.anulado_at.toDate() : new Date(data.anulado_at)) : undefined,
             anulado_por: data.anulado_por,
@@ -2202,6 +2209,20 @@ export const firestoreService = {
             referencia: data.referencia,
             usuario: data.usuario,
             fecha: docDate,
+            cliente_id: data.cliente_id,
+            cliente_nombre: data.cliente_nombre,
+            cliente_tipo: data.cliente_tipo,
+            precio_unitario_venta: typeof data.precio_unitario_venta === "number" ? data.precio_unitario_venta : undefined,
+            total_venta: typeof data.total_venta === "number" ? data.total_venta : undefined,
+            envio_cobrado_cliente: typeof data.envio_cobrado_cliente === "number" ? data.envio_cobrado_cliente : undefined,
+            otros_cargos_cliente: typeof data.otros_cargos_cliente === "number" ? data.otros_cargos_cliente : undefined,
+            concepto_otros_cargos: data.concepto_otros_cargos || undefined,
+            costo_envio_venta: typeof data.costo_envio_venta === "number" ? data.costo_envio_venta : undefined,
+            otros_costos_venta: typeof data.otros_costos_venta === "number" ? data.otros_costos_venta : undefined,
+            concepto_otros_costos: data.concepto_otros_costos || undefined,
+            total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
+            total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
+            comentarios_venta: data.comentarios_venta || undefined,
             estado: data.estado || "activo"
           });
         });
@@ -4375,6 +4396,7 @@ export const firestoreService = {
             concepto_otros_costos: data.concepto_otros_costos || undefined,
             total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
             total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
+            comentarios_venta: data.comentarios_venta || undefined,
             estado: data.estado || "activo",
             anulado_at: data.anulado_at
               ? (data.anulado_at as Timestamp).toDate
