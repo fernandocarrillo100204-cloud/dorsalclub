@@ -160,7 +160,7 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
         ? m.fecha 
         : (m.fecha as any)?.toDate 
           ? (m.fecha as any).toDate() 
-          : new Date((m.fecha as any)?.seconds ? (m.fecha as any).seconds * 1000 : m.fecha);
+          : new Date((m.fecha as any)?.seconds ? (m.fecha as any).seconds * 1000 : (m.fecha as any));
 
       if (!latestDate || dateObj > latestDate) {
         latestDate = dateObj;

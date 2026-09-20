@@ -956,7 +956,8 @@ export default function Compras({
                 {filteredCompras.map((compra) => {
                   let dateStr = "—";
                   if (compra.fecha) {
-                    const d = compra.fecha instanceof Date ? compra.fecha : new Date(compra.fecha);
+                    const rawF = compra.fecha as any;
+                    const d = compra.fecha instanceof Date ? compra.fecha : rawF?.toDate ? rawF.toDate() : new Date(rawF?.seconds ? rawF.seconds * 1000 : rawF);
                     dateStr = d.toLocaleDateString("es-MX", {
                       day: "2-digit",
                       month: "short",
@@ -1088,7 +1089,11 @@ export default function Compras({
                 <div>
                   <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Fecha Compra</span>
                   <span className="font-medium text-zinc-800 dark:text-zinc-200 text-xs">
-                    {selectedCompraDetail.fecha ? new Date(selectedCompraDetail.fecha).toLocaleDateString("es-MX") : "—"}
+                    {selectedCompraDetail.fecha ? (() => {
+                      const f = selectedCompraDetail.fecha as any;
+                      const d = selectedCompraDetail.fecha instanceof Date ? selectedCompraDetail.fecha : f?.toDate ? f.toDate() : new Date(f?.seconds ? f.seconds * 1000 : f);
+                      return d.toLocaleDateString("es-MX");
+                    })() : "—"}
                   </span>
                 </div>
                 {selectedCompraDetail.referencia && (

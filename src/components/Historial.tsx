@@ -429,9 +429,9 @@ export default function Historial({
                   const prod = getProductDetails(mov.sku);
 
                   let dateStr = "—";
-                  const rawDate = mov.fecha || mov.creado_at;
+                  const rawDate = mov.fecha || (mov as any).creado_at;
                   if (rawDate) {
-                    const d = rawDate instanceof Date ? rawDate : (rawDate as any).toDate ? (rawDate as any).toDate() : new Date(rawDate);
+                    const d = rawDate instanceof Date ? rawDate : (rawDate as any).toDate ? (rawDate as any).toDate() : new Date((rawDate as any)?.seconds ? (rawDate as any).seconds * 1000 : (rawDate as any));
                     dateStr = d.toLocaleString("es-MX", {
                       day: "2-digit",
                       month: "2-digit",
@@ -442,7 +442,7 @@ export default function Historial({
                   }
 
                   let badgeColorClass = "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300";
-                  let typeLabel = mov.tipo;
+                  let typeLabel: string = mov.tipo;
                   let qtyPrefix = "";
                   let qtyColorClass = "text-zinc-900 dark:text-white font-bold";
 
