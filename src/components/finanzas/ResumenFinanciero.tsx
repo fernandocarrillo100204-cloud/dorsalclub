@@ -242,8 +242,13 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
       setAvailablePeriods(periods);
       setPeriodsError(null);
 
-      // Si hay periodos disponibles, seleccionar el mes actual si existe o el más reciente válido
-      if (periods.length > 0) {
+      // Si no hay periodos disponibles, desactivar estados de carga y mostrar estado vacío
+      if (periods.length === 0) {
+        setInitialLoading(false);
+        setRefreshing(false);
+        setData(null);
+      } else {
+        // Si hay periodos disponibles, seleccionar el mes actual si existe o el más reciente válido
         setPeriod((prev) => {
           const key = `${prev.year}-${String(prev.month).padStart(2, "0")}`;
           const exists = periods.some((p) => p.periodo === key);
@@ -261,6 +266,7 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
       const errorMsg = "No fue posible consultar los periodos financieros. Verifica la conexión y los permisos de Firestore.";
       if (!isRefresh) {
         setPeriodsError(errorMsg);
+        setInitialLoading(false);
       }
       throw err;
     } finally {
@@ -386,6 +392,8 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
 
       if (freshPeriods.length === 0) {
         setData(null);
+        setInitialLoading(false);
+        setRefreshing(false);
         return;
       }
 
