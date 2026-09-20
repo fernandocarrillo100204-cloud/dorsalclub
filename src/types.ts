@@ -70,6 +70,15 @@ export interface Movimiento {
   cliente_tipo?: TipoCliente | string; // Snapshot del tipo de cliente
   precio_unitario_venta?: number; // Snapshot del precio unitario al momento de la venta
   total_venta?: number; // Snapshot: precio_unitario_venta * cantidad
+  // Ajustes opcionales de venta
+  envio_cobrado_cliente?: number;
+  otros_cargos_cliente?: number;
+  concepto_otros_cargos?: string;
+  costo_envio_venta?: number;
+  otros_costos_venta?: number;
+  concepto_otros_costos?: string;
+  total_cobrado?: number;
+  total_costos_venta?: number;
   estado?: "activo" | "anulado"; // Estado del movimiento (por defecto activo)
   anulado_at?: {
     seconds: number;
@@ -373,6 +382,20 @@ export interface DatosFinancierosMensuales {
   otrosGastos: number;
   egresosTotales: number;
   balanceNetoFlujo: number;
+
+  // Desglose de ingresos de ventas
+  ingresosMercanciaVendida: number;
+  enviosCobradosClientes: number;
+  otrosCargosClientes: number;
+  ingresosExtraVentas: number;
+
+  // Desglose de egresos operativos y costos de venta
+  gastosOperativos: number;
+  costosEnvioVentas: number;
+  otrosCostosVentas: number;
+  costosAsociadosVentas: number;
+  numVentasConCostos: number;
+
   // Indicadores secundarios
   numVentas: number;
   unidadesVendidas: number;

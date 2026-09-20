@@ -1388,6 +1388,14 @@ export const firestoreService = {
           ...(mov.cliente_tipo ? { cliente_tipo: mov.cliente_tipo } : {}),
           ...(typeof mov.precio_unitario_venta === "number" ? { precio_unitario_venta: mov.precio_unitario_venta } : {}),
           ...(typeof mov.total_venta === "number" ? { total_venta: mov.total_venta } : {}),
+          ...(typeof mov.envio_cobrado_cliente === "number" ? { envio_cobrado_cliente: mov.envio_cobrado_cliente } : {}),
+          ...(typeof mov.otros_cargos_cliente === "number" ? { otros_cargos_cliente: mov.otros_cargos_cliente } : {}),
+          ...(mov.concepto_otros_cargos ? { concepto_otros_cargos: mov.concepto_otros_cargos } : {}),
+          ...(typeof mov.costo_envio_venta === "number" ? { costo_envio_venta: mov.costo_envio_venta } : {}),
+          ...(typeof mov.otros_costos_venta === "number" ? { otros_costos_venta: mov.otros_costos_venta } : {}),
+          ...(mov.concepto_otros_costos ? { concepto_otros_costos: mov.concepto_otros_costos } : {}),
+          ...(typeof mov.total_cobrado === "number" ? { total_cobrado: mov.total_cobrado } : {}),
+          ...(typeof mov.total_costos_venta === "number" ? { total_costos_venta: mov.total_costos_venta } : {}),
           ...(destAlmId ? { almacen_destino_id: destAlmId } : {})
         });
 
@@ -1505,6 +1513,14 @@ export const firestoreService = {
       ...(mov.cliente_tipo ? { cliente_tipo: mov.cliente_tipo } : {}),
       ...(typeof mov.precio_unitario_venta === "number" ? { precio_unitario_venta: mov.precio_unitario_venta } : {}),
       ...(typeof mov.total_venta === "number" ? { total_venta: mov.total_venta } : {}),
+      ...(typeof mov.envio_cobrado_cliente === "number" ? { envio_cobrado_cliente: mov.envio_cobrado_cliente } : {}),
+      ...(typeof mov.otros_cargos_cliente === "number" ? { otros_cargos_cliente: mov.otros_cargos_cliente } : {}),
+      ...(mov.concepto_otros_cargos ? { concepto_otros_cargos: mov.concepto_otros_cargos } : {}),
+      ...(typeof mov.costo_envio_venta === "number" ? { costo_envio_venta: mov.costo_envio_venta } : {}),
+      ...(typeof mov.otros_costos_venta === "number" ? { otros_costos_venta: mov.otros_costos_venta } : {}),
+      ...(mov.concepto_otros_costos ? { concepto_otros_costos: mov.concepto_otros_costos } : {}),
+      ...(typeof mov.total_cobrado === "number" ? { total_cobrado: mov.total_cobrado } : {}),
+      ...(typeof mov.total_costos_venta === "number" ? { total_costos_venta: mov.total_costos_venta } : {}),
       ...(destAlmId ? { almacen_destino_id: destAlmId } : {})
     };
 
@@ -1837,6 +1853,14 @@ export const firestoreService = {
             cliente_tipo: data.cliente_tipo,
             precio_unitario_venta: typeof data.precio_unitario_venta === "number" ? data.precio_unitario_venta : undefined,
             total_venta: typeof data.total_venta === "number" ? data.total_venta : undefined,
+            envio_cobrado_cliente: typeof data.envio_cobrado_cliente === "number" ? data.envio_cobrado_cliente : undefined,
+            otros_cargos_cliente: typeof data.otros_cargos_cliente === "number" ? data.otros_cargos_cliente : undefined,
+            concepto_otros_cargos: data.concepto_otros_cargos || undefined,
+            costo_envio_venta: typeof data.costo_envio_venta === "number" ? data.costo_envio_venta : undefined,
+            otros_costos_venta: typeof data.otros_costos_venta === "number" ? data.otros_costos_venta : undefined,
+            concepto_otros_costos: data.concepto_otros_costos || undefined,
+            total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
+            total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
             estado: data.estado || "activo",
             anulado_at: data.anulado_at ? (data.anulado_at as Timestamp).toDate() : undefined,
             anulado_por: data.anulado_por,
@@ -1876,6 +1900,14 @@ export const firestoreService = {
               cliente_tipo: data.cliente_tipo,
               precio_unitario_venta: typeof data.precio_unitario_venta === "number" ? data.precio_unitario_venta : undefined,
               total_venta: typeof data.total_venta === "number" ? data.total_venta : undefined,
+              envio_cobrado_cliente: typeof data.envio_cobrado_cliente === "number" ? data.envio_cobrado_cliente : undefined,
+              otros_cargos_cliente: typeof data.otros_cargos_cliente === "number" ? data.otros_cargos_cliente : undefined,
+              concepto_otros_cargos: data.concepto_otros_cargos || undefined,
+              costo_envio_venta: typeof data.costo_envio_venta === "number" ? data.costo_envio_venta : undefined,
+              otros_costos_venta: typeof data.otros_costos_venta === "number" ? data.otros_costos_venta : undefined,
+              concepto_otros_costos: data.concepto_otros_costos || undefined,
+              total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
+              total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
               estado: data.estado || "activo",
               anulado_at: data.anulado_at ? (data.anulado_at as Timestamp).toDate() : undefined,
               anulado_por: data.anulado_por,
@@ -2010,6 +2042,14 @@ export const firestoreService = {
             cliente_tipo: data.cliente_tipo,
             precio_unitario_venta: typeof data.precio_unitario_venta === "number" ? data.precio_unitario_venta : undefined,
             total_venta: typeof data.total_venta === "number" ? data.total_venta : undefined,
+            envio_cobrado_cliente: typeof data.envio_cobrado_cliente === "number" ? data.envio_cobrado_cliente : undefined,
+            otros_cargos_cliente: typeof data.otros_cargos_cliente === "number" ? data.otros_cargos_cliente : undefined,
+            concepto_otros_cargos: data.concepto_otros_cargos || undefined,
+            costo_envio_venta: typeof data.costo_envio_venta === "number" ? data.costo_envio_venta : undefined,
+            otros_costos_venta: typeof data.otros_costos_venta === "number" ? data.otros_costos_venta : undefined,
+            concepto_otros_costos: data.concepto_otros_costos || undefined,
+            total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
+            total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
             estado: data.estado || "activo",
             anulado_at: data.anulado_at ? (data.anulado_at.toDate ? data.anulado_at.toDate() : new Date(data.anulado_at)) : undefined,
             anulado_por: data.anulado_por,
@@ -4327,6 +4367,14 @@ export const firestoreService = {
             cliente_tipo: data.cliente_tipo,
             precio_unitario_venta: typeof data.precio_unitario_venta === "number" ? data.precio_unitario_venta : undefined,
             total_venta: typeof data.total_venta === "number" ? data.total_venta : undefined,
+            envio_cobrado_cliente: typeof data.envio_cobrado_cliente === "number" ? data.envio_cobrado_cliente : undefined,
+            otros_cargos_cliente: typeof data.otros_cargos_cliente === "number" ? data.otros_cargos_cliente : undefined,
+            concepto_otros_cargos: data.concepto_otros_cargos || undefined,
+            costo_envio_venta: typeof data.costo_envio_venta === "number" ? data.costo_envio_venta : undefined,
+            otros_costos_venta: typeof data.otros_costos_venta === "number" ? data.otros_costos_venta : undefined,
+            concepto_otros_costos: data.concepto_otros_costos || undefined,
+            total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
+            total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
             estado: data.estado || "activo",
             anulado_at: data.anulado_at
               ? (data.anulado_at as Timestamp).toDate
@@ -4447,7 +4495,12 @@ export const firestoreService = {
 
     // 1. Filtrar ventas activas (no anuladas)
     const activeVentas = rawVentas.filter(m => (m.estado || "activo") !== "anulado");
-    let ingresosVentas = 0;
+    let ingresosMercanciaVendida = 0;
+    let enviosCobradosClientes = 0;
+    let otrosCargosClientes = 0;
+    let costosEnvioVentas = 0;
+    let otrosCostosVentas = 0;
+    let numVentasConCostos = 0;
     let unidadesVendidas = 0;
     let ventasSinImporte = 0;
 
@@ -4455,14 +4508,46 @@ export const firestoreService = {
       const qty = Number(v.cantidad) || 0;
       unidadesVendidas += qty;
 
+      let mercanciaVal = 0;
       if (typeof v.total_venta === "number" && !isNaN(v.total_venta)) {
-        ingresosVentas += v.total_venta;
+        mercanciaVal = v.total_venta;
       } else if (typeof v.precio_unitario_venta === "number" && !isNaN(v.precio_unitario_venta)) {
-        ingresosVentas += v.precio_unitario_venta * qty;
+        mercanciaVal = v.precio_unitario_venta * qty;
       } else {
         ventasSinImporte += 1;
       }
+
+      const envioCobrado = typeof v.envio_cobrado_cliente === "number" && !isNaN(v.envio_cobrado_cliente)
+        ? Math.max(0, v.envio_cobrado_cliente)
+        : 0;
+      const otrosCargos = typeof v.otros_cargos_cliente === "number" && !isNaN(v.otros_cargos_cliente)
+        ? Math.max(0, v.otros_cargos_cliente)
+        : 0;
+
+      ingresosMercanciaVendida += mercanciaVal;
+      enviosCobradosClientes += envioCobrado;
+      otrosCargosClientes += otrosCargos;
+
+      const costoEnvio = typeof v.costo_envio_venta === "number" && !isNaN(v.costo_envio_venta)
+        ? Math.max(0, v.costo_envio_venta)
+        : 0;
+      const otrosCostos = typeof v.otros_costos_venta === "number" && !isNaN(v.otros_costos_venta)
+        ? Math.max(0, v.otros_costos_venta)
+        : 0;
+      const costosVenta = typeof v.total_costos_venta === "number" && !isNaN(v.total_costos_venta)
+        ? v.total_costos_venta
+        : (costoEnvio + otrosCostos);
+
+      costosEnvioVentas += costoEnvio;
+      otrosCostosVentas += otrosCostos;
+      if (costosVenta > 0) {
+        numVentasConCostos += 1;
+      }
     }
+
+    const ingresosExtraVentas = enviosCobradosClientes + otrosCargosClientes;
+    const ingresosVentas = ingresosMercanciaVendida + enviosCobradosClientes + otrosCargosClientes;
+    const costosAsociadosVentas = costosEnvioVentas + otrosCostosVentas;
 
     // 2. Filtrar compras activas (no anuladas)
     const activeCompras = rawCompras.filter(c => (c.estado || "completada") !== "anulada");
@@ -4486,13 +4571,13 @@ export const firestoreService = {
     const mercanciaNeta = Math.max(0, subtotalCompras - descuentosCompras);
     const gastosAsociadosCompras = costoEnvioCompras + comisionesCompras;
 
-    // 3. Otros gastos
-    let otrosGastos = 0;
+    // 3. Gastos operativos y desglose
+    let gastosOperativos = 0;
     const catMap: Record<string, number> = {};
 
     for (const g of rawGastos) {
       const m = Number(g.monto) || 0;
-      otrosGastos += m;
+      gastosOperativos += m;
       const cat = (g.categoria || "Otros").trim();
       catMap[cat] = (catMap[cat] || 0) + m;
     }
@@ -4501,12 +4586,13 @@ export const firestoreService = {
       .map(([categoria, monto]) => ({
         categoria,
         monto,
-        porcentaje: otrosGastos > 0 ? (monto / otrosGastos) * 100 : 0
+        porcentaje: gastosOperativos > 0 ? (monto / gastosOperativos) * 100 : 0
       }))
       .sort((a, b) => b.monto - a.monto);
 
     // 4. Totales y balance
-    const egresosTotales = comprasTotales + otrosGastos;
+    const otrosGastos = gastosOperativos + costosAsociadosVentas;
+    const egresosTotales = comprasTotales + gastosOperativos + costosAsociadosVentas;
     const balanceNetoFlujo = ingresosVentas - egresosTotales;
 
     // 5. Agrupación diaria
@@ -4537,13 +4623,29 @@ export const firestoreService = {
     for (const v of activeVentas) {
       const day = getDayFromItemDate(v.fecha);
       if (day >= 1 && day <= daysInMonth) {
-        let val = 0;
-        if (typeof v.total_venta === "number" && !isNaN(v.total_venta)) {
-          val = v.total_venta;
-        } else if (typeof v.precio_unitario_venta === "number" && !isNaN(v.precio_unitario_venta)) {
-          val = v.precio_unitario_venta * (Number(v.cantidad) || 0);
+        let ingresoVenta = 0;
+        if (typeof v.total_cobrado === "number" && !isNaN(v.total_cobrado)) {
+          ingresoVenta = v.total_cobrado;
+        } else {
+          let mercancia = 0;
+          if (typeof v.total_venta === "number" && !isNaN(v.total_venta)) {
+            mercancia = v.total_venta;
+          } else if (typeof v.precio_unitario_venta === "number" && !isNaN(v.precio_unitario_venta)) {
+            mercancia = v.precio_unitario_venta * (Number(v.cantidad) || 0);
+          }
+          const envioCobrado = typeof v.envio_cobrado_cliente === "number" && !isNaN(v.envio_cobrado_cliente) ? Math.max(0, v.envio_cobrado_cliente) : 0;
+          const otrosCargos = typeof v.otros_cargos_cliente === "number" && !isNaN(v.otros_cargos_cliente) ? Math.max(0, v.otros_cargos_cliente) : 0;
+          ingresoVenta = mercancia + envioCobrado + otrosCargos;
         }
-        dailyData[day - 1].ingresos += val;
+        dailyData[day - 1].ingresos += ingresoVenta;
+
+        const costoEnvio = typeof v.costo_envio_venta === "number" && !isNaN(v.costo_envio_venta) ? Math.max(0, v.costo_envio_venta) : 0;
+        const otrosCostos = typeof v.otros_costos_venta === "number" && !isNaN(v.otros_costos_venta) ? Math.max(0, v.otros_costos_venta) : 0;
+        const costosVenta = typeof v.total_costos_venta === "number" && !isNaN(v.total_costos_venta) ? v.total_costos_venta : (costoEnvio + otrosCostos);
+        if (costosVenta > 0) {
+          dailyData[day - 1].otrosGastos += costosVenta;
+          dailyData[day - 1].egresos += costosVenta;
+        }
       }
     }
 
@@ -4576,6 +4678,18 @@ export const firestoreService = {
       otrosGastos,
       egresosTotales,
       balanceNetoFlujo,
+
+      ingresosMercanciaVendida,
+      enviosCobradosClientes,
+      otrosCargosClientes,
+      ingresosExtraVentas,
+
+      gastosOperativos,
+      costosEnvioVentas,
+      otrosCostosVentas,
+      costosAsociadosVentas,
+      numVentasConCostos,
+
       numVentas: activeVentas.length,
       unidadesVendidas,
       numCompras: activeCompras.length,

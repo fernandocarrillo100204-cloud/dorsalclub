@@ -618,6 +618,16 @@ export default function Historial({
                                 (${mov.precio_unitario_venta.toFixed(2)} c/u)
                               </span>
                             )}
+                            {mov.total_cobrado !== undefined && mov.total_cobrado !== totalVentaVal && (
+                              <span className="text-[10px] text-rose-600 dark:text-rose-400 font-semibold block" title="Total cobrado al cliente con envío y cargos">
+                                Cobrado: ${mov.total_cobrado.toFixed(2)}
+                              </span>
+                            )}
+                            {(mov.costo_envio_venta || mov.otros_costos_venta) ? (
+                              <span className="text-[10px] text-zinc-400 block" title="Costos asumidos por el negocio">
+                                Costos: ${((mov.costo_envio_venta || 0) + (mov.otros_costos_venta || 0)).toFixed(2)}
+                              </span>
+                            ) : null}
                           </div>
                         ) : (
                           <span className="text-zinc-400 text-xs">—</span>
