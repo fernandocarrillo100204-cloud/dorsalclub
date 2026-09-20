@@ -68,8 +68,7 @@ import {
   computeNewPeriodIndexData,
   applyPeriodIndexDeltas,
   getPeriodosFinancierosDisponibles,
-  clearPeriodosFinancierosCache,
-  rebuildPeriodosFinancierosIndex
+  clearPeriodosFinancierosCache
 } from "./periodosFinancieros";
 
 // Silence non-critical network retry noise from Firestore client
@@ -433,7 +432,6 @@ export const firestoreService = {
   clearFinanzasCache,
   getPeriodosFinancierosDisponibles,
   clearPeriodosFinancierosCache,
-  rebuildPeriodosFinancierosIndex,
   getPeriodoKey,
   getPeriodContribution,
   applyPeriodIndexDeltas,
@@ -1529,7 +1527,7 @@ export const firestoreService = {
       const movRef = doc(realDb, "movimientos", id);
 
       await runTransaction(realDb, async (transaction) => {
-        // 1. Lectura del movimiento
+        // 1. Leer el movimiento
         const movSnap = await transaction.get(movRef);
         if (!movSnap.exists()) {
           throw new Error("El movimiento que intentas anular no existe en el sistema.");
@@ -1537,7 +1535,7 @@ export const firestoreService = {
 
         const movData = movSnap.data();
 
-        // 2. Validación estricta anti-doble anulación
+        // 2. Validar que exista y no esté ya anulado
         if (movData.estado === "anulado") {
           throw new Error("Este movimiento ya ha sido anulado previamente. No se puede anular dos veces.");
         }
@@ -1548,18 +1546,61 @@ export const firestoreService = {
         const qty = Number(movData.cantidad) || 0;
         const tipo = movData.tipo;
 
+        // 3. Construir las referencias necesarias según su tipo
         const originStockKey = `${sku}_${originAlmId}`;
         const originStockRef = doc(realDb, "stock", originStockKey);
 
-        // 3. Reversión de stock
-        if (tipo === "entrada") {
-          const originSnap = await transaction.get(originStockRef);
-          const currentOrigin = originSnap.exists() ? (Number(originSnap.data()?.cantidad) || 0) : 0;
+        const destStockKey = (tipo === "transferencia" && destAlmId) ? `${sku}_${destAlmId}` : null;
+        const destStockRef = destStockKey ? doc(realDb, "stock", destStockKey) : null;
 
+        const dateStr = tipo === "salida" ? getLocalDateString(movData.fecha) : null;
+        const summaryKey = (tipo === "salida" && dateStr) ? `${dateStr}_${sku}_${originAlmId}` : null;
+        const resumenDocRef = summaryKey ? doc(realDb, "resumen_ventas", summaryKey) : null;
+
+        const periodoKey = tipo === "salida" ? getPeriodoKey(movData.fecha) : null;
+        const periodRef = (tipo === "salida" && periodoKey) ? doc(realDb, "periodos_financieros", periodoKey) : null;
+
+        // 4. Leer el stock de origen
+        const originSnap = await transaction.get(originStockRef);
+        const currentOrigin = originSnap.exists() ? (Number(originSnap.data()?.cantidad) || 0) : 0;
+
+        // 5. Si es transferencia, leer el stock de destino
+        let destSnap: any = null;
+        if (tipo === "transferencia") {
+          if (!destAlmId || !destStockRef) {
+            throw new Error("Datos de transferencia incompletos: falta almacén de destino.");
+          }
+          destSnap = await transaction.get(destStockRef);
+        }
+
+        // 6. Si es una venta, leer resumen_ventas
+        let resumenSnap: any = null;
+        if (tipo === "salida" && resumenDocRef) {
+          resumenSnap = await transaction.get(resumenDocRef);
+        }
+
+        // 7. Si es una venta, leer el documento correspondiente de periodos_financieros
+        let periodSnap: any = null;
+        if (tipo === "salida" && periodRef) {
+          periodSnap = await transaction.get(periodRef);
+        }
+
+        // 8. Completar todas las validaciones antes de cualquier escritura
+        if (tipo === "entrada") {
           if (currentOrigin < qty) {
             throw new Error(`No se puede anular la entrada: el stock actual (${currentOrigin} uds) en el almacén es menor a la cantidad a revertir (${qty} uds).`);
           }
+        } else if (tipo === "transferencia") {
+          const currentDest = destSnap && destSnap.exists() ? (Number(destSnap.data()?.cantidad) || 0) : 0;
+          if (currentDest < qty) {
+            throw new Error(`No se puede anular la transferencia: el almacén de destino no tiene suficiente stock (${currentDest} uds) para devolver las ${qty} uds.`);
+          }
+        }
 
+        // 9. Solamente después comenzar escrituras (cero lecturas a partir de aquí):
+
+        // 9.1 Actualización de stock
+        if (tipo === "entrada") {
           transaction.set(originStockRef, {
             id: originStockKey,
             sku,
@@ -1568,9 +1609,6 @@ export const firestoreService = {
             actualizado: Timestamp.now()
           }, { merge: true });
         } else if (tipo === "salida") {
-          const originSnap = await transaction.get(originStockRef);
-          const currentOrigin = originSnap.exists() ? (Number(originSnap.data()?.cantidad) || 0) : 0;
-
           transaction.set(originStockRef, {
             id: originStockKey,
             sku,
@@ -1578,40 +1616,8 @@ export const firestoreService = {
             cantidad: currentOrigin + qty,
             actualizado: Timestamp.now()
           }, { merge: true });
-
-          // Descontar del resumen incremental de ventas
-          const dateStr = getLocalDateString(movData.fecha);
-          const summaryKey = `${dateStr}_${sku}_${originAlmId}`;
-          const resumenDocRef = doc(realDb, "resumen_ventas", summaryKey);
-          const resumenSnap = await transaction.get(resumenDocRef);
-
-          if (resumenSnap.exists()) {
-            const prevQty = Number(resumenSnap.data()?.cantidad) || 0;
-            const prevTotal = Number(resumenSnap.data()?.total_transacciones) || 0;
-            transaction.set(resumenDocRef, {
-              cantidad: Math.max(0, prevQty - qty),
-              total_transacciones: Math.max(0, prevTotal - 1),
-              actualizado: Timestamp.now()
-            }, { merge: true });
-          }
         } else if (tipo === "transferencia") {
-          if (!destAlmId) {
-            throw new Error("Datos de transferencia incompletos: falta almacén de destino.");
-          }
-
-          const destStockKey = `${sku}_${destAlmId}`;
-          const destStockRef = doc(realDb, "stock", destStockKey);
-
-          const destSnap = await transaction.get(destStockRef);
-          const currentDest = destSnap.exists() ? (Number(destSnap.data()?.cantidad) || 0) : 0;
-
-          if (currentDest < qty) {
-            throw new Error(`No se puede anular la transferencia: el almacén de destino no tiene suficiente stock (${currentDest} uds) para devolver las ${qty} uds.`);
-          }
-
-          const originSnap = await transaction.get(originStockRef);
-          const currentOrigin = originSnap.exists() ? (Number(originSnap.data()?.cantidad) || 0) : 0;
-
+          const currentDest = destSnap && destSnap.exists() ? (Number(destSnap.data()?.cantidad) || 0) : 0;
           transaction.set(originStockRef, {
             id: originStockKey,
             sku,
@@ -1620,8 +1626,8 @@ export const firestoreService = {
             actualizado: Timestamp.now()
           }, { merge: true });
 
-          transaction.set(destStockRef, {
-            id: destStockKey,
+          transaction.set(destStockRef!, {
+            id: destStockKey!,
             sku,
             almacen_id: destAlmId,
             cantidad: currentDest - qty,
@@ -1629,21 +1635,19 @@ export const firestoreService = {
           }, { merge: true });
         }
 
-        // 3.5 Lectura de periodos_financieros si era una venta activa
-        const periodoKey = tipo === "salida" ? getPeriodoKey(movData.fecha) : null;
-        const periodRef = (tipo === "salida" && periodoKey) ? doc(realDb, "periodos_financieros", periodoKey) : null;
-        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+        // 9.2 Actualización de resumen_ventas
+        if (tipo === "salida" && resumenDocRef && resumenSnap && resumenSnap.exists()) {
+          const prevQty = Number(resumenSnap.data()?.cantidad) || 0;
+          const prevTotal = Number(resumenSnap.data()?.total_transacciones) || 0;
+          transaction.set(resumenDocRef, {
+            cantidad: Math.max(0, prevQty - qty),
+            total_transacciones: Math.max(0, prevTotal - 1),
+            actualizado: Timestamp.now()
+          }, { merge: true });
+        }
 
-        // 4. Marca el documento como anulado
-        transaction.update(movRef, {
-          estado: "anulado",
-          anulado_at: Timestamp.now(),
-          anulado_por: usuarioEmail,
-          motivo_anulacion: motivo
-        });
-
-        // 5. Decrementar contador de ventas activas en el índice del periodo
-        if (periodRef && periodoKey) {
+        // 9.3 Decremento del índice financiero
+        if (tipo === "salida" && periodRef && periodoKey) {
           const updatedPeriod = computeNewPeriodIndexData(
             periodSnap?.exists() ? periodSnap.data() : null,
             periodoKey,
@@ -1653,6 +1657,14 @@ export const firestoreService = {
           );
           transaction.set(periodRef, updatedPeriod, { merge: true });
         }
+
+        // 9.4 Actualización del movimiento a estado anulado
+        transaction.update(movRef, {
+          estado: "anulado",
+          anulado_at: Timestamp.now(),
+          anulado_por: usuarioEmail,
+          motivo_anulacion: motivo
+        });
       });
 
       clearFinanzasCache();

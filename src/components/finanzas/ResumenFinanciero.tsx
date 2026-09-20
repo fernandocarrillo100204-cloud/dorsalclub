@@ -94,7 +94,9 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
 
   // Available periods list from the lightweight index
   const [availablePeriods, setAvailablePeriods] = useState<PeriodoFinancieroIndex[]>([]);
-  const [periodsLoaded, setPeriodsLoaded] = useState<boolean>(false);
+  const [periodsLoading, setPeriodsLoading] = useState<boolean>(true);
+  const [periodsRefreshing, setPeriodsRefreshing] = useState<boolean>(false);
+  const [periodsError, setPeriodsError] = useState<string | null>(null);
 
   // Selected period state
   const [period, setPeriod] = useState<{ month: number; year: number }>({
@@ -227,33 +229,50 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
   };
 
   // Load available periods from Firestore/Local lightweight index
-  const loadAvailablePeriods = useCallback(async (forceRefresh: boolean = false): Promise<PeriodoFinancieroIndex[]> => {
-    try {
-      const periods = await firestoreService.getPeriodosFinancierosDisponibles(forceRefresh);
-      setAvailablePeriods(periods);
-      setPeriodsLoaded(true);
+  const loadAvailablePeriods = useCallback(async (isRefresh: boolean = false): Promise<PeriodoFinancieroIndex[]> => {
+    if (isRefresh) {
+      setPeriodsRefreshing(true);
+    } else {
+      setPeriodsLoading(true);
+      setPeriodsError(null);
+    }
 
-      // Si el periodo actual no es válido en la nueva lista, seleccionar el periodo inicial adecuado
-      setPeriod((prev) => {
-        const key = `${prev.year}-${String(prev.month).padStart(2, "0")}`;
-        const exists = periods.some((p) => p.periodo === key);
-        if (exists) {
-          return prev;
-        }
-        const initial = getInitialSelectedPeriod(periods, currentYear, currentMonth);
-        return { month: initial.month, year: initial.year };
-      });
+    try {
+      const periods = await firestoreService.getPeriodosFinancierosDisponibles(isRefresh);
+      setAvailablePeriods(periods);
+      setPeriodsError(null);
+
+      // Si hay periodos disponibles, seleccionar el mes actual si existe o el más reciente válido
+      if (periods.length > 0) {
+        setPeriod((prev) => {
+          const key = `${prev.year}-${String(prev.month).padStart(2, "0")}`;
+          const exists = periods.some((p) => p.periodo === key);
+          if (exists) {
+            return prev;
+          }
+          const initial = getInitialSelectedPeriod(periods, currentYear, currentMonth);
+          return { month: initial.month, year: initial.year };
+        });
+      }
 
       return periods;
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error al cargar periodos financieros disponibles:", err);
-      setPeriodsLoaded(true);
-      return [];
+      const errorMsg = "No fue posible consultar los periodos financieros. Verifica la conexión y los permisos de Firestore.";
+      if (!isRefresh) {
+        setPeriodsError(errorMsg);
+      }
+      throw err;
+    } finally {
+      setPeriodsLoading(false);
+      setPeriodsRefreshing(false);
     }
   }, [currentYear, currentMonth]);
 
   useEffect(() => {
-    loadAvailablePeriods(false);
+    loadAvailablePeriods(false).catch(() => {
+      // Error manejado a través del estado periodsError
+    });
   }, [loadAvailablePeriods]);
 
   // Request ID counter to protect against out-of-order responses
@@ -335,21 +354,41 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
     }
   }, [selectedYear, selectedMonth]);
 
+  // Solo consultar automáticamente si la carga de periodos terminó sin errores y hay periodos disponibles
   useEffect(() => {
-    if (periodsLoaded) {
+    if (!periodsLoading && !periodsError && availablePeriods.length > 0) {
       fetchData(false);
     }
-  }, [fetchData, periodsLoaded]);
+  }, [fetchData, periodsLoading, periodsError, availablePeriods.length]);
 
   // Actualización manual y re-sincronización de periodos
   const handleRefreshAll = async () => {
     try {
       setRefreshing(true);
-      const freshPeriods = await loadAvailablePeriods(true);
+      setPeriodsRefreshing(true);
+      setError(null);
+
+      let freshPeriods: PeriodoFinancieroIndex[];
+      try {
+        freshPeriods = await firestoreService.getPeriodosFinancierosDisponibles(true);
+        setAvailablePeriods(freshPeriods);
+        setPeriodsError(null);
+      } catch (pErr) {
+        console.error("Error al actualizar periodos disponibles:", pErr);
+        // Error al actualizar:
+        // Conserva visibles la lista de periodos y las cifras válidas anteriores.
+        // Muestra el aviso de error sin sustituir los datos por una lista vacía.
+        // No cambies automáticamente el periodo seleccionado.
+        // No borres data.
+        setError("No fue posible actualizar los periodos financieros. Verifica la conexión y los permisos de Firestore.");
+        return;
+      }
+
       if (freshPeriods.length === 0) {
         setData(null);
         return;
       }
+
       const key = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}`;
       const stillExists = freshPeriods.some((p) => p.periodo === key);
       if (!stillExists) {
@@ -358,10 +397,12 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
       } else {
         await fetchData(true);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error al refrescar finanzas:", err);
-      await fetchData(true);
+      // Conserva visibles la lista de periodos y las cifras válidas anteriores
+      setError(err?.message || "No fue posible actualizar los datos financieros. Verifica la conexión y los permisos.");
     } finally {
+      setPeriodsRefreshing(false);
       setRefreshing(false);
     }
   };
@@ -421,7 +462,7 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
             type="button"
             id="btn-periodo-anterior"
             onClick={handlePrevPeriod}
-            disabled={!canPrevPeriod || initialLoading}
+            disabled={availablePeriods.length === 0 || !canPrevPeriod || initialLoading || periodsLoading || periodsRefreshing}
             aria-label="Periodo anterior"
             title={canPrevPeriod ? "Periodo anterior disponible" : "Primer periodo disponible"}
             className="h-10 w-10 flex items-center justify-center rounded-xl bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-700/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition-colors shadow-2xs cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
@@ -436,31 +477,35 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
               id="btn-selector-periodo"
               ref={periodButtonRef}
               onClick={() => {
-                if (availablePeriods.length > 0) {
+                if (availablePeriods.length > 0 && !periodsLoading && !periodsError) {
                   setIsPopoverOpen((prev) => !prev);
                 }
               }}
-              disabled={availablePeriods.length === 0}
+              disabled={availablePeriods.length === 0 || periodsLoading || Boolean(periodsError)}
               aria-expanded={isPopoverOpen}
               aria-haspopup="dialog"
               aria-label={
-                availablePeriods.length === 0
-                  ? "Sin registros financieros en el sistema"
+                periodsError
+                  ? "Error al consultar periodos financieros"
+                  : availablePeriods.length === 0
+                  ? "No hay periodos con registros"
                   : `Periodo actual: ${monthLabel} ${selectedYear}. Haz clic para ver los meses disponibles`
               }
               className={`h-10 px-3 sm:px-3.5 flex items-center space-x-2 rounded-xl bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-700/80 text-[#172033] dark:text-[#F8FAFC] text-xs sm:text-sm font-semibold transition-colors shadow-2xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669] ${
-                availablePeriods.length === 0
+                availablePeriods.length === 0 || periodsLoading || Boolean(periodsError)
                   ? "opacity-60 cursor-not-allowed"
                   : "hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
               }`}
             >
               <CalendarDays className="h-4 w-4 text-[#059669] shrink-0" />
               <span className="capitalize">
-                {availablePeriods.length === 0
-                  ? `${monthLabel} ${selectedYear} (Sin registros)`
+                {periodsLoading
+                  ? "Cargando periodos..."
+                  : periodsError
+                  ? "Error en periodos"
                   : `${monthLabel} ${selectedYear}`}
               </span>
-              {availablePeriods.length > 0 && (
+              {availablePeriods.length > 0 && !periodsLoading && !periodsError && (
                 <ChevronDown
                   className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-150 ${
                     isPopoverOpen ? "rotate-180" : ""
@@ -563,7 +608,7 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
             type="button"
             id="btn-periodo-siguiente"
             onClick={handleNextPeriod}
-            disabled={!canNextPeriod || initialLoading}
+            disabled={availablePeriods.length === 0 || !canNextPeriod || initialLoading || periodsLoading || periodsRefreshing}
             aria-label="Periodo siguiente"
             title={canNextPeriod ? "Periodo siguiente disponible" : "Último periodo disponible"}
             className="h-10 w-10 flex items-center justify-center rounded-xl bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-700/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition-colors shadow-2xs cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
@@ -576,14 +621,14 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
             type="button"
             id="btn-finanzas-actualizar"
             onClick={handleRefreshAll}
-            disabled={initialLoading || refreshing}
+            disabled={initialLoading || refreshing || periodsLoading || periodsRefreshing}
             aria-label="Actualizar datos"
             title="Actualizar datos"
             className="h-10 w-10 flex items-center justify-center rounded-xl bg-white dark:bg-[#111827] hover:bg-slate-50 dark:hover:bg-slate-800 text-[#172033] dark:text-[#F8FAFC] border border-slate-200 dark:border-slate-700/80 transition-colors shadow-2xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669]"
           >
             <RefreshCw
               className={`h-4 w-4 text-slate-600 dark:text-slate-300 ${
-                refreshing ? "animate-spin text-[#059669]" : ""
+                refreshing || periodsRefreshing ? "animate-spin text-[#059669]" : ""
               }`}
             />
           </button>
@@ -598,6 +643,32 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
         </p>
       </div>
 
+      {/* Error al consultar periodos financieros (Carga inicial) */}
+      {periodsError && !data && (
+        <div className="bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-xl p-6 text-center space-y-3 shadow-2xs">
+          <AlertTriangle className="h-8 w-8 text-rose-600 dark:text-rose-400 mx-auto" />
+          <h3 className="text-sm font-bold text-rose-900 dark:text-rose-200">
+            Error al consultar periodos financieros
+          </h3>
+          <p className="text-xs text-rose-700 dark:text-rose-300 max-w-md mx-auto">
+            {periodsError}
+          </p>
+          <div>
+            <button
+              type="button"
+              id="btn-reintentar-periodos"
+              onClick={() => {
+                loadAvailablePeriods(false).catch(() => {});
+              }}
+              className="inline-flex items-center space-x-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-rose-600 text-white hover:bg-rose-700 shadow-xs cursor-pointer transition-colors"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>Reintentar</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Warning for sales without registered amount */}
       {isDataValidForPeriod && data && data.ventasSinImporte > 0 && (
         <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 rounded-xl p-3.5 text-xs text-amber-800 dark:text-amber-300 flex items-start space-x-3 shadow-2xs">
@@ -611,7 +682,7 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
         </div>
       )}
 
-      {/* Error state with retry */}
+      {/* Error state with retry for monthly data */}
       {error && (
         <div className="bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-xl p-6 text-center space-y-3 shadow-2xs">
           <AlertTriangle className="h-8 w-8 text-rose-600 dark:text-rose-400 mx-auto" />
@@ -635,25 +706,25 @@ export const ResumenFinanciero: React.FC<ResumenFinancieroProps> = ({
         </div>
       )}
 
-      {/* Empty state: No financial movements in the system */}
-      {availablePeriods.length === 0 && periodsLoaded && !initialLoading && !error && (
+      {/* Empty state: Carga inicial exitosa sin periodos */}
+      {availablePeriods.length === 0 && !periodsLoading && !periodsError && !initialLoading && !error && (
         <div className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-2xl p-10 sm:p-14 text-center max-w-xl mx-auto shadow-2xs space-y-4">
           <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 mx-auto flex items-center justify-center">
             <CalendarDays className="w-6 h-6" />
           </div>
           <div className="space-y-1.5">
             <h3 className="text-base font-semibold text-[#172033] dark:text-[#F8FAFC]">
-              Sin registros financieros en el sistema
+              No hay periodos con registros
             </h3>
             <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8] max-w-md mx-auto leading-relaxed">
-              Aún no existen ventas activas, compras ni gastos registrados. Los meses y años disponibles se habilitarán automáticamente a partir de tus movimientos contables reales.
+              Aún no existen ventas activas, compras ni gastos registrados en el sistema. Los meses y años disponibles se habilitarán automáticamente a partir de tus movimientos contables reales.
             </p>
           </div>
         </div>
       )}
 
-      {/* Visualización de métricas y gráficas: se muestran skeletons en carga inicial o los datos válidos del periodo */}
-      {(initialLoading || (isDataValidForPeriod && availablePeriods.length > 0)) && (
+      {/* Visualización de métricas y gráficas */}
+      {!periodsError && availablePeriods.length > 0 && (initialLoading || isDataValidForPeriod) && (
         <>
           {/* Main Metric Cards (5 Cards) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">

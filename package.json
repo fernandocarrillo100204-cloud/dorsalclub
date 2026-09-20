@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "reset:inventory": "node scripts/reset-inventory.mjs"
+    "reset:inventory": "node scripts/reset-inventory.mjs",
+    "migrate:financial-periods": "node scripts/rebuild-financial-period-index.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

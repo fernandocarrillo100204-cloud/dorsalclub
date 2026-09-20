@@ -9,8 +9,6 @@ import {
   getDocs,
   runTransaction,
   writeBatch,
-  query,
-  where,
   Timestamp,
   Transaction,
   Firestore
@@ -315,10 +313,10 @@ export async function getPeriodosFinancierosDisponibles(
       const snap = await getDocs(collection(realDb, "periodos_financieros"));
       const list: PeriodoFinancieroIndex[] = [];
 
-      // Si el índice en Firestore está completamente vacío, realizamos una reconstrucción
-      // automática e idempotente desde los registros existentes.
+      // Si el índice en Firestore está vacío, devolvemos una lista vacía sin reconstruir automáticamente
       if (snap.empty) {
-        return await rebuildPeriodosFinancierosIndex();
+        cachedPeriodos = [];
+        return [];
       }
 
       snap.forEach((d) => {
@@ -407,101 +405,6 @@ export async function getPeriodosFinancierosDisponibles(
   list.sort((a, b) => a.periodo.localeCompare(b.periodo));
   cachedPeriodos = list;
   return list;
-}
-
-/**
- * Reconstruye de forma idempotente la colección `periodos_financieros` a partir de
- * los registros históricos reales de ventas (movimientos tipo salida), compras y gastos.
- * Excluye anulados, transferencias y registros inválidos.
- */
-export async function rebuildPeriodosFinancierosIndex(): Promise<PeriodoFinancieroIndex[]> {
-  const realDb = getRealDb();
-
-  if (isRealFirebase && realDb) {
-    try {
-      const [movSnap, compSnap, gasSnap] = await Promise.all([
-        getDocs(query(collection(realDb, "movimientos"), where("tipo", "==", "salida"))),
-        getDocs(collection(realDb, "compras")),
-        getDocs(collection(realDb, "gastos"))
-      ]);
-
-      const map = new Map<string, { ventas: number; compras: number; gastos: number }>();
-
-      movSnap.forEach((d) => {
-        const contrib = getPeriodContribution(d.data(), "venta");
-        if (contrib) {
-          const curr = map.get(contrib.periodo) || { ventas: 0, compras: 0, gastos: 0 };
-          curr.ventas += 1;
-          map.set(contrib.periodo, curr);
-        }
-      });
-
-      compSnap.forEach((d) => {
-        const contrib = getPeriodContribution(d.data(), "compra");
-        if (contrib) {
-          const curr = map.get(contrib.periodo) || { ventas: 0, compras: 0, gastos: 0 };
-          curr.compras += 1;
-          map.set(contrib.periodo, curr);
-        }
-      });
-
-      gasSnap.forEach((d) => {
-        const contrib = getPeriodContribution(d.data(), "gasto");
-        if (contrib) {
-          const curr = map.get(contrib.periodo) || { ventas: 0, compras: 0, gastos: 0 };
-          curr.gastos += 1;
-          map.set(contrib.periodo, curr);
-        }
-      });
-
-      const existingIndexSnap = await getDocs(collection(realDb, "periodos_financieros"));
-      const seenPeriods = new Set<string>();
-      const result: PeriodoFinancieroIndex[] = [];
-      const batch = writeBatch(realDb);
-
-      for (const [periodo, counts] of map.entries()) {
-        seenPeriods.add(periodo);
-        const [yStr, mStr] = periodo.split("-");
-        const anio = parseInt(yStr, 10);
-        const mes = parseInt(mStr, 10);
-        const total = counts.ventas + counts.compras + counts.gastos;
-
-        const docData: PeriodoFinancieroIndex = {
-          periodo,
-          anio,
-          mes,
-          ventasActivas: counts.ventas,
-          comprasActivas: counts.compras,
-          gastosActivos: counts.gastos,
-          totalRegistrosActivos: total,
-          actualizadoEn: Timestamp.now()
-        };
-
-        if (total > 0) {
-          result.push(docData);
-        }
-        batch.set(doc(realDb, "periodos_financieros", periodo), docData, { merge: true });
-      }
-
-      existingIndexSnap.forEach((d) => {
-        if (!seenPeriods.has(d.id)) {
-          batch.delete(d.ref);
-        }
-      });
-
-      await batch.commit();
-
-      result.sort((a, b) => a.periodo.localeCompare(b.periodo));
-      cachedPeriodos = result;
-      return result;
-    } catch (err) {
-      console.error("Error al reconstruir periodos_financieros:", err);
-      throw err;
-    }
-  }
-
-  // Modo local
-  return await getPeriodosFinancierosDisponibles(true);
 }
 
 /**
