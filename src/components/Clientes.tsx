@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from "react";
-import { Cliente, Movimiento, TipoCliente, EstadoCliente, getTotalCobradoVenta } from "../types";
+import { Cliente, Movimiento, TipoCliente, EstadoCliente, MarcaCatalogo, getTotalCobradoVenta } from "../types";
 import { firestoreService } from "../lib/firebase";
 import ClienteModal from "./ClienteModal";
 import {
@@ -42,6 +42,7 @@ interface ClientesProps {
 
 export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: ClientesProps) {
   const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [marcas, setMarcas] = useState<MarcaCatalogo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isUsingLocalFallback, setIsUsingLocalFallback] = useState(false);
@@ -94,6 +95,30 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
       unsub();
     };
   }, []);
+
+  // Load the brand catalog once for ID-to-name resolution and in-memory search.
+  useEffect(() => {
+    let isMounted = true;
+
+    firestoreService.getMarcas()
+      .then((catalogo) => {
+        if (!isMounted) return;
+        setMarcas([...catalogo].sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" })));
+      })
+      .catch((err) => {
+        console.warn("No se pudo cargar el catálogo de marcas para clientes:", err);
+        if (isMounted) setMarcas([]);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const marcasPorId = useMemo(
+    () => new Map(marcas.map(marca => [marca.id, marca])),
+    [marcas]
+  );
 
   // Fetch client movements when detail drawer is opened
   useEffect(() => {
@@ -200,10 +225,13 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
       const matchPhone = cleanPhone.includes(termNoSymbols) || (c.telefono && c.telefono.includes(term));
       const matchEmail = c.email?.toLowerCase().includes(term);
       const matchCity = c.ciudad?.toLowerCase().includes(term);
+      const matchMarca = (c.marcas_favoritas_ids || []).some(id =>
+        marcasPorId.get(id)?.nombre.toLocaleLowerCase("es").includes(term)
+      );
 
-      return matchName || matchIg || matchPhone || matchEmail || matchCity;
+      return matchName || matchIg || matchPhone || matchEmail || matchCity || matchMarca;
     });
-  }, [clientes, searchTerm, tipoFilter, estadoFilter]);
+  }, [clientes, searchTerm, tipoFilter, estadoFilter, marcasPorId]);
 
   const handleToggleEstado = async (cliente: Cliente, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -439,6 +467,10 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
                 {filteredClientes.map((c) => {
                   const waLink = formatWhatsAppLink(c.telefono);
                   const igLink = formatInstagramLink(c.instagram);
+                  const marcasFavoritas = (c.marcas_favoritas_ids || []).map(id => ({
+                    id,
+                    marca: marcasPorId.get(id)
+                  }));
 
                   return (
                     <tr 
@@ -456,9 +488,27 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
                             </span>
                           )}
                         </div>
+                        {marcasFavoritas.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1.5 max-w-xs">
+                            {marcasFavoritas.slice(0, 3).map(({ id, marca }) => (
+                              <span
+                                key={id}
+                                title={marca?.nombre || `ID: ${id}`}
+                                className={`px-1.5 py-0.5 rounded-md border text-[10px] ${marca ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300" : "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300"}`}
+                              >
+                                {marca?.nombre || "Marca no disponible"}
+                              </span>
+                            ))}
+                            {marcasFavoritas.length > 3 && (
+                              <span className="px-1.5 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-500 text-[10px]">
+                                +{marcasFavoritas.length - 3}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         {c.intereses && (
                           <p className="text-[10px] text-zinc-400 truncate max-w-xs mt-0.5">
-                            Interés: {c.intereses}
+                            Intereses anteriores: {c.intereses}
                           </p>
                         )}
                       </td>
@@ -744,9 +794,30 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
                   </div>
                 </div>
 
+                {(selectedCliente.marcas_favoritas_ids || []).length > 0 && (
+                  <div className="pt-2 border-t border-zinc-200 dark:border-zinc-700">
+                    <span className="text-[11px] text-zinc-400 block mb-1.5">Marcas favoritas:</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(selectedCliente.marcas_favoritas_ids || []).map(id => {
+                        const marca = marcasPorId.get(id);
+                        return (
+                          <span
+                            key={id}
+                            title={marca?.nombre || `ID: ${id}`}
+                            className={`px-2 py-1 rounded-lg border text-[11px] ${marca ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200" : "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300"}`}
+                          >
+                            {marca?.nombre || "Marca no disponible"}
+                            {marca && !marca.activa ? " (inactiva)" : ""}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {selectedCliente.intereses && (
                   <div className="pt-2 border-t border-zinc-200 dark:border-zinc-700">
-                    <span className="text-[11px] text-zinc-400 block">Intereses / Modelos:</span>
+                    <span className="text-[11px] text-zinc-400 block">Intereses anteriores:</span>
                     <p className="text-zinc-700 dark:text-zinc-300 text-xs mt-0.5">
                       {selectedCliente.intereses}
                     </p>
