@@ -217,6 +217,24 @@ const notifyListeners = (key: keyof typeof listeners, data: any) => {
   });
 };
 
+const normalizeMarcasFavoritasIds = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+
+  return [...new Set(
+    value
+      .filter((id): id is string => typeof id === "string")
+      .map(id => id.trim())
+      .filter(Boolean)
+  )];
+};
+
+const getLocalClientes = (): Cliente[] => (
+  getLocalStorageItem<Cliente[]>("clientes", []).map(cliente => ({
+    ...cliente,
+    marcas_favoritas_ids: normalizeMarcasFavoritasIds(cliente.marcas_favoritas_ids)
+  }))
+);
+
 // Initialize empty keys in local emulator mode only if they do not already exist
 const initializeLocalEmulator = () => {
   if (isConfigured) return;
@@ -550,6 +568,7 @@ export const firestoreService = {
             ciudad: data.ciudad || "",
             canal_preferido: data.canal_preferido || "WhatsApp",
             intereses: data.intereses || "",
+            marcas_favoritas_ids: normalizeMarcasFavoritasIds(data.marcas_favoritas_ids),
             origen: data.origen || "Instagram",
             notas: data.notas || "",
             proximo_seguimiento: data.proximo_seguimiento ? (data.proximo_seguimiento.toDate ? data.proximo_seguimiento.toDate() : data.proximo_seguimiento) : null,
@@ -568,15 +587,15 @@ export const firestoreService = {
         return list;
       } catch (err: any) {
         console.warn("Consulta Firestore clientes no disponible (reglas o permisos de colección), recurriendo a almacenamiento local:", err?.message || err);
-        return getLocalStorageItem<Cliente[]>("clientes", []);
+        return getLocalClientes();
       }
     }
-    return getLocalStorageItem<Cliente[]>("clientes", []);
+    return getLocalClientes();
   },
 
   getClientesRealtime: (onUpdate: (clientes: Cliente[]) => void, onError?: (error: any) => void): (() => void) => {
     // Deliver local cache immediately so UI doesn't stall in loading
-    const localCached = getLocalStorageItem<Cliente[]>("clientes", []);
+    const localCached = getLocalClientes();
     onUpdate(localCached);
 
     if (isConfigured && realDb) {
@@ -585,7 +604,7 @@ export const firestoreService = {
 
       // Register local change listener to reflect modifications in real time
       const updateFromLocal = () => {
-        const list = getLocalStorageItem<Cliente[]>("clientes", []);
+        const list = getLocalClientes();
         onUpdate(list);
       };
       listeners.clientes.push(updateFromLocal);
@@ -610,6 +629,7 @@ export const firestoreService = {
                 ciudad: data.ciudad || "",
                 canal_preferido: data.canal_preferido || "WhatsApp",
                 intereses: data.intereses || "",
+                marcas_favoritas_ids: normalizeMarcasFavoritasIds(data.marcas_favoritas_ids),
                 origen: data.origen || "Instagram",
                 notas: data.notas || "",
                 proximo_seguimiento: data.proximo_seguimiento ? (data.proximo_seguimiento.toDate ? data.proximo_seguimiento.toDate() : data.proximo_seguimiento) : null,
@@ -635,14 +655,14 @@ export const firestoreService = {
             } else {
               console.warn("Aviso en listener de clientes de Firestore:", error);
             }
-            const fallbackList = getLocalStorageItem<Cliente[]>("clientes", []);
+            const fallbackList = getLocalClientes();
             onUpdate(fallbackList);
             if (onError) onError(error);
           }
         );
       } catch (err) {
         console.warn("Excepción al suscribir listener de clientes:", err);
-        const fallbackList = getLocalStorageItem<Cliente[]>("clientes", []);
+        const fallbackList = getLocalClientes();
         onUpdate(fallbackList);
         if (onError) onError(err);
       }
@@ -659,7 +679,7 @@ export const firestoreService = {
     }
 
     const update = () => {
-      const list = getLocalStorageItem<Cliente[]>("clientes", []);
+      const list = getLocalClientes();
       onUpdate(list);
     };
     update();
@@ -678,6 +698,7 @@ export const firestoreService = {
     ciudad?: string;
     canal_preferido?: CanalPreferido | string;
     intereses?: string;
+    marcas_favoritas_ids?: string[];
     origen?: OrigenCliente | string;
     notas?: string;
     proximo_seguimiento?: Date | string | null;
@@ -701,6 +722,7 @@ export const firestoreService = {
 
     const estado: EstadoCliente = clienteData.estado || "activo";
     const userEmail = user?.email || "sistema@dorsalclub.com";
+    const marcasFavoritasIds = normalizeMarcasFavoritasIds(clienteData.marcas_favoritas_ids);
 
     if (isConfigured && realDb) {
       try {
@@ -716,6 +738,7 @@ export const firestoreService = {
           ciudad: (clienteData.ciudad || "").trim(),
           canal_preferido: clienteData.canal_preferido || "WhatsApp",
           intereses: (clienteData.intereses || "").trim(),
+          marcas_favoritas_ids: marcasFavoritasIds,
           origen: clienteData.origen || "Instagram",
           notas: (clienteData.notas || "").trim(),
           estado,
@@ -741,7 +764,7 @@ export const firestoreService = {
           actualizado_at: new Date()
         };
 
-        const list = getLocalStorageItem<Cliente[]>("clientes", []);
+        const list = getLocalClientes();
         list.unshift(createdItem);
         setLocalStorageItem("clientes", list);
         notifyListeners("clientes", list);
@@ -751,7 +774,7 @@ export const firestoreService = {
         const isPermission = err?.code === "permission-denied" || (err?.message && err.message.includes("permission"));
         if (isPermission) {
           console.warn("Escritura Firestore rechazada por reglas. Guardando cliente localmente:", err);
-          const list = getLocalStorageItem<Cliente[]>("clientes", []);
+          const list = getLocalClientes();
           const newId = "cli_" + Math.random().toString(36).substr(2, 9);
           const newLocal: Cliente = {
             id: newId,
@@ -765,6 +788,7 @@ export const firestoreService = {
             ciudad: (clienteData.ciudad || "").trim(),
             canal_preferido: clienteData.canal_preferido || "WhatsApp",
             intereses: (clienteData.intereses || "").trim(),
+            marcas_favoritas_ids: marcasFavoritasIds,
             origen: clienteData.origen || "Instagram",
             notas: (clienteData.notas || "").trim(),
             proximo_seguimiento: clienteData.proximo_seguimiento || null,
@@ -782,7 +806,7 @@ export const firestoreService = {
       }
     }
 
-    const list = getLocalStorageItem<Cliente[]>("clientes", []);
+    const list = getLocalClientes();
     const newId = "cli_" + Math.random().toString(36).substr(2, 9);
     const newLocal: Cliente = {
       id: newId,
@@ -796,6 +820,7 @@ export const firestoreService = {
       ciudad: (clienteData.ciudad || "").trim(),
       canal_preferido: clienteData.canal_preferido || "WhatsApp",
       intereses: (clienteData.intereses || "").trim(),
+      marcas_favoritas_ids: marcasFavoritasIds,
       origen: clienteData.origen || "Instagram",
       notas: (clienteData.notas || "").trim(),
       proximo_seguimiento: clienteData.proximo_seguimiento || null,
@@ -841,6 +866,9 @@ export const firestoreService = {
     if (updates.ciudad !== undefined) patch.ciudad = (updates.ciudad || "").trim();
     if (updates.canal_preferido !== undefined) patch.canal_preferido = updates.canal_preferido;
     if (updates.intereses !== undefined) patch.intereses = (updates.intereses || "").trim();
+    if (updates.marcas_favoritas_ids !== undefined) {
+      patch.marcas_favoritas_ids = normalizeMarcasFavoritasIds(updates.marcas_favoritas_ids);
+    }
     if (updates.origen !== undefined) patch.origen = updates.origen;
     if (updates.notas !== undefined) patch.notas = (updates.notas || "").trim();
     if (updates.proximo_seguimiento !== undefined) {
@@ -859,7 +887,7 @@ export const firestoreService = {
         const docRef = doc(realDb, "clientes", id);
         await setDoc(docRef, patch, { merge: true });
 
-        const list = getLocalStorageItem<Cliente[]>("clientes", []);
+        const list = getLocalClientes();
         const idx = list.findIndex(c => c.id === id);
         if (idx !== -1) {
           list[idx] = { ...list[idx], ...updates, actualizado_at: new Date() };
@@ -871,7 +899,7 @@ export const firestoreService = {
         const isPermission = err?.code === "permission-denied" || (err?.message && err.message.includes("permission"));
         if (isPermission) {
           console.warn("Actualización Firestore rechazada por reglas. Aplicando cambio localmente:", err);
-          const list = getLocalStorageItem<Cliente[]>("clientes", []);
+          const list = getLocalClientes();
           const idx = list.findIndex(c => c.id === id);
           if (idx !== -1) {
             list[idx] = { ...list[idx], ...updates, actualizado_at: new Date() };
@@ -884,7 +912,7 @@ export const firestoreService = {
       }
     }
 
-    const list = getLocalStorageItem<Cliente[]>("clientes", []);
+    const list = getLocalClientes();
     const idx = list.findIndex(c => c.id === id);
     if (idx !== -1) {
       list[idx] = { ...list[idx], ...patch };

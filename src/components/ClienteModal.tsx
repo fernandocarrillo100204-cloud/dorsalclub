@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
-import { Cliente, TipoCliente, CanalPreferido, OrigenCliente, EstadoCliente } from "../types";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { Cliente, TipoCliente, CanalPreferido, OrigenCliente, EstadoCliente, MarcaCatalogo } from "../types";
 import { firestoreService } from "../lib/firebase";
-import { X, AlertTriangle, CheckCircle2, User, Phone, Instagram, Mail, MapPin, Calendar, MessageSquare, Tag } from "lucide-react";
+import { X, AlertTriangle, CheckCircle2, User, Phone, Instagram, Mail, MapPin, Calendar, MessageSquare, Tag, Search, ChevronDown, Check, RefreshCw } from "lucide-react";
 
 interface ClienteModalProps {
   isOpen: boolean;
@@ -30,7 +30,13 @@ export default function ClienteModal({
   const [email, setEmail] = useState("");
   const [ciudad, setCiudad] = useState("");
   const [canalPreferido, setCanalPreferido] = useState<CanalPreferido>("WhatsApp");
-  const [intereses, setIntereses] = useState("");
+  const [marcas, setMarcas] = useState<MarcaCatalogo[]>([]);
+  const [marcasFavoritasIds, setMarcasFavoritasIds] = useState<string[]>([]);
+  const [marcasLoading, setMarcasLoading] = useState(false);
+  const [marcasError, setMarcasError] = useState<string | null>(null);
+  const [marcasTouched, setMarcasTouched] = useState(false);
+  const [selectorMarcasOpen, setSelectorMarcasOpen] = useState(false);
+  const [marcaSearch, setMarcaSearch] = useState("");
   const [origen, setOrigen] = useState<OrigenCliente>("Instagram");
   const [notas, setNotas] = useState("");
   const [proximoSeguimiento, setProximoSeguimiento] = useState("");
@@ -38,6 +44,8 @@ export default function ClienteModal({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const selectorMarcasRef = useRef<HTMLDivElement>(null);
+  const marcasRequestRef = useRef(0);
 
   // Duplicate warning confirmation state
   const [duplicateWarning, setDuplicateWarning] = useState<{
@@ -53,7 +61,9 @@ export default function ClienteModal({
       setEmail(clienteToEdit.email || "");
       setCiudad(clienteToEdit.ciudad || "");
       setCanalPreferido((clienteToEdit.canal_preferido as CanalPreferido) || "WhatsApp");
-      setIntereses(clienteToEdit.intereses || "");
+      setMarcasFavoritasIds(Array.isArray(clienteToEdit.marcas_favoritas_ids)
+        ? [...new Set(clienteToEdit.marcas_favoritas_ids.filter((id): id is string => typeof id === "string" && id.trim().length > 0).map(id => id.trim()))]
+        : []);
       setOrigen((clienteToEdit.origen as OrigenCliente) || "Instagram");
       setNotas(clienteToEdit.notas || "");
       
@@ -78,7 +88,7 @@ export default function ClienteModal({
       setEmail("");
       setCiudad("");
       setCanalPreferido("WhatsApp");
-      setIntereses("");
+      setMarcasFavoritasIds([]);
       setOrigen("Instagram");
       setNotas("");
       setProximoSeguimiento("");
@@ -86,7 +96,80 @@ export default function ClienteModal({
     }
     setError(null);
     setDuplicateWarning(null);
+    setMarcasTouched(false);
+    setSelectorMarcasOpen(false);
+    setMarcaSearch("");
   }, [clienteToEdit, isOpen]);
+
+  const loadMarcas = useCallback(async () => {
+    const requestId = ++marcasRequestRef.current;
+    setMarcasLoading(true);
+    setMarcasError(null);
+
+    try {
+      const catalogo = await firestoreService.getMarcas();
+      if (requestId !== marcasRequestRef.current) return;
+      setMarcas([...catalogo].sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" })));
+    } catch (err) {
+      if (requestId !== marcasRequestRef.current) return;
+      console.error("Error al cargar el catálogo de marcas:", err);
+      setMarcas([]);
+      setMarcasError("No se pudo cargar el catálogo de marcas.");
+    } finally {
+      if (requestId === marcasRequestRef.current) setMarcasLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    loadMarcas();
+
+    return () => {
+      marcasRequestRef.current += 1;
+    };
+  }, [isOpen, loadMarcas]);
+
+  useEffect(() => {
+    if (!selectorMarcasOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (selectorMarcasRef.current && !selectorMarcasRef.current.contains(event.target as Node)) {
+        setSelectorMarcasOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelectorMarcasOpen(false);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [selectorMarcasOpen]);
+
+  const marcasActivasFiltradas = useMemo(() => {
+    const term = marcaSearch.trim().toLocaleLowerCase("es");
+    return marcas.filter(marca => marca.activa && (!term || marca.nombre.toLocaleLowerCase("es").includes(term)));
+  }, [marcaSearch, marcas]);
+
+  const marcasSeleccionadas = useMemo(() => {
+    const marcasPorId = new Map(marcas.map(marca => [marca.id, marca]));
+    return marcasFavoritasIds.map(id => ({ id, marca: marcasPorId.get(id) }));
+  }, [marcas, marcasFavoritasIds]);
+
+  const toggleMarca = (marcaId: string) => {
+    setMarcasTouched(true);
+    setMarcasFavoritasIds(current => current.includes(marcaId)
+      ? current.filter(id => id !== marcaId)
+      : [...current, marcaId]);
+  };
+
+  const removeMarca = (marcaId: string) => {
+    setMarcasTouched(true);
+    setMarcasFavoritasIds(current => current.filter(id => id !== marcaId));
+  };
 
   if (!isOpen) return null;
 
@@ -126,6 +209,18 @@ export default function ClienteModal({
       return;
     }
 
+    if (marcasError && marcasTouched) {
+      setError("No se pueden modificar las marcas favoritas mientras el catálogo no esté disponible. Reintenta la carga o conserva la selección anterior.");
+      return;
+    }
+
+    const cleanMarcasFavoritasIds: string[] = [...new Set<string>(
+      marcasFavoritasIds
+        .filter((id): id is string => typeof id === "string")
+        .map(id => id.trim())
+        .filter(Boolean)
+    )];
+
     if (!forceSave) {
       const dupMatches = checkDuplicates();
       if (dupMatches.length > 0) {
@@ -148,7 +243,7 @@ export default function ClienteModal({
           email: email.trim() || undefined,
           ciudad: ciudad.trim() || undefined,
           canal_preferido: canalPreferido,
-          intereses: intereses.trim() || undefined,
+          marcas_favoritas_ids: cleanMarcasFavoritasIds,
           origen,
           notas: notas.trim() || undefined,
           proximo_seguimiento: dateObj,
@@ -165,7 +260,7 @@ export default function ClienteModal({
           email: email.trim() || undefined,
           ciudad: ciudad.trim() || undefined,
           canal_preferido: canalPreferido,
-          intereses: intereses.trim() || undefined,
+          marcas_favoritas_ids: cleanMarcasFavoritasIds,
           origen,
           notas: notas.trim() || undefined,
           proximo_seguimiento: dateObj,
@@ -181,7 +276,7 @@ export default function ClienteModal({
           email: email.trim() || undefined,
           ciudad: ciudad.trim() || undefined,
           canal_preferido: canalPreferido,
-          intereses: intereses.trim() || undefined,
+          marcas_favoritas_ids: cleanMarcasFavoritasIds,
           origen,
           notas: notas.trim() || undefined,
           proximo_seguimiento: dateObj,
@@ -416,22 +511,119 @@ export default function ClienteModal({
             </div>
           </div>
 
-          {/* Intereses y Próximo Seguimiento */}
+          {/* Marcas favoritas y Próximo Seguimiento */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
+            <div ref={selectorMarcasRef} className="relative">
               <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                Intereses / Marcas Favoritas (Opcional)
+                Marcas favoritas (Opcional)
               </label>
-              <div className="relative">
-                <Tag className="w-4 h-4 text-zinc-400 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  placeholder="Ej. Jordan 4, Trapstar, Hoodies oversized"
-                  value={intereses}
-                  onChange={(e) => setIntereses(e.target.value)}
-                  className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl pl-9 pr-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
-                />
-              </div>
+              <button
+                type="button"
+                onClick={() => setSelectorMarcasOpen(open => !open)}
+                aria-expanded={selectorMarcasOpen}
+                aria-haspopup="listbox"
+                className="w-full min-h-9 bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl pl-3 pr-2 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white flex items-center justify-between gap-2"
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <Tag className="w-4 h-4 text-zinc-400 shrink-0" />
+                  <span className="truncate">
+                    {marcasFavoritasIds.length > 0
+                      ? `${marcasFavoritasIds.length} ${marcasFavoritasIds.length === 1 ? "marca seleccionada" : "marcas seleccionadas"}`
+                      : "Seleccionar marcas"}
+                  </span>
+                </span>
+                <ChevronDown className={`w-4 h-4 text-zinc-400 shrink-0 transition-transform ${selectorMarcasOpen ? "rotate-180" : ""}`} />
+              </button>
+
+              {selectorMarcasOpen && (
+                <div className="absolute z-30 top-full left-0 right-0 mt-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-xl overflow-hidden">
+                  <div className="p-2 border-b border-zinc-200 dark:border-zinc-800">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-2.5" />
+                      <input
+                        type="search"
+                        value={marcaSearch}
+                        onChange={(event) => setMarcaSearch(event.target.value)}
+                        placeholder="Buscar marca..."
+                        aria-label="Buscar marca"
+                        className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg pl-8 pr-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div role="listbox" aria-multiselectable="true" className="max-h-52 overflow-y-auto p-1.5">
+                    {marcasLoading ? (
+                      <div className="p-4 text-xs text-zinc-500 flex items-center justify-center gap-2">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Cargando catálogo...</span>
+                      </div>
+                    ) : marcasError ? (
+                      <div className="p-3 text-center space-y-2">
+                        <p className="text-xs text-rose-600 dark:text-rose-400">{marcasError}</p>
+                        <button
+                          type="button"
+                          onClick={loadMarcas}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          Reintentar
+                        </button>
+                      </div>
+                    ) : marcasActivasFiltradas.length === 0 ? (
+                      <p className="p-4 text-center text-xs text-zinc-500">
+                        {marcaSearch ? "No hay marcas que coincidan." : "No hay marcas activas en el catálogo."}
+                      </p>
+                    ) : (
+                      marcasActivasFiltradas.map(marca => {
+                        const selected = marcasFavoritasIds.includes(marca.id);
+                        return (
+                          <button
+                            key={marca.id}
+                            type="button"
+                            role="option"
+                            aria-selected={selected}
+                            onClick={() => toggleMarca(marca.id)}
+                            className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left text-xs text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-zinc-900 dark:focus:ring-white"
+                          >
+                            <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${selected ? "bg-zinc-900 dark:bg-white border-zinc-900 dark:border-white text-white dark:text-zinc-900" : "border-zinc-300 dark:border-zinc-600"}`}>
+                              {selected && <Check className="w-3 h-3" />}
+                            </span>
+                            <span className="truncate">{marca.nombre}</span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {marcasSeleccionadas.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2" aria-label="Marcas favoritas seleccionadas">
+                  {marcasSeleccionadas.map(({ id, marca }) => (
+                    <span
+                      key={id}
+                      className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] ${marca?.activa ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200" : "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300"}`}
+                    >
+                      <span>{marca?.nombre || "Marca no disponible"}{marca && !marca.activa ? " (inactiva)" : ""}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeMarca(id)}
+                        aria-label={`Quitar ${marca?.nombre || "marca no disponible"}`}
+                        className="rounded p-0.5 hover:bg-black/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-current"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {clienteToEdit?.intereses && (
+                <div className="mt-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/40 px-2.5 py-2">
+                  <span className="text-[10px] font-semibold text-zinc-500 block">Intereses anteriores</span>
+                  <span className="text-[11px] text-zinc-700 dark:text-zinc-300">{clienteToEdit.intereses}</span>
+                </div>
+              )}
             </div>
 
             <div>

@@ -106,6 +106,7 @@ export interface Cliente {
   ciudad?: string; // opcional
   canal_preferido?: CanalPreferido | string; // WhatsApp, Instagram, llamada, correo u otro
   intereses?: string; // opcional
+  marcas_favoritas_ids?: string[]; // IDs de catalogo_marcas; intereses se conserva solo por compatibilidad
   origen?: OrigenCliente | string; // Instagram, recomendación, tienda física, evento u otro
   notas?: string; // opcional
   proximo_seguimiento?: {
@@ -522,6 +523,5 @@ export function getTotalCostosVenta(movimiento: Partial<Movimiento> | null | und
       : 0;
   return Math.round((envio + otros + Number.EPSILON) * 100) / 100;
 }
-
 
 
