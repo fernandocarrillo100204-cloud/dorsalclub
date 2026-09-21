@@ -3,18 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
 import { Almacen, Producto, StockItem } from "../types";
 import {
   ArrowRightLeft,
-  QrCode,
   CheckCircle,
   AlertCircle,
   Package,
   Layers,
   Warehouse,
-  Barcode,
   ArrowRight
 } from "lucide-react";
 
@@ -45,11 +43,6 @@ export default function Transferencias({
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
-
-  // QR / Barcode scanner
-  const [showScanner, setShowScanner] = useState(false);
-  const [scannerError, setScannerError] = useState<string | null>(null);
-  const html5QrcodeRef = useRef<any>(null);
 
   // Sync initial props
   useEffect(() => {
@@ -102,49 +95,6 @@ export default function Transferencias({
     return stockItem ? stockItem.cantidad : 0;
   }, [sku, almacenDestinoId, stockList]);
 
-  // Scanner controls
-  const startScanner = async () => {
-    setScannerError(null);
-    setShowScanner(true);
-    setTimeout(async () => {
-      try {
-        const { Html5Qrcode } = await import("html5-qrcode");
-        const qrCode = new Html5Qrcode("transf-barcode-reader");
-        html5QrcodeRef.current = qrCode;
-        await qrCode.start(
-          { facingMode: "environment" },
-          { fps: 10, qrbox: { width: 250, height: 250 } },
-          (decodedText) => {
-            const cleanText = decodedText.trim().toUpperCase();
-            setSku(cleanText);
-            stopScanner();
-          },
-          () => {}
-        );
-      } catch (err) {
-        console.error("Scanner error:", err);
-        setScannerError("No se pudo acceder a la cámara. Verifica los permisos.");
-      }
-    }, 100);
-  };
-
-  const stopScanner = () => {
-    if (html5QrcodeRef.current) {
-      html5QrcodeRef.current
-        .stop()
-        .then(() => {
-          html5QrcodeRef.current?.clear();
-          html5QrcodeRef.current = null;
-          setShowScanner(false);
-        })
-        .catch(() => {
-          setShowScanner(false);
-        });
-    } else {
-      setShowScanner(false);
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
@@ -152,7 +102,7 @@ export default function Transferencias({
 
     const cleanSku = sku.trim().toUpperCase();
     if (!cleanSku) {
-      setFormError("Por favor selecciona o escanea un producto / SKU.");
+      setFormError("Por favor selecciona un producto / SKU.");
       return;
     }
 
@@ -246,44 +196,15 @@ export default function Transferencias({
         </div>
       )}
 
-      {/* Barcode Scanner Modal/Overlay */}
-      {showScanner && (
-        <div className="p-4 bg-zinc-900 text-white rounded-2xl space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-2">
-              <QrCode className="w-4 h-4 text-sky-400" />
-              Escáner de Código de Barras / SKU
-            </span>
-            <button
-              type="button"
-              onClick={stopScanner}
-              className="text-xs text-zinc-400 hover:text-white"
-            >
-              Cerrar escáner
-            </button>
-          </div>
-          <div id="transf-barcode-reader" className="w-full max-w-sm mx-auto overflow-hidden rounded-xl bg-black" />
-          {scannerError && <p className="text-xs text-rose-400 text-center">{scannerError}</p>}
-        </div>
-      )}
-
       {/* Transfer Form */}
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-xs space-y-5">
           {/* Product Selection */}
           <div>
-            <div className="flex items-center justify-between mb-1.5">
+            <div className="mb-1.5">
               <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">
                 Producto / Variante a Transferir <span className="text-rose-500">*</span>
               </label>
-              <button
-                type="button"
-                onClick={startScanner}
-                className="inline-flex items-center gap-1 text-[11px] font-bold text-sky-600 dark:text-sky-400 hover:underline"
-              >
-                <Barcode className="w-3.5 h-3.5" />
-                <span>Escanear Código</span>
-              </button>
             </div>
 
             <select
