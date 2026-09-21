@@ -3,12 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
 import { Almacen, Producto, StockItem } from "../types";
 import { 
   ArrowRightLeft, 
-  QrCode, 
   Settings, 
   CheckCircle, 
   X, 
@@ -76,11 +75,6 @@ export default function MovimientoForm({
   const [almacenDestinoError, setAlmacenDestinoError] = useState<string | null>(null);
   const [skuError, setSkuError] = useState<string | null>(null);
 
-  // QR/Barcode Scanner state
-  const [showScanner, setShowScanner] = useState(false);
-  const [scannerError, setScannerError] = useState<string | null>(null);
-  const html5QrcodeRef = useRef<any>(null);
-
   // Sync props changes if preselectedSku / preselectedAlmacenId change
   useEffect(() => {
     if (preselectedSku) {
@@ -111,7 +105,6 @@ export default function MovimientoForm({
     setAlmacenError(null);
     setAlmacenDestinoError(null);
     setSkuError(null);
-    stopScanner();
   };
 
   // Cancel button handler: resets form and navigates to Dashboard
@@ -199,71 +192,6 @@ export default function MovimientoForm({
     setAlmacenError(null);
     setAlmacenDestinoError(null);
     setFormError(null);
-  };
-
-  // QR Scanner management
-  const startScanner = async () => {
-    setScannerError(null);
-    setShowScanner(true);
-    
-    setTimeout(async () => {
-      try {
-        const { Html5Qrcode } = await import("html5-qrcode");
-        const qrInstance = new Html5Qrcode("qr-scanner-view");
-        html5QrcodeRef.current = qrInstance;
-
-        await qrInstance.start(
-          { facingMode: "environment" },
-          {
-            fps: 15,
-            qrbox: (width, height) => {
-              const size = Math.min(width, height) * 0.7;
-              return { width: size, height: size * 0.5 };
-            }
-          },
-          (decodedText) => {
-            handleScanSuccess(decodedText);
-          },
-          () => {}
-        );
-      } catch (err: any) {
-        console.error("Failed to start QR scanner:", err);
-        setScannerError("No se pudo acceder a la cámara. Por favor concede los permisos o escribe el SKU.");
-      }
-    }, 300);
-  };
-
-  const stopScanner = async () => {
-    if (html5QrcodeRef.current) {
-      try {
-        if (html5QrcodeRef.current.isScanning) {
-          await html5QrcodeRef.current.stop();
-        }
-      } catch (err) {
-        console.error("Error stopping scanner:", err);
-      }
-      html5QrcodeRef.current = null;
-    }
-    setShowScanner(false);
-  };
-
-  const handleScanSuccess = (decodedText: string) => {
-    const clean = decodedText.trim().toUpperCase();
-    const matchedByBarcode = productos.find(p => p.codigo_barras === clean);
-    const matchedBySku = productos.find(p => p.sku?.toUpperCase() === clean);
-    
-    if (matchedByBarcode) {
-      setSku(matchedByBarcode.sku);
-      setUseCustomSku(false);
-      stopScanner();
-    } else if (matchedBySku) {
-      setSku(matchedBySku.sku);
-      setUseCustomSku(false);
-      stopScanner();
-    } else {
-      setSku(clean);
-      stopScanner();
-    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -364,29 +292,6 @@ export default function MovimientoForm({
 
       {/* Main Form Card */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xs overflow-hidden">
-        {/* Camera Scanner View */}
-        {showScanner && (
-          <div className="p-4 bg-zinc-950 text-white border-b border-zinc-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-emerald-400" />
-                Apunta al código de barras o QR de la prenda
-              </span>
-              <button
-                type="button"
-                onClick={stopScanner}
-                className="text-xs text-zinc-400 hover:text-white"
-              >
-                Cerrar Cámara
-              </button>
-            </div>
-            <div id="qr-scanner-view" className="w-full max-w-xs mx-auto rounded-xl overflow-hidden bg-black" />
-            {scannerError && (
-              <p className="text-xs text-rose-400 text-center">{scannerError}</p>
-            )}
-          </div>
-        )}
-
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
           {/* Feedback alerts */}
           {formError && (
@@ -473,26 +378,19 @@ export default function MovimientoForm({
                 {skuError && <p className="text-[11px] text-rose-600 mt-1">{skuError}</p>}
               </div>
 
-              {/* Tools: Scanner & Toggle Custom SKU */}
-              <div className="sm:col-span-4 flex gap-2">
-                <button
-                  type="button"
-                  onClick={startScanner}
-                  className="flex-1 px-3 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-emerald-100 transition-colors"
-                >
-                  <QrCode className="w-4 h-4" />
-                  Escanear
-                </button>
+              {/* Toggle custom SKU */}
+              <div className="sm:col-span-4 flex justify-end">
                 <button
                   type="button"
                   onClick={() => {
                     setUseCustomSku(!useCustomSku);
                     setSku("");
                   }}
-                  className="p-2 rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                  className="w-full sm:w-auto px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-900 dark:hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5"
                   title={useCustomSku ? "Elegir del catálogo" : "Escribir SKU manual"}
                 >
                   <Settings className="w-4 h-4" />
+                  <span>{useCustomSku ? "Elegir del catálogo" : "Escribir SKU manual"}</span>
                 </button>
               </div>
             </div>
