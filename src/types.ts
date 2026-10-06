@@ -80,6 +80,12 @@ export interface Movimiento {
   total_cobrado?: number;
   total_costos_venta?: number;
   comentarios_venta?: string; // Comentarios u observaciones opcionales de la venta
+  venta_id?: string; // Agrupa todas las partidas que pertenecen a una misma venta
+  venta_partida?: number; // Posición de la partida dentro de la venta (base 1)
+  venta_total_partidas?: number; // Número total de partidas de la venta
+  venta_subtotal?: number; // Subtotal completo de mercancía de la venta
+  venta_total_cobrado?: number; // Total completo cobrado al cliente
+  venta_total_costos?: number; // Costos adicionales completos asumidos por el negocio
   estado?: "activo" | "anulado"; // Estado del movimiento (por defecto activo)
   anulado_at?: {
     seconds: number;
@@ -87,6 +93,28 @@ export interface Movimiento {
   } | Date;
   anulado_por?: string; // Usuario / Email que realizó la anulación
   motivo_anulacion?: string; // Motivo opcional de la anulación
+}
+
+export interface VentaPartidaInput {
+  sku: string;
+  almacen_id: string;
+  cantidad: number;
+  precio_unitario_venta: number;
+}
+
+export interface VentaRegistroInput {
+  items: VentaPartidaInput[];
+  referencia: string;
+  cliente_id?: string;
+  cliente_nombre: string;
+  cliente_tipo?: TipoCliente | string;
+  envio_cobrado_cliente?: number;
+  otros_cargos_cliente?: number;
+  concepto_otros_cargos?: string;
+  costo_envio_venta?: number;
+  otros_costos_venta?: number;
+  concepto_otros_costos?: string;
+  comentarios_venta?: string;
 }
 
 export type TipoCliente = "minorista" | "mayorista" | "emprendedor";
@@ -523,5 +551,4 @@ export function getTotalCostosVenta(movimiento: Partial<Movimiento> | null | und
       : 0;
   return Math.round((envio + otros + Number.EPSILON) * 100) / 100;
 }
-
 

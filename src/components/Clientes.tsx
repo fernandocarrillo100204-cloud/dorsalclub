@@ -190,7 +190,9 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
       }
     });
 
-    const pedidosCount = activeMovs.length;
+    const pedidosCount = new Set(
+      activeMovs.map((movimiento) => movimiento.venta_id || movimiento.folio || movimiento.id)
+    ).size;
     const ticketPromedio = pedidosCount > 0 ? total / pedidosCount : 0;
 
     return {

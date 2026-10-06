@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
-import { Almacen, Producto, StockItem, Cliente, TipoCliente, normalizeOptionalMoney } from "../types";
+import { Almacen, Producto, StockItem, Cliente, TipoCliente, VentaPartidaInput, normalizeOptionalMoney } from "../types";
 import ClienteModal from "./ClienteModal";
 import {
   TrendingDown,
@@ -27,8 +27,27 @@ import {
   ChevronUp,
   Truck,
   Check,
-  X
+  X,
+  Trash2
 } from "lucide-react";
+
+interface VentaItemDraft {
+  id: string;
+  sku: string;
+  almacenId: string;
+  cantidad: number | string;
+  precioUnitario: number | string;
+}
+
+let nextVentaItemId = 0;
+
+const createVentaItem = (sku = "", almacenId = "", precioUnitario: number | string = ""): VentaItemDraft => ({
+  id: `venta-item-${++nextVentaItemId}`,
+  sku,
+  almacenId,
+  cantidad: 1,
+  precioUnitario
+});
 
 interface VentasProps {
   almacenes: Almacen[];
@@ -49,10 +68,14 @@ export default function Ventas({
   onSuccess,
   onCancel
 }: VentasProps) {
-  const [sku, setSku] = useState(preselectedSku);
-  const [almacenId, setAlmacenId] = useState<string>(preselectedAlmacenId || almacenes[0]?.id || "");
-  const [cantidad, setCantidad] = useState<number | string>(1);
-  const [precioUnitario, setPrecioUnitario] = useState<number | string>("");
+  const [items, setItems] = useState<VentaItemDraft[]>(() => {
+    const initialProduct = productos.find((product) => product.sku === preselectedSku);
+    return [createVentaItem(
+      preselectedSku,
+      preselectedAlmacenId || almacenes[0]?.id || "",
+      initialProduct?.precio_venta ?? ""
+    )];
+  });
   const [referencia, setReferencia] = useState("");
 
   // Opciones y ajustes de venta (envío y costos adicionales)
@@ -80,10 +103,21 @@ export default function Ventas({
 
   // Sync initial props
   useEffect(() => {
-    if (preselectedSku) setSku(preselectedSku);
-    if (preselectedAlmacenId) setAlmacenId(preselectedAlmacenId);
+    if (preselectedSku || preselectedAlmacenId) {
+      setItems((current) => current.map((item, index) => {
+        if (index !== 0) return item;
+        const nextSku = preselectedSku || item.sku;
+        const selectedProduct = productos.find((product) => product.sku === nextSku);
+        return {
+          ...item,
+          sku: nextSku,
+          almacenId: preselectedAlmacenId || item.almacenId,
+          precioUnitario: preselectedSku ? selectedProduct?.precio_venta ?? "" : item.precioUnitario
+        };
+      }));
+    }
     if (preselectedClienteId) setSelectedClienteId(preselectedClienteId);
-  }, [preselectedSku, preselectedAlmacenId, preselectedClienteId]);
+  }, [preselectedSku, preselectedAlmacenId, preselectedClienteId, productos]);
 
   // Close client dropdown when clicking outside
   useEffect(() => {
@@ -112,19 +146,6 @@ export default function Ventas({
     return () => unsub();
   }, []);
 
-  // Selected product details
-  const selectedProduct = useMemo(() => {
-    if (!sku) return null;
-    return productos.find((p) => p.sku.toLowerCase() === sku.toLowerCase()) || null;
-  }, [sku, productos]);
-
-  // Update default unit price when product changes
-  useEffect(() => {
-    if (selectedProduct && selectedProduct.precio_venta !== undefined) {
-      setPrecioUnitario(selectedProduct.precio_venta);
-    }
-  }, [selectedProduct]);
-
   // Selected client details
   const selectedCliente = useMemo(() => {
     if (!selectedClienteId || selectedClienteId === "mostrador") return null;
@@ -150,20 +171,43 @@ export default function Ventas({
     });
   }, [clientes, clientSearchText]);
 
-  // Current stock available in selected warehouse
-  const availableStock = useMemo(() => {
-    if (!sku || !almacenId) return null;
+  const updateItem = (id: string, patch: Partial<VentaItemDraft>) => {
+    setItems((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
+  };
+
+  const handleItemSkuChange = (id: string, nextSku: string) => {
+    const selectedProduct = productos.find((product) => product.sku === nextSku);
+    updateItem(id, {
+      sku: nextSku,
+      precioUnitario: selectedProduct?.precio_venta ?? ""
+    });
+  };
+
+  const addItem = () => {
+    setItems((current) => [
+      ...current,
+      createVentaItem("", current[0]?.almacenId || almacenes[0]?.id || "")
+    ]);
+  };
+
+  const removeItem = (id: string) => {
+    setItems((current) => current.length === 1 ? current : current.filter((item) => item.id !== id));
+  };
+
+  const getAvailableStock = (item: VentaItemDraft): number | null => {
+    if (!item.sku || !item.almacenId) return null;
     const stockItem = stockList.find(
-      (s) => s.sku.toLowerCase() === sku.toLowerCase() && s.almacen_id === almacenId
+      (stock) => stock.sku.toLowerCase() === item.sku.toLowerCase() && stock.almacen_id === item.almacenId
     );
     return stockItem ? stockItem.cantidad : 0;
-  }, [sku, almacenId, stockList]);
+  };
 
-  // Calculated totals
-  const numQuantity = Number(cantidad) || 0;
-  const unitPriceVal = typeof precioUnitario === "number" ? precioUnitario : parseFloat(String(precioUnitario)) || 0;
-  const totalMercancia = Math.max(0, unitPriceVal * numQuantity);
-  const totalCalculado = totalMercancia; // total_venta: precio_unitario_venta * cantidad
+  const totalUnidades = items.reduce((sum, item) => sum + (Number(item.cantidad) || 0), 0);
+  const totalMercancia = items.reduce((sum, item) => {
+    const quantity = Number(item.cantidad) || 0;
+    const unitPrice = Number(item.precioUnitario) || 0;
+    return sum + Math.max(0, quantity * unitPrice);
+  }, 0);
 
   const parseNumField = (val: string): number => {
     try {
@@ -186,27 +230,58 @@ export default function Ventas({
     setFormError(null);
     setFormSuccess(null);
 
-    const cleanSku = sku.trim().toUpperCase();
-    if (!cleanSku) {
-      setFormError("Por favor selecciona un producto / SKU.");
+    if (items.length === 0) {
+      setFormError("Agrega al menos un producto a la venta.");
       return;
     }
 
-    if (!almacenId) {
-      setFormError("Por favor selecciona el almacén de despacho.");
-      return;
-    }
+    const normalizedItems: VentaPartidaInput[] = [];
+    const usedStockKeys = new Set<string>();
 
-    if (isNaN(numQuantity) || numQuantity <= 0) {
-      setFormError("La cantidad debe ser un número entero mayor a cero.");
-      return;
-    }
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      const cleanSku = item.sku.trim().toUpperCase();
+      const quantity = Number(item.cantidad);
+      const unitPrice = Number(item.precioUnitario);
 
-    if (availableStock !== null && availableStock < numQuantity) {
-      setFormError(
-        `Stock insuficiente en el almacén seleccionado. Stock disponible: ${availableStock} uds, solicitado: ${numQuantity} uds.`
-      );
-      return;
+      if (!cleanSku) {
+        setFormError(`Selecciona el producto de la partida ${index + 1}.`);
+        return;
+      }
+      if (!item.almacenId) {
+        setFormError(`Selecciona el almacén de la partida ${index + 1}.`);
+        return;
+      }
+      if (!Number.isInteger(quantity) || quantity <= 0) {
+        setFormError(`La cantidad de la partida ${index + 1} debe ser un número entero mayor a cero.`);
+        return;
+      }
+      if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+        setFormError(`El precio de la partida ${index + 1} debe ser un número válido mayor o igual a cero.`);
+        return;
+      }
+
+      const stockKey = `${cleanSku}_${item.almacenId}`;
+      if (usedStockKeys.has(stockKey)) {
+        setFormError(`El producto ${cleanSku} está repetido para el mismo almacén. Unifica su cantidad en una sola partida.`);
+        return;
+      }
+      usedStockKeys.add(stockKey);
+
+      const availableStock = getAvailableStock(item);
+      if (availableStock !== null && availableStock < quantity) {
+        setFormError(
+          `Stock insuficiente para ${cleanSku}. Disponible: ${availableStock} uds, solicitado: ${quantity} uds.`
+        );
+        return;
+      }
+
+      normalizedItems.push({
+        sku: cleanSku,
+        almacen_id: item.almacenId,
+        cantidad: quantity,
+        precio_unitario_venta: unitPrice
+      });
     }
 
     // Validar importes y costos opcionales con normalizeOptionalMoney
@@ -266,39 +341,29 @@ export default function Ventas({
       const otrosCostosFinal = otrosCostosValidated > 0 ? otrosCostosValidated : undefined;
       const conceptoOtrosCostosFinal = otrosCostosFinal && conceptoOtrosCostos.trim() ? conceptoOtrosCostos.trim() : undefined;
 
-      const totalCobradoFinal = Math.round((totalMercancia + envioCobradoValidated + otrosCargosValidated + Number.EPSILON) * 100) / 100;
-      const totalCostosVentaFinal = (costoEnvioValidated + otrosCostosValidated) > 0
-        ? Math.round((costoEnvioValidated + otrosCostosValidated + Number.EPSILON) * 100) / 100
-        : undefined;
-
       const cleanComentarios = comentariosVenta.trim();
       const comentariosVentaFinal = cleanComentarios ? cleanComentarios.slice(0, 500) : undefined;
 
-      const res = await firestoreService.registerMovimientoTransaction({
-        sku: cleanSku,
-        almacen_id: almacenId,
-        tipo: "salida",
-        cantidad: numQuantity,
+      const res = await firestoreService.registerVentaTransaction({
+        items: normalizedItems,
         referencia: fullReference,
         cliente_id: clienteId,
         cliente_nombre: clienteNombre,
         cliente_tipo: clienteTipo,
-        precio_unitario_venta: unitPriceVal,
-        total_venta: totalCalculado,
         envio_cobrado_cliente: envioCobradoFinal,
         otros_cargos_cliente: otrosCargosFinal,
         concepto_otros_cargos: conceptoOtrosCargosFinal,
         costo_envio_venta: costoEnvioFinal,
         otros_costos_venta: otrosCostosFinal,
         concepto_otros_costos: conceptoOtrosCostosFinal,
-        total_cobrado: totalCobradoFinal,
-        total_costos_venta: totalCostosVentaFinal,
         comentarios_venta: comentariosVentaFinal
       });
 
-      setFormSuccess(`¡Venta registrada con éxito! Folio generado: ${res.folio}. El stock ha sido descontado.`);
+      setFormSuccess(
+        `¡Venta registrada con éxito! Folio: ${res.folio}. ${res.movimientosCount} ${res.movimientosCount === 1 ? "partida registrada" : "partidas registradas"}.`
+      );
 
-      setCantidad(1);
+      setItems([createVentaItem("", almacenes[0]?.id || "")]);
       setReferencia("");
       setSelectedClienteId("");
       setEnvioCobradoCliente("");
@@ -352,139 +417,166 @@ export default function Ventas({
       {/* Sales Form */}
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-xs space-y-5">
-          {/* Product Selection */}
-          <div>
-            <div className="mb-1.5">
-              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">
-                Producto / Variante a Vender <span className="text-rose-500">*</span>
-              </label>
-            </div>
-
-            <div className="relative">
-              <select
-                value={sku}
-                onChange={(e) => setSku(e.target.value)}
-                className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white font-mono"
-              >
-                <option value="">-- Seleccionar producto por SKU o Nombre --</option>
-                {productos.map((prod) => (
-                  <option key={prod.sku} value={prod.sku}>
-                    [{prod.sku}] {prod.nombre} {prod.talla ? `- Talla: ${prod.talla}` : ""}{" "}
-                    {prod.color ? `(${prod.color})` : ""} - Precio: ${prod.precio_venta || 0}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Selected Product Specs Badge */}
-            {selectedProduct && (
-              <div className="mt-2 p-3 bg-zinc-50 dark:bg-zinc-800/40 rounded-xl border border-zinc-200 dark:border-zinc-700/60 flex flex-wrap items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <Package className="w-4 h-4 text-rose-500 shrink-0" />
-                  <span className="font-bold text-zinc-900 dark:text-white">
-                    {selectedProduct.nombre}
-                  </span>
-                  {selectedProduct.talla && (
-                    <span className="px-1.5 py-0.5 bg-zinc-200 dark:bg-zinc-700 rounded text-[10px] font-mono">
-                      Talla: {selectedProduct.talla}
-                    </span>
-                  )}
-                  {selectedProduct.color && (
-                    <span className="px-1.5 py-0.5 bg-zinc-200 dark:bg-zinc-700 rounded text-[10px]">
-                      {selectedProduct.color}
-                    </span>
-                  )}
-                </div>
-                <div className="text-zinc-500 text-[11px] font-mono">
-                  Precio sugerido: ${selectedProduct.precio_venta || 0} MXN
-                </div>
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <div>
+                <h2 className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">
+                  Productos de la venta <span className="text-rose-500">*</span>
+                </h2>
+                <p className="text-[11px] text-zinc-400 mt-0.5">
+                  Agrega todas las prendas del mismo pedido antes de confirmar.
+                </p>
               </div>
-            )}
-          </div>
-
-          {/* Warehouse and Stock */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
-                Almacén de Despacho <span className="text-rose-500">*</span>
-              </label>
-              <select
-                value={almacenId}
-                onChange={(e) => setAlmacenId(e.target.value)}
-                className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white font-medium"
+              <button
+                type="button"
+                onClick={addItem}
+                disabled={items.length >= 50}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 text-xs font-bold hover:bg-rose-100 dark:hover:bg-rose-950/50 disabled:opacity-50"
+                id="agregar-producto-venta-btn"
               >
-                {almacenes.map((alm) => (
-                  <option key={alm.id} value={alm.id}>
-                    {alm.nombre}
-                  </option>
-                ))}
-              </select>
+                <Plus className="w-3.5 h-3.5" />
+                Agregar producto
+              </button>
+            </div>
 
-              {sku && (
-                <div className="mt-1.5 text-[11px] flex items-center gap-1.5">
-                  <span className="text-zinc-500">Stock disponible en este almacén:</span>
-                  <span
-                    className={`font-bold font-mono px-1.5 py-0.5 rounded ${
-                      (availableStock || 0) > 0
-                        ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400"
-                        : "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400"
-                    }`}
+            <div className="space-y-3">
+              {items.map((item, index) => {
+                const selectedProduct = productos.find((product) => product.sku === item.sku) || null;
+                const availableStock = getAvailableStock(item);
+                const quantity = Number(item.cantidad) || 0;
+                const unitPrice = Number(item.precioUnitario) || 0;
+                const lineTotal = Math.max(0, quantity * unitPrice);
+
+                return (
+                  <div
+                    key={item.id}
+                    className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/20 p-4 space-y-3"
                   >
-                    {availableStock !== null ? `${availableStock} uds` : "Consultando..."}
-                  </span>
-                </div>
-              )}
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[11px] font-bold flex items-center justify-center">
+                          {index + 1}
+                        </span>
+                        <span className="text-xs font-bold text-zinc-900 dark:text-white">
+                          Partida {index + 1}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeItem(item.id)}
+                        disabled={items.length === 1}
+                        className="p-2 rounded-lg text-zinc-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-zinc-400"
+                        aria-label={`Eliminar partida ${index + 1}`}
+                        title={items.length === 1 ? "La venta debe conservar al menos una partida" : "Eliminar producto"}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                        Producto / Variante
+                      </label>
+                      <select
+                        value={item.sku}
+                        onChange={(event) => handleItemSkuChange(item.id, event.target.value)}
+                        className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white font-mono"
+                      >
+                        <option value="">-- Seleccionar producto por SKU o nombre --</option>
+                        {productos.map((product) => (
+                          <option key={product.sku} value={product.sku}>
+                            [{product.sku}] {product.nombre} {product.talla ? `- Talla: ${product.talla}` : ""}{" "}
+                            {product.color ? `(${product.color})` : ""} - ${product.precio_venta || 0}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      <div className="lg:col-span-2">
+                        <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                          Almacén de despacho
+                        </label>
+                        <select
+                          value={item.almacenId}
+                          onChange={(event) => updateItem(item.id, { almacenId: event.target.value })}
+                          className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
+                        >
+                          {almacenes.map((warehouse) => (
+                            <option key={warehouse.id} value={warehouse.id}>{warehouse.nombre}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                          Cantidad
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={item.cantidad}
+                          onChange={(event) => updateItem(item.id, {
+                            cantidad: event.target.value === "" ? "" : Math.max(1, parseInt(event.target.value, 10) || 1)
+                          })}
+                          className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs font-bold text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                          Precio unitario
+                        </label>
+                        <div className="relative">
+                          <DollarSign className="w-4 h-4 text-zinc-400 absolute left-3 top-2.5" />
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={item.precioUnitario}
+                            onChange={(event) => updateItem(item.id, { precioUnitario: event.target.value })}
+                            placeholder="0.00"
+                            className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl pl-9 pr-3 py-2.5 text-xs font-bold text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-2 border-t border-zinc-200 dark:border-zinc-800 text-[11px]">
+                      <div className="flex flex-wrap items-center gap-2 text-zinc-500">
+                        {selectedProduct && (
+                          <span className="inline-flex items-center gap-1">
+                            <Package className="w-3.5 h-3.5 text-rose-500" />
+                            {selectedProduct.nombre}
+                            {selectedProduct.talla ? ` · Talla ${selectedProduct.talla}` : ""}
+                          </span>
+                        )}
+                        {item.sku && (
+                          <span className={`px-2 py-0.5 rounded-full font-mono font-bold ${
+                            (availableStock || 0) >= quantity
+                              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400"
+                              : "bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-400"
+                          }`}>
+                            Stock: {availableStock ?? 0} uds
+                          </span>
+                        )}
+                      </div>
+                      <div className="font-mono text-sm font-bold text-zinc-900 dark:text-white">
+                        ${lineTotal.toFixed(2)} MXN
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
-            {/* Cantidad a vender */}
-            <div>
-              <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
-                Cantidad a Vender <span className="text-rose-500">*</span>
-              </label>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                required
-                value={cantidad}
-                onChange={(e) => setCantidad(e.target.value === "" ? "" : Math.max(1, parseInt(e.target.value) || 1))}
-                className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
-              />
-            </div>
-          </div>
-
-          {/* Pricing Row: Unit Price & Calculated Total */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3.5 bg-zinc-50 dark:bg-zinc-800/30 rounded-xl border border-zinc-200 dark:border-zinc-800">
-            <div>
-              <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
-                Precio Unitario de Venta ($ MXN)
-              </label>
-              <div className="relative">
-                <DollarSign className="w-4 h-4 text-zinc-400 absolute left-3 top-2.5" />
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={precioUnitario}
-                  onChange={(e) => setPrecioUnitario(e.target.value)}
-                  placeholder="0.00"
-                  className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl pl-9 pr-3 py-2 text-xs font-bold text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white font-mono"
-                />
-              </div>
-              <p className="text-[11px] text-zinc-400 mt-1">
-                Editable por venta o toma el precio del catálogo.
-              </p>
-            </div>
-
-            <div className="flex flex-col justify-center">
-              <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider block mb-1">
-                Total de la Venta
+            <div className="flex items-center justify-between rounded-xl bg-zinc-100 dark:bg-zinc-800 px-4 py-3 text-xs">
+              <span className="font-semibold text-zinc-600 dark:text-zinc-300">
+                {items.length} {items.length === 1 ? "producto" : "productos"} · {totalUnidades} unidades
               </span>
-              <div className="text-xl font-bold font-mono text-zinc-900 dark:text-white">
-                ${totalCalculado.toFixed(2)} <span className="text-xs text-zinc-400 font-sans font-normal">MXN</span>
-              </div>
-              <span className="text-[11px] text-zinc-500 font-mono">
-                {numQuantity} uds × ${unitPriceVal.toFixed(2)}
+              <span className="font-mono font-bold text-zinc-900 dark:text-white">
+                Subtotal: ${totalMercancia.toFixed(2)} MXN
               </span>
             </div>
           </div>

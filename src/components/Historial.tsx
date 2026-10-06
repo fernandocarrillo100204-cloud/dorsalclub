@@ -173,9 +173,12 @@ export default function Historial({
     try {
       await firestoreService.anularMovimiento(movToAnular.id, reason);
 
-      // Update local state item immediately
+      const isGroupedSale = Boolean(movToAnular.venta_id && Number(movToAnular.venta_total_partidas) > 1);
+
+      // Update the selected movement or every item in the grouped sale immediately
       setMovimientos(prev => prev.map(m => {
-        if (m.id === movToAnular.id) {
+        const belongsToCancelledSale = isGroupedSale && m.venta_id === movToAnular.venta_id;
+        if (m.id === movToAnular.id || belongsToCancelledSale) {
           return {
             ...m,
             estado: "anulado",
@@ -186,7 +189,11 @@ export default function Historial({
         return m;
       }));
 
-      setAnularSuccess(`Movimiento ${movToAnular.folio || movToAnular.id} anulado correctamente. El stock ha sido revertido.`);
+      setAnularSuccess(
+        isGroupedSale
+          ? `Venta ${movToAnular.folio || movToAnular.id} anulada correctamente. Se revirtió el stock de todas sus partidas.`
+          : `Movimiento ${movToAnular.folio || movToAnular.id} anulado correctamente. El stock ha sido revertido.`
+      );
       setTimeout(() => setAnularSuccess(null), 5000);
       setMovToAnular(null);
       setMotivoAnulacion("");
@@ -509,6 +516,11 @@ export default function Historial({
                         }`}>
                           {mov.folio || "—"}
                         </span>
+                        {mov.venta_total_partidas && mov.venta_total_partidas > 1 && (
+                          <span className="block mt-1 text-[9px] text-zinc-400 font-mono text-center">
+                            Partida {mov.venta_partida || 1}/{mov.venta_total_partidas}
+                          </span>
+                        )}
                       </td>
 
                       {/* Estado */}
@@ -657,6 +669,11 @@ export default function Historial({
                                 </span>
                               )
                             )}
+                            {mov.venta_total_partidas && mov.venta_total_partidas > 1 && mov.venta_partida === 1 && typeof mov.venta_total_cobrado === "number" && (
+                              <div className="mt-1.5 pt-1.5 border-t border-dashed border-zinc-200 dark:border-zinc-700 text-[10px] font-sans text-zinc-500">
+                                Total del folio: <span className="font-mono font-bold text-zinc-900 dark:text-white">${mov.venta_total_cobrado.toFixed(2)}</span>
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <span className="text-zinc-400 text-xs">—</span>
@@ -757,7 +774,9 @@ export default function Historial({
               </div>
               <div>
                 <h3 className="text-base font-bold text-zinc-900 dark:text-white">
-                  Confirmar Anulación de Movimiento
+                  {movToAnular.venta_id && Number(movToAnular.venta_total_partidas) > 1
+                    ? "Confirmar Anulación de Venta"
+                    : "Confirmar Anulación de Movimiento"}
                 </h3>
                 <p className="text-xs text-zinc-500 font-mono">
                   {movToAnular.folio || movToAnular.id}
@@ -765,9 +784,15 @@ export default function Historial({
               </div>
             </div>
 
-            <p className="text-xs text-zinc-600 dark:text-zinc-400">
-              Esta acción revertirá automáticamente el stock de <strong>{movToAnular.sku}</strong> en el almacén de origen y registrará el movimiento como anulado de forma permanente.
-            </p>
+            {movToAnular.venta_id && Number(movToAnular.venta_total_partidas) > 1 ? (
+              <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                Esta acción anulará las <strong>{movToAnular.venta_total_partidas} partidas</strong> del folio, devolverá todo su stock y conservará la operación para auditoría.
+              </p>
+            ) : (
+              <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                Esta acción revertirá automáticamente el stock de <strong>{movToAnular.sku}</strong> en el almacén de origen y registrará el movimiento como anulado de forma permanente.
+              </p>
+            )}
 
             <div>
               <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
