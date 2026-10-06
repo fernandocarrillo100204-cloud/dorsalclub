@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { 
   ShoppingBag,
   ShoppingCart,
@@ -22,7 +22,9 @@ import {
   Tag,
   Users,
   UserCheck,
-  Receipt
+  Receipt,
+  ChevronRight,
+  Boxes
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Usuario, NavigationTab } from "../types";
@@ -42,7 +44,17 @@ interface NavItem {
   matchActive?: (current: NavigationTab) => boolean;
 }
 
-const NAV_ITEMS: NavItem[] = [
+type NavGroupId = "clientes" | "inventario" | "finanzas";
+
+interface NavGroup {
+  id: NavGroupId;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  items: NavItem[];
+  matchActive: (current: NavigationTab) => boolean;
+}
+
+const DIRECT_NAV_ITEMS: NavItem[] = [
   { 
     id: "compras", 
     label: "Compras", 
@@ -54,77 +66,124 @@ const NAV_ITEMS: NavItem[] = [
     label: "Ventas", 
     icon: ShoppingCart,
     matchActive: (curr) => curr === "ventas_nueva"
-  },
-  { 
-    id: "clientes", 
-    label: "Clientes", 
-    icon: Users,
-    matchActive: (curr) => curr === "clientes"
-  },
-  { 
-    id: "transferencias_nueva", 
-    label: "Transferencias", 
-    icon: ArrowRightLeft,
-    matchActive: (curr) => curr === "transferencias_nueva"
-  },
-  { 
-    id: "historial", 
-    label: "Historial", 
-    icon: History,
-    matchActive: (curr) => curr === "historial"
-  },
-  { 
-    id: "finanzas", 
-    label: "Finanzas", 
-    icon: Receipt,
-    matchActive: (curr) => curr === "finanzas" || curr === "finanzas_gastos" || curr === "finanzas_gastos_nuevo" || curr === "finanzas_gastos_editar"
-  },
-  { 
-    id: "dashboard", 
-    label: "Dashboard", 
-    icon: LayoutDashboard,
-    matchActive: (curr) => curr === "dashboard"
-  },
-  { 
-    id: "analisis_ventas", 
-    label: "Análisis de ventas", 
-    icon: TrendingUp,
-    matchActive: (curr) => curr === "analisis_ventas" || curr === "ventas"
-  },
-  { 
-    id: "analisis_clientes", 
-    label: "Análisis de clientes", 
-    icon: UserCheck,
-    matchActive: (curr) => curr === "analisis_clientes"
-  },
-  { 
-    id: "almacenes", 
-    label: "Almacenes", 
-    icon: Warehouse,
-    matchActive: (curr) => curr === "almacenes"
-  },
-  { 
-    id: "catalogo", 
-    label: "Productos", 
-    icon: Package,
-    matchActive: (curr) => curr === "catalogo"
-  },
+  }
 ];
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    id: "clientes",
+    label: "Clientes",
+    icon: Users,
+    matchActive: (curr) => curr === "clientes" || curr === "analisis_clientes",
+    items: [
+      {
+        id: "clientes",
+        label: "Directorio de clientes",
+        icon: Users,
+        matchActive: (curr) => curr === "clientes"
+      },
+      {
+        id: "analisis_clientes",
+        label: "Análisis de clientes",
+        icon: UserCheck,
+        matchActive: (curr) => curr === "analisis_clientes"
+      }
+    ]
+  },
+  {
+    id: "inventario",
+    label: "Inventario",
+    icon: Boxes,
+    matchActive: (curr) => ["dashboard", "catalogo", "almacenes", "transferencias_nueva", "historial"].includes(curr),
+    items: [
+      {
+        id: "dashboard",
+        label: "Resumen",
+        icon: LayoutDashboard,
+        matchActive: (curr) => curr === "dashboard"
+      },
+      {
+        id: "catalogo",
+        label: "Productos",
+        icon: Package,
+        matchActive: (curr) => curr === "catalogo"
+      },
+      {
+        id: "almacenes",
+        label: "Almacenes",
+        icon: Warehouse,
+        matchActive: (curr) => curr === "almacenes"
+      },
+      {
+        id: "transferencias_nueva",
+        label: "Transferencias",
+        icon: ArrowRightLeft,
+        matchActive: (curr) => curr === "transferencias_nueva"
+      },
+      {
+        id: "historial",
+        label: "Historial",
+        icon: History,
+        matchActive: (curr) => curr === "historial"
+      }
+    ]
+  },
+  {
+    id: "finanzas",
+    label: "Finanzas",
+    icon: Receipt,
+    matchActive: (curr) => ["finanzas", "finanzas_gastos", "finanzas_gastos_nuevo", "finanzas_gastos_editar", "analisis_ventas", "ventas"].includes(curr),
+    items: [
+      {
+        id: "finanzas",
+        label: "Resumen financiero",
+        icon: Receipt,
+        matchActive: (curr) => curr === "finanzas"
+      },
+      {
+        id: "finanzas_gastos",
+        label: "Gastos",
+        icon: Receipt,
+        matchActive: (curr) => curr === "finanzas_gastos" || curr === "finanzas_gastos_nuevo" || curr === "finanzas_gastos_editar"
+      },
+      {
+        id: "analisis_ventas",
+        label: "Análisis de ventas",
+        icon: TrendingUp,
+        matchActive: (curr) => curr === "analisis_ventas" || curr === "ventas"
+      }
+    ]
+  }
+];
+
+const getActiveGroup = (activeTab: NavigationTab): NavGroupId | null => (
+  NAV_GROUPS.find((group) => group.matchActive(activeTab))?.id ?? null
+);
 
 export default function Sidebar({ user, activeTab, setActiveTab, onLogout }: SidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [openGroup, setOpenGroup] = useState<NavGroupId | null>(() => getActiveGroup(activeTab));
   const { theme, toggleTheme } = useTheme();
+
+  useEffect(() => {
+    const activeGroup = getActiveGroup(activeTab);
+    if (activeGroup) setOpenGroup(activeGroup);
+  }, [activeTab]);
 
   const handleSelectTab = (tab: NavigationTab) => {
     setActiveTab(tab);
     setMobileOpen(false);
   };
 
+  const toggleGroup = (groupId: NavGroupId) => {
+    setOpenGroup((current) => current === groupId ? null : groupId);
+  };
+
   // Shared navigation items component
   const NavContent = () => (
     <div className="flex flex-col h-full justify-between select-none">
       {/* Top Branding & Navigation */}
-      <div className="flex flex-col">
+      <div className="flex flex-col min-h-0 flex-1">
         {/* Brand Header */}
         <div className="px-3.5 py-3 border-b border-[#E2E8F0] dark:border-[#263449]">
           <div className="flex items-center space-x-2.5">
@@ -143,8 +202,8 @@ export default function Sidebar({ user, activeTab, setActiveTab, onLogout }: Sid
         </div>
 
         {/* Navigation Links (14px text) */}
-        <nav className="p-2 space-y-1" aria-label="Navegación principal">
-          {NAV_ITEMS.map((item) => {
+        <nav className="p-2 space-y-1 overflow-y-auto" aria-label="Navegación principal">
+          {DIRECT_NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = item.matchActive ? item.matchActive(activeTab) : activeTab === item.id;
             return (
@@ -153,6 +212,7 @@ export default function Sidebar({ user, activeTab, setActiveTab, onLogout }: Sid
                 type="button"
                 id={`nav-item-${item.id}`}
                 onClick={() => handleSelectTab(item.id)}
+                aria-current={isActive ? "page" : undefined}
                 className={`w-full flex items-center space-x-2.5 px-2.5 py-1.5 rounded-lg text-sm transition-all text-left ${
                   isActive
                     ? "bg-[#ECFDF5] dark:bg-emerald-950/40 text-[#059669] dark:text-emerald-400 font-semibold border-l-2 border-[#059669] dark:border-emerald-500 pl-2"
@@ -162,6 +222,60 @@ export default function Sidebar({ user, activeTab, setActiveTab, onLogout }: Sid
                 <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-[#059669] dark:text-emerald-400" : "text-[#64748B] dark:text-[#94A3B8]"}`} />
                 <span className="truncate">{item.label}</span>
               </button>
+            );
+          })}
+
+          {NAV_GROUPS.map((group) => {
+            const GroupIcon = group.icon;
+            const isOpen = openGroup === group.id;
+            const isGroupActive = group.matchActive(activeTab);
+
+            return (
+              <div key={group.id} className="space-y-0.5">
+                <button
+                  type="button"
+                  id={`nav-group-${group.id}`}
+                  onClick={() => toggleGroup(group.id)}
+                  aria-expanded={isOpen}
+                  aria-controls={`nav-group-items-${group.id}`}
+                  className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-sm transition-all text-left ${
+                    isGroupActive
+                      ? "text-[#059669] dark:text-emerald-400 font-semibold"
+                      : "text-[#64748B] dark:text-[#94A3B8] hover:text-[#172033] dark:hover:text-[#F8FAFC] hover:bg-[#F1F5F9] dark:hover:bg-[#111827] font-normal"
+                  }`}
+                >
+                  <GroupIcon className={`h-4 w-4 shrink-0 ${isGroupActive ? "text-[#059669] dark:text-emerald-400" : "text-[#64748B] dark:text-[#94A3B8]"}`} />
+                  <span className="truncate flex-1">{group.label}</span>
+                  <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`} />
+                </button>
+
+                {isOpen && (
+                  <div
+                    id={`nav-group-items-${group.id}`}
+                    className="ml-[18px] pl-2.5 border-l border-[#E2E8F0] dark:border-[#334155] space-y-0.5"
+                  >
+                    {group.items.map((item) => {
+                      const isActive = item.matchActive ? item.matchActive(activeTab) : activeTab === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          id={`nav-item-${item.id}`}
+                          onClick={() => handleSelectTab(item.id)}
+                          aria-current={isActive ? "page" : undefined}
+                          className={`w-full flex items-center px-2.5 py-1.5 rounded-lg text-xs transition-all text-left ${
+                            isActive
+                              ? "bg-[#ECFDF5] dark:bg-emerald-950/40 text-[#059669] dark:text-emerald-400 font-semibold"
+                              : "text-[#64748B] dark:text-[#94A3B8] hover:text-[#172033] dark:hover:text-[#F8FAFC] hover:bg-[#F1F5F9] dark:hover:bg-[#111827] font-normal"
+                          }`}
+                        >
+                          <span className="truncate">{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             );
           })}
         </nav>
