@@ -60,6 +60,7 @@ const AnalisisVentas = lazyWithRetry(() => import("./components/AnalisisVentas")
 const AnalisisClientes = lazyWithRetry(() => import("./components/AnalisisClientes"));
 const Clientes = lazyWithRetry(() => import("./components/Clientes"));
 const Finanzas = lazyWithRetry(() => import("./components/Finanzas"));
+const Papelera = lazyWithRetry(() => import("./components/Papelera"));
 
 const getGastoIdFromPath = (path: string): string => {
   const match = path.match(/\/finanzas\/gastos\/([^/]+)\/editar\/?$/i);
@@ -79,6 +80,9 @@ const getTabFromPath = (path: string): NavigationTab => {
   }
   if (normalized === "/finanzas") {
     return "finanzas";
+  }
+  if (normalized === "/papelera") {
+    return "papelera";
   }
   if (normalized === "/clientes") {
     return "clientes";
@@ -148,6 +152,8 @@ const getPathFromTab = (tab: NavigationTab): string => {
       return "/finanzas/gastos";
     case "finanzas_gastos_nuevo":
       return "/finanzas/gastos/nuevo";
+    case "papelera":
+      return "/papelera";
     case "movimientos":
       return "/compras/nueva";
     case "dashboard":
@@ -572,6 +578,18 @@ export default function App() {
                       onNavigateToVentas={() => navigateTo("analisis_ventas")}
                       onNavigateToCompras={() => navigateTo("compras")}
                     />
+                  </motion.div>
+                )}
+
+                {activeTab === "papelera" && (
+                  <motion.div
+                    key="papelera"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                  >
+                    <Papelera />
                   </motion.div>
                 )}
               </AnimatePresence>
