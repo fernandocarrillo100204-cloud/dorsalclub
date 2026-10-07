@@ -951,7 +951,7 @@ export default function ModalCatalogos({
                                   <button
                                     onClick={() => setItemToDelete({ type: "marcas", id: marca.id, nombre: marca.nombre })}
                                     className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
-                                    title="Eliminar"
+                                    title="Enviar a Papelera"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
@@ -1066,7 +1066,7 @@ export default function ModalCatalogos({
                                   <button
                                     onClick={() => setItemToDelete({ type: "categorias", id: cat.id, nombre: cat.nombre })}
                                     className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
-                                    title="Eliminar"
+                                    title="Enviar a Papelera"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
@@ -1208,7 +1208,7 @@ export default function ModalCatalogos({
                                   <button
                                     onClick={() => setItemToDelete({ type: "colores", id: color.id, nombre: color.nombre })}
                                     className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
-                                    title="Eliminar"
+                                    title="Enviar a Papelera"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
@@ -1320,7 +1320,7 @@ export default function ModalCatalogos({
                                   <button
                                     onClick={() => setItemToDelete({ type: "tallas_ropa", id: talla.id, nombre: talla.nombre })}
                                     className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
-                                    title="Eliminar"
+                                    title="Enviar a Papelera"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
@@ -1432,7 +1432,7 @@ export default function ModalCatalogos({
                                   <button
                                     onClick={() => setItemToDelete({ type: "tallas_calzado", id: talla.id, nombre: talla.nombre })}
                                     className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
-                                    title="Eliminar"
+                                    title="Enviar a Papelera"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
@@ -1563,7 +1563,7 @@ export default function ModalCatalogos({
                                   <button
                                     onClick={() => setItemToDelete({ type: "unidades", id: unit.id, nombre: unit.nombre })}
                                     className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
-                                    title="Eliminar"
+                                    title="Enviar a Papelera"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
@@ -1621,10 +1621,10 @@ export default function ModalCatalogos({
             </div>
             <div>
               <h3 className="text-base font-bold text-zinc-900 dark:text-white">
-                ¿Eliminar {itemToDelete.nombre}?
+                ¿Enviar {itemToDelete.nombre} a la Papelera?
               </h3>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
-                Esta acción eliminará el elemento del catálogo. Los productos existentes que ya lo utilicen mantendrán su texto actual.
+                El elemento quedará desactivado y podrá restaurarse desde Papelera. Los productos que ya lo utilizan conservarán su información.
               </p>
             </div>
             <div className="flex gap-2 justify-end pt-2">
@@ -1639,7 +1639,7 @@ export default function ModalCatalogos({
                 disabled={actionLoading}
                 className="px-4 py-2 text-xs font-semibold rounded-xl bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-50"
               >
-                Eliminar
+                Enviar a Papelera
               </button>
             </div>
           </div>
