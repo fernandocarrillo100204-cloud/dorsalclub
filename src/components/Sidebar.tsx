@@ -24,7 +24,8 @@ import {
   UserCheck,
   Receipt,
   ChevronRight,
-  Boxes
+  Boxes,
+  Trash2
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Usuario, NavigationTab } from "../types";
@@ -66,6 +67,15 @@ const DIRECT_NAV_ITEMS: NavItem[] = [
     label: "Ventas", 
     icon: ShoppingCart,
     matchActive: (curr) => curr === "ventas_nueva"
+  }
+];
+
+const UTILITY_NAV_ITEMS: NavItem[] = [
+  {
+    id: "papelera",
+    label: "Papelera",
+    icon: Trash2,
+    matchActive: (curr) => curr === "papelera"
   }
 ];
 
@@ -278,6 +288,30 @@ export default function Sidebar({ user, activeTab, setActiveTab, onLogout }: Sid
               </div>
             );
           })}
+
+          <div className="pt-1 mt-1 border-t border-[#E2E8F0] dark:border-[#334155]">
+            {UTILITY_NAV_ITEMS.map((item) => {
+              const Icon = item.icon;
+              const isActive = item.matchActive ? item.matchActive(activeTab) : activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  id={`nav-item-${item.id}`}
+                  onClick={() => handleSelectTab(item.id)}
+                  aria-current={isActive ? "page" : undefined}
+                  className={`w-full flex items-center space-x-2.5 px-2.5 py-1.5 rounded-lg text-sm transition-all text-left ${
+                    isActive
+                      ? "bg-[#ECFDF5] dark:bg-emerald-950/40 text-[#059669] dark:text-emerald-400 font-semibold border-l-2 border-[#059669] dark:border-emerald-500 pl-2"
+                      : "text-[#64748B] dark:text-[#94A3B8] hover:text-[#172033] dark:hover:text-[#F8FAFC] hover:bg-[#F1F5F9] dark:hover:bg-[#111827] font-normal"
+                  }`}
+                >
+                  <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-[#059669] dark:text-emerald-400" : "text-[#64748B] dark:text-[#94A3B8]"}`} />
+                  <span className="truncate">{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </nav>
       </div>
 
