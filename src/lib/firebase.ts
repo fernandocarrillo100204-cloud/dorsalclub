@@ -47,6 +47,8 @@ import {
   TallaRopaCatalogo,
   TallaCalzadoCatalogo,
   UnidadMedidaCatalogo,
+  UbicacionEntregaCatalogo,
+  RepartidorCatalogo,
   ResumenVentaDiaria,
   Compra,
   CompraItem,
@@ -204,6 +206,8 @@ const listeners = {
   tallas_ropa: [] as ((data: TallaRopaCatalogo[]) => void)[],
   tallas_calzado: [] as ((data: TallaCalzadoCatalogo[]) => void)[],
   unidades: [] as ((data: UnidadMedidaCatalogo[]) => void)[],
+  ubicaciones_entrega: [] as ((data: UbicacionEntregaCatalogo[]) => void)[],
+  repartidores: [] as ((data: RepartidorCatalogo[]) => void)[],
   clientes: [] as ((data: Cliente[]) => void)[],
   gastos: [] as ((data: Gasto[]) => void)[],
   auth: [] as ((user: Usuario | null) => void)[]
@@ -445,6 +449,78 @@ export function clearFinanzasCache(year?: number, month?: number): void {
     clearPeriodosFinancierosCache();
   }
 }
+
+type CatalogoEntrega = UbicacionEntregaCatalogo | RepartidorCatalogo;
+type CatalogoEntregaKey = "ubicaciones_entrega" | "repartidores";
+
+const getCatalogoEntrega = async <T extends CatalogoEntrega>(collectionName: string, localKey: CatalogoEntregaKey): Promise<T[]> => {
+  if (isConfigured && realDb) {
+    const snap = await getDocs(collection(realDb, collectionName));
+    const list = snap.docs.map(item => ({ id: item.id, ...item.data() } as T));
+    return list.filter(item => item.en_papelera !== true).sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" }));
+  }
+  return getLocalStorageItem<T[]>(localKey, [])
+    .filter(item => item.en_papelera !== true)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" }));
+};
+
+const subscribeCatalogoEntrega = <T extends CatalogoEntrega>(collectionName: string, localKey: CatalogoEntregaKey, onUpdate: (items: T[]) => void): (() => void) => {
+  const emit = (items: T[]) => onUpdate(items
+    .filter(item => item.en_papelera !== true)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" })));
+  if (isConfigured && realDb) {
+    return onSnapshot(collection(realDb, collectionName), snapshot => {
+      emit(snapshot.docs.map(item => ({ id: item.id, ...item.data() } as T)));
+    }, error => console.error(`Error al consultar ${collectionName}:`, error));
+  }
+  const update = () => emit(getLocalStorageItem<T[]>(localKey, []));
+  update();
+  listeners[localKey].push(update as any);
+  return () => { listeners[localKey] = listeners[localKey].filter(callback => callback !== update as any) as any; };
+};
+
+const addCatalogoEntrega = async <T extends CatalogoEntrega>(collectionName: string, localKey: CatalogoEntregaKey, prefix: string, nombre: string): Promise<string> => {
+  const cleanName = nombre.trim();
+  if (!cleanName) throw new Error("El nombre es obligatorio.");
+  const existing = await getCatalogoEntrega<T>(collectionName, localKey);
+  if (existing.some(item => item.nombre.trim().toLowerCase() === cleanName.toLowerCase())) throw new Error(`"${cleanName}" ya existe.`);
+  const id = `${prefix}_${Math.random().toString(36).slice(2, 11)}`;
+  if (isConfigured && realDb) {
+    await setDoc(doc(realDb, collectionName, id), { nombre: cleanName, activa: true, creado: Timestamp.now() });
+    return id;
+  }
+  const list = getLocalStorageItem<T[]>(localKey, []);
+  list.push({ id, nombre: cleanName, activa: true, creado: new Date() } as T);
+  setLocalStorageItem(localKey, list);
+  notifyListeners(localKey, list);
+  return id;
+};
+
+const updateCatalogoEntrega = async <T extends CatalogoEntrega>(collectionName: string, localKey: CatalogoEntregaKey, id: string, data: Partial<Omit<T, "id">>): Promise<void> => {
+  if (isConfigured && realDb) {
+    await setDoc(doc(realDb, collectionName, id), data, { merge: true });
+    return;
+  }
+  const list = getLocalStorageItem<T[]>(localKey, []);
+  const index = list.findIndex(item => item.id === id);
+  if (index === -1) throw new Error("El elemento ya no existe.");
+  list[index] = { ...list[index], ...data };
+  setLocalStorageItem(localKey, list);
+  notifyListeners(localKey, list);
+};
+
+const deleteCatalogoEntrega = async <T extends CatalogoEntrega>(collectionName: string, localKey: CatalogoEntregaKey, id: string): Promise<void> => {
+  if (isConfigured && realDb) {
+    await setDoc(doc(realDb, collectionName, id), { activa: false, en_papelera: true, desactivado_at: Timestamp.now() }, { merge: true });
+    return;
+  }
+  const list = getLocalStorageItem<T[]>(localKey, []);
+  const index = list.findIndex(item => item.id === id);
+  if (index === -1) throw new Error("El elemento ya no existe.");
+  list[index] = { ...list[index], activa: false, en_papelera: true, desactivado_at: new Date() };
+  setLocalStorageItem(localKey, list);
+  notifyListeners(localKey, list);
+};
 
 // --- SERVICIO DE FIRESTORE / INVENTARIO ---
 export const firestoreService = {
@@ -1387,7 +1463,9 @@ export const firestoreService = {
             ...(isPrimaryItem && otrosCostos > 0 ? { otros_costos_venta: otrosCostos } : {}),
             ...(isPrimaryItem && otrosCostos > 0 && venta.concepto_otros_costos ? { concepto_otros_costos: venta.concepto_otros_costos } : {}),
             ...(isPrimaryItem && ventaTotalCostos > 0 ? { total_costos_venta: ventaTotalCostos } : {}),
-            ...(venta.comentarios_venta ? { comentarios_venta: venta.comentarios_venta } : {})
+            ...(venta.comentarios_venta ? { comentarios_venta: venta.comentarios_venta } : {}),
+            ...(venta.ubicacion_entrega_id ? { ubicacion_entrega_id: venta.ubicacion_entrega_id, ubicacion_entrega_nombre: venta.ubicacion_entrega_nombre || "" } : {}),
+            ...(venta.repartidor_id ? { repartidor_id: venta.repartidor_id, repartidor_nombre: venta.repartidor_nombre || "" } : {})
           });
         });
 
@@ -1484,7 +1562,9 @@ export const firestoreService = {
         ...(isPrimaryItem && otrosCostos > 0 ? { otros_costos_venta: otrosCostos } : {}),
         ...(isPrimaryItem && otrosCostos > 0 && venta.concepto_otros_costos ? { concepto_otros_costos: venta.concepto_otros_costos } : {}),
         ...(isPrimaryItem && ventaTotalCostos > 0 ? { total_costos_venta: ventaTotalCostos } : {}),
-        ...(venta.comentarios_venta ? { comentarios_venta: venta.comentarios_venta } : {})
+        ...(venta.comentarios_venta ? { comentarios_venta: venta.comentarios_venta } : {}),
+        ...(venta.ubicacion_entrega_id ? { ubicacion_entrega_id: venta.ubicacion_entrega_id, ubicacion_entrega_nombre: venta.ubicacion_entrega_nombre || "" } : {}),
+        ...(venta.repartidor_id ? { repartidor_id: venta.repartidor_id, repartidor_nombre: venta.repartidor_nombre || "" } : {})
       });
     });
 
@@ -2585,6 +2665,10 @@ export const firestoreService = {
             total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
             total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
             comentarios_venta: data.comentarios_venta || undefined,
+            ubicacion_entrega_id: data.ubicacion_entrega_id || undefined,
+            ubicacion_entrega_nombre: data.ubicacion_entrega_nombre || undefined,
+            repartidor_id: data.repartidor_id || undefined,
+            repartidor_nombre: data.repartidor_nombre || undefined,
             estado: data.estado || "activo",
             anulado_at: data.anulado_at ? (data.anulado_at as Timestamp).toDate() : undefined,
             anulado_por: data.anulado_por,
@@ -2639,6 +2723,10 @@ export const firestoreService = {
               total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
               total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
               comentarios_venta: data.comentarios_venta || undefined,
+              ubicacion_entrega_id: data.ubicacion_entrega_id || undefined,
+              ubicacion_entrega_nombre: data.ubicacion_entrega_nombre || undefined,
+              repartidor_id: data.repartidor_id || undefined,
+              repartidor_nombre: data.repartidor_nombre || undefined,
               estado: data.estado || "activo",
               anulado_at: data.anulado_at ? (data.anulado_at as Timestamp).toDate() : undefined,
               anulado_por: data.anulado_por,
@@ -2691,7 +2779,9 @@ export const firestoreService = {
         (m.folio && m.folio.toLowerCase().includes(s)) ||
         (m.referencia && m.referencia.toLowerCase().includes(s)) ||
         (m.cliente_nombre && m.cliente_nombre.toLowerCase().includes(s)) ||
-        (m.comentarios_venta && m.comentarios_venta.toLowerCase().includes(s))
+        (m.comentarios_venta && m.comentarios_venta.toLowerCase().includes(s)) ||
+        (m.ubicacion_entrega_nombre && m.ubicacion_entrega_nombre.toLowerCase().includes(s)) ||
+        (m.repartidor_nombre && m.repartidor_nombre.toLowerCase().includes(s))
       );
     }
     if (options.warehouseFilter && options.warehouseFilter !== "all") {
@@ -2790,6 +2880,10 @@ export const firestoreService = {
             total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
             total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
             comentarios_venta: data.comentarios_venta || undefined,
+            ubicacion_entrega_id: data.ubicacion_entrega_id || undefined,
+            ubicacion_entrega_nombre: data.ubicacion_entrega_nombre || undefined,
+            repartidor_id: data.repartidor_id || undefined,
+            repartidor_nombre: data.repartidor_nombre || undefined,
             estado: data.estado || "activo",
             anulado_at: data.anulado_at ? (data.anulado_at.toDate ? data.anulado_at.toDate() : new Date(data.anulado_at)) : undefined,
             anulado_por: data.anulado_por,
@@ -2962,6 +3056,10 @@ export const firestoreService = {
             total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
             total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
             comentarios_venta: data.comentarios_venta || undefined,
+            ubicacion_entrega_id: data.ubicacion_entrega_id || undefined,
+            ubicacion_entrega_nombre: data.ubicacion_entrega_nombre || undefined,
+            repartidor_id: data.repartidor_id || undefined,
+            repartidor_nombre: data.repartidor_nombre || undefined,
             estado: data.estado || "activo"
           });
         });
@@ -4722,6 +4820,43 @@ export const firestoreService = {
     notifyListeners("unidades", list);
   },
 
+  // --- CATÁLOGOS DE ENTREGA ---
+  getUbicacionesEntrega: async (): Promise<UbicacionEntregaCatalogo[]> =>
+    getCatalogoEntrega<UbicacionEntregaCatalogo>("catalogo_ubicaciones_entrega", "ubicaciones_entrega"),
+
+  getUbicacionesEntregaRealtime: (onUpdate: (items: UbicacionEntregaCatalogo[]) => void): (() => void) =>
+    subscribeCatalogoEntrega<UbicacionEntregaCatalogo>("catalogo_ubicaciones_entrega", "ubicaciones_entrega", onUpdate),
+
+  addUbicacionEntrega: async (nombre: string): Promise<string> =>
+    addCatalogoEntrega<UbicacionEntregaCatalogo>("catalogo_ubicaciones_entrega", "ubicaciones_entrega", "ubi", nombre),
+
+  updateUbicacionEntrega: async (id: string, data: Partial<Omit<UbicacionEntregaCatalogo, "id">>): Promise<void> =>
+    updateCatalogoEntrega<UbicacionEntregaCatalogo>("catalogo_ubicaciones_entrega", "ubicaciones_entrega", id, data),
+
+  toggleUbicacionEntregaStatus: async (id: string, activa: boolean): Promise<void> =>
+    updateCatalogoEntrega<UbicacionEntregaCatalogo>("catalogo_ubicaciones_entrega", "ubicaciones_entrega", id, { activa }),
+
+  deleteUbicacionEntrega: async (id: string): Promise<void> =>
+    deleteCatalogoEntrega<UbicacionEntregaCatalogo>("catalogo_ubicaciones_entrega", "ubicaciones_entrega", id),
+
+  getRepartidores: async (): Promise<RepartidorCatalogo[]> =>
+    getCatalogoEntrega<RepartidorCatalogo>("catalogo_repartidores", "repartidores"),
+
+  getRepartidoresRealtime: (onUpdate: (items: RepartidorCatalogo[]) => void): (() => void) =>
+    subscribeCatalogoEntrega<RepartidorCatalogo>("catalogo_repartidores", "repartidores", onUpdate),
+
+  addRepartidor: async (nombre: string): Promise<string> =>
+    addCatalogoEntrega<RepartidorCatalogo>("catalogo_repartidores", "repartidores", "rep", nombre),
+
+  updateRepartidor: async (id: string, data: Partial<Omit<RepartidorCatalogo, "id">>): Promise<void> =>
+    updateCatalogoEntrega<RepartidorCatalogo>("catalogo_repartidores", "repartidores", id, data),
+
+  toggleRepartidorStatus: async (id: string, activa: boolean): Promise<void> =>
+    updateCatalogoEntrega<RepartidorCatalogo>("catalogo_repartidores", "repartidores", id, { activa }),
+
+  deleteRepartidor: async (id: string): Promise<void> =>
+    deleteCatalogoEntrega<RepartidorCatalogo>("catalogo_repartidores", "repartidores", id),
+
   // --- MÓDULO DE GASTOS (FINANZAS) ---
   getGastosPaginated: async (options: {
     pageSize?: number;
@@ -5315,7 +5450,7 @@ export const firestoreService = {
       const collectionNames = [
         "clientes", "movimientos", "compras", "gastos", "productos", "almacenes",
         "catalogo_categorias", "catalogo_marcas", "catalogo_colores", "catalogo_tallas_ropa",
-        "catalogo_tallas_calzado", "catalogo_unidades"
+        "catalogo_tallas_calzado", "catalogo_unidades", "catalogo_ubicaciones_entrega", "catalogo_repartidores"
       ] as const;
       const snapshots = await Promise.all(collectionNames.map(name => getDocs(query(collection(realDb!, name), where("en_papelera", "==", true)))));
       const byName = new Map(collectionNames.map((name, index) => [name, snapshots[index]]));
@@ -5341,7 +5476,8 @@ export const firestoreService = {
       byName.get("almacenes")?.docs.forEach(item => { const data = item.data(); items.push(makeItem("almacen", item.id, data.nombre || "Almacén", data.ubicacion || "Sin ubicación", data)); });
       const catalogMap: Array<[typeof collectionNames[number], PapeleraTipo]> = [
         ["catalogo_categorias", "categoria"], ["catalogo_marcas", "marca"], ["catalogo_colores", "color"],
-        ["catalogo_tallas_ropa", "talla_ropa"], ["catalogo_tallas_calzado", "talla_calzado"], ["catalogo_unidades", "unidad"]
+        ["catalogo_tallas_ropa", "talla_ropa"], ["catalogo_tallas_calzado", "talla_calzado"], ["catalogo_unidades", "unidad"],
+        ["catalogo_ubicaciones_entrega", "ubicacion_entrega"], ["catalogo_repartidores", "repartidor"]
       ];
       catalogMap.forEach(([collectionName, tipo]) => byName.get(collectionName)?.docs.forEach(item => { const data = item.data(); items.push(makeItem(tipo, item.id, data.nombre || data.abreviatura || item.id, "Elemento de catálogo", data)); }));
       return items.sort((a, b) => (b.fecha?.getTime() || 0) - (a.fecha?.getTime() || 0));
@@ -5364,7 +5500,7 @@ export const firestoreService = {
     getLocalStorageItem<Gasto[]>("gastos", []).filter(item => item.en_papelera).forEach(item => items.push(makeItem("gasto", item.id || "", item.concepto, `${item.categoria} · $${Number(item.monto || 0).toFixed(2)}`, item)));
     getLocalStorageItem<Producto[]>("productos", []).filter(item => item.en_papelera).forEach(item => items.push(makeItem("producto", item.sku, item.nombre, `SKU ${item.sku}`, item)));
     getLocalStorageItem<Almacen[]>("almacenes", []).filter(item => item.en_papelera).forEach(item => items.push(makeItem("almacen", item.id, item.nombre, item.ubicacion, item)));
-    const localCatalogs: Array<[string, PapeleraTipo]> = [["categorias", "categoria"], ["marcas", "marca"], ["colores", "color"], ["tallas_ropa", "talla_ropa"], ["tallas_calzado", "talla_calzado"], ["unidades", "unidad"]];
+    const localCatalogs: Array<[string, PapeleraTipo]> = [["categorias", "categoria"], ["marcas", "marca"], ["colores", "color"], ["tallas_ropa", "talla_ropa"], ["tallas_calzado", "talla_calzado"], ["unidades", "unidad"], ["ubicaciones_entrega", "ubicacion_entrega"], ["repartidores", "repartidor"]];
     localCatalogs.forEach(([key, tipo]) => getLocalStorageItem<any[]>(key, []).filter(item => item.en_papelera).forEach(item => items.push(makeItem(tipo, item.id, item.nombre || item.abreviatura || item.id, "Elemento de catálogo", item))));
     return items.sort((a, b) => (b.fecha?.getTime() || 0) - (a.fecha?.getTime() || 0));
   },
@@ -5383,7 +5519,9 @@ export const firestoreService = {
       color: { collection: "catalogo_colores", localKey: "colores", activeField: "activa" },
       talla_ropa: { collection: "catalogo_tallas_ropa", localKey: "tallas_ropa", activeField: "activa" },
       talla_calzado: { collection: "catalogo_tallas_calzado", localKey: "tallas_calzado", activeField: "activa" },
-      unidad: { collection: "catalogo_unidades", localKey: "unidades", activeField: "activa" }
+      unidad: { collection: "catalogo_unidades", localKey: "unidades", activeField: "activa" },
+      ubicacion_entrega: { collection: "catalogo_ubicaciones_entrega", localKey: "ubicaciones_entrega", activeField: "activa" },
+      repartidor: { collection: "catalogo_repartidores", localKey: "repartidores", activeField: "activa" }
     };
     const target = config[item.tipo];
     if (!target) throw new Error("Tipo de registro no compatible con Papelera.");
@@ -5498,6 +5636,10 @@ export const firestoreService = {
             total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
             total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
             comentarios_venta: data.comentarios_venta || undefined,
+            ubicacion_entrega_id: data.ubicacion_entrega_id || undefined,
+            ubicacion_entrega_nombre: data.ubicacion_entrega_nombre || undefined,
+            repartidor_id: data.repartidor_id || undefined,
+            repartidor_nombre: data.repartidor_nombre || undefined,
             estado: data.estado || "activo",
             anulado_at: data.anulado_at
               ? (data.anulado_at as Timestamp).toDate

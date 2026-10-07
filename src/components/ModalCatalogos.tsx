@@ -12,6 +12,8 @@ import {
   TallaRopaCatalogo, 
   TallaCalzadoCatalogo, 
   UnidadMedidaCatalogo, 
+  UbicacionEntregaCatalogo,
+  RepartidorCatalogo,
   Producto 
 } from "../types";
 import { 
@@ -33,7 +35,9 @@ import {
   RefreshCw,
   Info,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  MapPin,
+  UserRound
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -43,7 +47,92 @@ interface ModalCatalogosProps {
   productos: Producto[];
 }
 
-type TabType = "marcas" | "categorias" | "colores" | "tallas_ropa" | "tallas_calzado" | "unidades";
+type TabType = "marcas" | "categorias" | "colores" | "tallas_ropa" | "tallas_calzado" | "unidades" | "ubicaciones_entrega" | "repartidores";
+
+interface SimpleCatalogItem {
+  id: string;
+  nombre: string;
+  activa: boolean;
+}
+
+function SimpleCatalogTable({
+  items,
+  searchQuery,
+  filterStatus,
+  emptyText,
+  icon: Icon,
+  onUpdate,
+  onToggle,
+  onDelete,
+  onError,
+  onSuccess
+}: {
+  items: SimpleCatalogItem[];
+  searchQuery: string;
+  filterStatus: "todos" | "activas" | "desactivadas";
+  emptyText: string;
+  icon: React.ComponentType<{ className?: string }>;
+  onUpdate: (id: string, nombre: string) => Promise<void>;
+  onToggle: (id: string, activa: boolean) => Promise<void>;
+  onDelete: (item: SimpleCatalogItem) => void;
+  onError: (message: string) => void;
+  onSuccess: (message: string) => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const filtered = items.filter(item => {
+    const matchesSearch = item.nombre.toLowerCase().includes(searchQuery.trim().toLowerCase());
+    const matchesStatus = filterStatus === "todos" || (filterStatus === "activas" ? item.activa : !item.activa);
+    return matchesSearch && matchesStatus;
+  });
+
+  const save = async (item: SimpleCatalogItem) => {
+    const cleanName = editingName.trim();
+    if (!cleanName) return;
+    try {
+      await onUpdate(item.id, cleanName);
+      setEditingId(null);
+      onSuccess("Elemento actualizado.");
+    } catch (error: any) {
+      onError(error?.message || "No se pudo actualizar el elemento.");
+    }
+  };
+
+  return (
+    <table className="w-full text-left text-xs">
+      <thead className="bg-zinc-50 dark:bg-zinc-800/60 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500 font-semibold">
+        <tr><th className="py-3 px-4">Nombre</th><th className="py-3 px-4 text-center">Estado</th><th className="py-3 px-4 text-right">Acciones</th></tr>
+      </thead>
+      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        {filtered.length === 0 ? (
+          <tr><td colSpan={3} className="py-8 text-center text-zinc-400">{emptyText}</td></tr>
+        ) : filtered.map(item => {
+          const editing = editingId === item.id;
+          return (
+            <tr key={item.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/40">
+              <td className="py-3 px-4 font-medium text-zinc-900 dark:text-white">
+                {editing ? <input value={editingName} onChange={event => setEditingName(event.target.value)} className="w-full max-w-sm px-2 py-1 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800" /> : <span className="inline-flex items-center gap-2"><Icon className="w-3.5 h-3.5 text-zinc-400" />{item.nombre}</span>}
+              </td>
+              <td className="py-3 px-4 text-center"><span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${item.activa ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"}`}>{item.activa ? "Activa" : "Inactiva"}</span></td>
+              <td className="py-3 px-4 text-right">
+                <div className="inline-flex items-center gap-1.5">
+                  {editing ? <>
+                    <button type="button" onClick={() => save(item)} className="p-1.5 text-emerald-600 rounded-lg hover:bg-emerald-50"><Check className="w-4 h-4" /></button>
+                    <button type="button" onClick={() => setEditingId(null)} className="p-1.5 text-zinc-400 rounded-lg hover:bg-zinc-100"><X className="w-4 h-4" /></button>
+                  </> : <>
+                    <button type="button" onClick={() => { setEditingId(item.id); setEditingName(item.nombre); }} className="p-1.5 text-zinc-500 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800" title="Editar"><Edit3 className="w-3.5 h-3.5" /></button>
+                    <button type="button" onClick={() => onToggle(item.id, !item.activa).catch(error => onError(error?.message || "No se pudo cambiar el estado."))} className="p-1.5 text-zinc-400 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800" title={item.activa ? "Desactivar" : "Activar"}><Power className="w-3.5 h-3.5" /></button>
+                    <button type="button" onClick={() => onDelete(item)} className="p-1.5 text-zinc-400 hover:text-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30" title="Enviar a Papelera"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </>}
+                </div>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
 
 export default function ModalCatalogos({
   isOpen,
@@ -59,6 +148,8 @@ export default function ModalCatalogos({
   const [tallasRopa, setTallasRopa] = useState<TallaRopaCatalogo[]>([]);
   const [tallasCalzado, setTallasCalzado] = useState<TallaCalzadoCatalogo[]>([]);
   const [unidades, setUnidades] = useState<UnidadMedidaCatalogo[]>([]);
+  const [ubicacionesEntrega, setUbicacionesEntrega] = useState<UbicacionEntregaCatalogo[]>([]);
+  const [repartidores, setRepartidores] = useState<RepartidorCatalogo[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Search & filter
@@ -98,6 +189,8 @@ export default function ModalCatalogos({
   const [editingUnitId, setEditingUnitId] = useState<string | null>(null);
   const [editingUnitNombre, setEditingUnitNombre] = useState("");
   const [editingUnitAbrev, setEditingUnitAbrev] = useState("");
+  const [newUbicacionEntrega, setNewUbicacionEntrega] = useState("");
+  const [newRepartidor, setNewRepartidor] = useState("");
 
   // Feedback states
   const [actionLoading, setActionLoading] = useState(false);
@@ -148,6 +241,9 @@ export default function ModalCatalogos({
       setUnidades(data);
     });
 
+    const unsubLocations = firestoreService.getUbicacionesEntregaRealtime(setUbicacionesEntrega);
+    const unsubDeliveryPeople = firestoreService.getRepartidoresRealtime(setRepartidores);
+
     return () => {
       unsubMarcas();
       unsubCats();
@@ -155,6 +251,8 @@ export default function ModalCatalogos({
       unsubTallasRopa();
       unsubTallasCalz();
       unsubUnits();
+      unsubLocations();
+      unsubDeliveryPeople();
     };
   }, [isOpen]);
 
@@ -465,6 +563,40 @@ export default function ModalCatalogos({
     }
   };
 
+  const handleAddUbicacionEntrega = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const nombre = newUbicacionEntrega.trim();
+    if (!nombre) return;
+    setActionLoading(true);
+    setErrorMsg(null);
+    try {
+      await firestoreService.addUbicacionEntrega(nombre);
+      setNewUbicacionEntrega("");
+      setSuccessMsg(`Ubicación "${nombre}" agregada.`);
+    } catch (error: any) {
+      setErrorMsg(error?.message || "No se pudo agregar la ubicación.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleAddRepartidor = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const nombre = newRepartidor.trim();
+    if (!nombre) return;
+    setActionLoading(true);
+    setErrorMsg(null);
+    try {
+      await firestoreService.addRepartidor(nombre);
+      setNewRepartidor("");
+      setSuccessMsg(`Persona "${nombre}" agregada.`);
+    } catch (error: any) {
+      setErrorMsg(error?.message || "No se pudo agregar a la persona que entrega.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   // Confirm delete handler
   const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
@@ -483,8 +615,12 @@ export default function ModalCatalogos({
         await firestoreService.deleteTallaCalzado(itemToDelete.id);
       } else if (itemToDelete.type === "unidades") {
         await firestoreService.deleteUnidad(itemToDelete.id);
+      } else if (itemToDelete.type === "ubicaciones_entrega") {
+        await firestoreService.deleteUbicacionEntrega(itemToDelete.id);
+      } else if (itemToDelete.type === "repartidores") {
+        await firestoreService.deleteRepartidor(itemToDelete.id);
       }
-      setSuccessMsg(`Elemento "${itemToDelete.nombre}" eliminado correctamente.`);
+      setSuccessMsg(`Elemento "${itemToDelete.nombre}" enviado a Papelera.`);
       setItemToDelete(null);
     } catch (err: any) {
       setErrorMsg(err.message || "Error al eliminar.");
@@ -516,7 +652,7 @@ export default function ModalCatalogos({
                 Administrar Catálogos
               </h2>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Marcas, categorías, colores, tallas y unidades de medida
+                Productos, medidas y opciones de entrega
               </p>
             </div>
           </div>
@@ -607,6 +743,32 @@ export default function ModalCatalogos({
           >
             <Scale className="w-4 h-4" />
             Unidades ({unidades.length})
+          </button>
+
+          <button
+            id="tab-ubicaciones-entrega"
+            onClick={() => handleTabChange("ubicaciones_entrega")}
+            className={`flex items-center gap-2 py-3 px-3 text-xs font-semibold border-b-2 whitespace-nowrap transition-all ${
+              activeTab === "ubicaciones_entrega"
+                ? "border-zinc-900 text-zinc-900 dark:border-white dark:text-white bg-white dark:bg-zinc-800/60 rounded-t-lg"
+                : "border-transparent text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"
+            }`}
+          >
+            <MapPin className="w-4 h-4" />
+            Ubicaciones ({ubicacionesEntrega.length})
+          </button>
+
+          <button
+            id="tab-repartidores"
+            onClick={() => handleTabChange("repartidores")}
+            className={`flex items-center gap-2 py-3 px-3 text-xs font-semibold border-b-2 whitespace-nowrap transition-all ${
+              activeTab === "repartidores"
+                ? "border-zinc-900 text-zinc-900 dark:border-white dark:text-white bg-white dark:bg-zinc-800/60 rounded-t-lg"
+                : "border-transparent text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"
+            }`}
+          >
+            <UserRound className="w-4 h-4" />
+            Quién entrega ({repartidores.length})
           </button>
         </div>
 
@@ -819,6 +981,50 @@ export default function ModalCatalogos({
                 >
                   <Plus className="w-4 h-4" />
                   Agregar Unidad
+                </button>
+              </form>
+            )}
+
+            {activeTab === "ubicaciones_entrega" && (
+              <form onSubmit={handleAddUbicacionEntrega} className="flex flex-col sm:flex-row gap-3 items-end">
+                <div className="flex-1 w-full">
+                  <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                    Nueva ubicación de entrega
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej. Sucursal Centro, domicilio del cliente..."
+                    value={newUbicacionEntrega}
+                    onChange={(event) => setNewUbicacionEntrega(event.target.value)}
+                    className="w-full px-3.5 py-2 text-sm bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white text-zinc-900 dark:text-white"
+                  />
+                </div>
+                <button type="submit" disabled={actionLoading || !newUbicacionEntrega.trim()} className="w-full sm:w-auto px-4 py-2 bg-zinc-900 hover:bg-black dark:bg-white dark:hover:bg-zinc-100 text-white dark:text-zinc-900 font-semibold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50">
+                  <Plus className="w-4 h-4" />
+                  Agregar ubicación
+                </button>
+              </form>
+            )}
+
+            {activeTab === "repartidores" && (
+              <form onSubmit={handleAddRepartidor} className="flex flex-col sm:flex-row gap-3 items-end">
+                <div className="flex-1 w-full">
+                  <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                    Nueva persona que entrega
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej. Fernando, mensajería externa..."
+                    value={newRepartidor}
+                    onChange={(event) => setNewRepartidor(event.target.value)}
+                    className="w-full px-3.5 py-2 text-sm bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white text-zinc-900 dark:text-white"
+                  />
+                </div>
+                <button type="submit" disabled={actionLoading || !newRepartidor.trim()} className="w-full sm:w-auto px-4 py-2 bg-zinc-900 hover:bg-black dark:bg-white dark:hover:bg-zinc-100 text-white dark:text-zinc-900 font-semibold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50">
+                  <Plus className="w-4 h-4" />
+                  Agregar persona
                 </button>
               </form>
             )}
@@ -1577,6 +1783,36 @@ export default function ModalCatalogos({
                   )}
                 </tbody>
               </table>
+            )}
+
+            {activeTab === "ubicaciones_entrega" && (
+              <SimpleCatalogTable
+                items={ubicacionesEntrega}
+                searchQuery={searchQuery}
+                filterStatus={filterStatus}
+                emptyText="No hay ubicaciones de entrega registradas."
+                icon={MapPin}
+                onUpdate={(id, nombre) => firestoreService.updateUbicacionEntrega(id, { nombre })}
+                onToggle={(id, activa) => firestoreService.toggleUbicacionEntregaStatus(id, activa)}
+                onDelete={(item) => setItemToDelete({ type: "ubicaciones_entrega", id: item.id, nombre: item.nombre })}
+                onError={setErrorMsg}
+                onSuccess={setSuccessMsg}
+              />
+            )}
+
+            {activeTab === "repartidores" && (
+              <SimpleCatalogTable
+                items={repartidores}
+                searchQuery={searchQuery}
+                filterStatus={filterStatus}
+                emptyText="No hay personas de entrega registradas."
+                icon={UserRound}
+                onUpdate={(id, nombre) => firestoreService.updateRepartidor(id, { nombre })}
+                onToggle={(id, activa) => firestoreService.toggleRepartidorStatus(id, activa)}
+                onDelete={(item) => setItemToDelete({ type: "repartidores", id: item.id, nombre: item.nombre })}
+                onError={setErrorMsg}
+                onSuccess={setSuccessMsg}
+              />
             )}
           </div>
         </div>

@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
-import { Almacen, Producto, StockItem, Cliente, TipoCliente, VentaPartidaInput, normalizeOptionalMoney } from "../types";
+import { Almacen, Producto, StockItem, Cliente, TipoCliente, VentaPartidaInput, UbicacionEntregaCatalogo, RepartidorCatalogo, normalizeOptionalMoney } from "../types";
 import ClienteModal from "./ClienteModal";
 import {
   TrendingDown,
@@ -87,6 +87,12 @@ export default function Ventas({
   const [otrosCostosVenta, setOtrosCostosVenta] = useState<string>("");
   const [conceptoOtrosCostos, setConceptoOtrosCostos] = useState<string>("");
   const [comentariosVenta, setComentariosVenta] = useState<string>("");
+  const [ubicacionesEntrega, setUbicacionesEntrega] = useState<UbicacionEntregaCatalogo[]>([]);
+  const [repartidores, setRepartidores] = useState<RepartidorCatalogo[]>([]);
+  const [ubicacionEntregaId, setUbicacionEntregaId] = useState("");
+  const [repartidorId, setRepartidorId] = useState("");
+  const [deliveryCatalogLoading, setDeliveryCatalogLoading] = useState(true);
+  const [deliveryCatalogError, setDeliveryCatalogError] = useState<string | null>(null);
 
   // Client Selection State
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -144,6 +150,27 @@ export default function Ventas({
       setClientes(items);
     });
     return () => unsub();
+  }, []);
+
+  const loadDeliveryCatalogs = async () => {
+    setDeliveryCatalogLoading(true);
+    setDeliveryCatalogError(null);
+    try {
+      const [locations, deliveryPeople] = await Promise.all([
+        firestoreService.getUbicacionesEntrega(),
+        firestoreService.getRepartidores()
+      ]);
+      setUbicacionesEntrega(locations.filter(item => item.activa));
+      setRepartidores(deliveryPeople.filter(item => item.activa));
+    } catch (error: any) {
+      setDeliveryCatalogError(error?.message || "No se pudieron cargar las opciones de entrega.");
+    } finally {
+      setDeliveryCatalogLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDeliveryCatalogs();
   }, []);
 
   // Selected client details
@@ -343,6 +370,8 @@ export default function Ventas({
 
       const cleanComentarios = comentariosVenta.trim();
       const comentariosVentaFinal = cleanComentarios ? cleanComentarios.slice(0, 500) : undefined;
+      const selectedDeliveryLocation = ubicacionesEntrega.find(item => item.id === ubicacionEntregaId);
+      const selectedDeliveryPerson = repartidores.find(item => item.id === repartidorId);
 
       const res = await firestoreService.registerVentaTransaction({
         items: normalizedItems,
@@ -356,7 +385,11 @@ export default function Ventas({
         costo_envio_venta: costoEnvioFinal,
         otros_costos_venta: otrosCostosFinal,
         concepto_otros_costos: conceptoOtrosCostosFinal,
-        comentarios_venta: comentariosVentaFinal
+        comentarios_venta: comentariosVentaFinal,
+        ubicacion_entrega_id: selectedDeliveryLocation?.id,
+        ubicacion_entrega_nombre: selectedDeliveryLocation?.nombre,
+        repartidor_id: selectedDeliveryPerson?.id,
+        repartidor_nombre: selectedDeliveryPerson?.nombre
       });
 
       setFormSuccess(
@@ -373,6 +406,8 @@ export default function Ventas({
       setOtrosCostosVenta("");
       setConceptoOtrosCostos("");
       setComentariosVenta("");
+      setUbicacionEntregaId("");
+      setRepartidorId("");
       setIsAjustesOpen(false);
 
       if (onSuccess) {
@@ -744,6 +779,50 @@ export default function Ventas({
               <p className="text-[11px] text-zinc-400 mt-1">
                 Identificador de venta externa o canal de despacho.
               </p>
+            </div>
+
+            {/* Datos opcionales de entrega */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="ubicacion-entrega-select" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                  Ubicación de entrega (Opcional)
+                </label>
+                <select
+                  id="ubicacion-entrega-select"
+                  value={ubicacionEntregaId}
+                  onChange={(event) => setUbicacionEntregaId(event.target.value)}
+                  disabled={deliveryCatalogLoading || Boolean(deliveryCatalogError)}
+                  className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white disabled:opacity-60"
+                >
+                  <option value="">Sin especificar</option>
+                  {ubicacionesEntrega.map(item => <option key={item.id} value={item.id}>{item.nombre}</option>)}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="repartidor-select" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                  Quién entrega (Opcional)
+                </label>
+                <select
+                  id="repartidor-select"
+                  value={repartidorId}
+                  onChange={(event) => setRepartidorId(event.target.value)}
+                  disabled={deliveryCatalogLoading || Boolean(deliveryCatalogError)}
+                  className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white disabled:opacity-60"
+                >
+                  <option value="">Sin especificar</option>
+                  {repartidores.map(item => <option key={item.id} value={item.id}>{item.nombre}</option>)}
+                </select>
+              </div>
+              {deliveryCatalogLoading && <p className="sm:col-span-2 text-[11px] text-zinc-400">Cargando opciones de entrega…</p>}
+              {!deliveryCatalogLoading && !deliveryCatalogError && (ubicacionesEntrega.length === 0 || repartidores.length === 0) && (
+                <p className="sm:col-span-2 text-[11px] text-amber-600 dark:text-amber-400">Agrega ubicaciones y personas desde Administrar Catálogos para habilitar todas las opciones.</p>
+              )}
+              {deliveryCatalogError && (
+                <div className="sm:col-span-2 flex items-center gap-2 text-[11px] text-rose-600 dark:text-rose-400">
+                  <span>{deliveryCatalogError}</span>
+                  <button type="button" onClick={loadDeliveryCatalogs} className="font-semibold underline">Reintentar</button>
+                </div>
+              )}
             </div>
 
             {/* Comentarios de la venta */}

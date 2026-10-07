@@ -21,7 +21,9 @@ const TYPE_LABELS: Record<PapeleraTipo, string> = {
   color: "Color",
   talla_ropa: "Talla de ropa",
   talla_calzado: "Talla de calzado",
-  unidad: "Unidad"
+  unidad: "Unidad",
+  ubicacion_entrega: "Ubicación de entrega",
+  repartidor: "Persona que entrega"
 };
 
 export default function Papelera() {

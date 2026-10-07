@@ -200,6 +200,16 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /catalogo_ubicaciones_entrega/{ubicacionId} {
+      allow read, create, update: if isSignedIn();
+      allow delete: if false;
+    }
+
+    match /catalogo_repartidores/{repartidorId} {
+      allow read, create, update: if isSignedIn();
+      allow delete: if false;
+    }
+
     match /configuracion/{configId} {
       allow read, write: if isSignedIn();
     }

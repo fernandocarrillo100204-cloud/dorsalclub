@@ -85,6 +85,10 @@ export interface Movimiento {
   total_cobrado?: number;
   total_costos_venta?: number;
   comentarios_venta?: string; // Comentarios u observaciones opcionales de la venta
+  ubicacion_entrega_id?: string;
+  ubicacion_entrega_nombre?: string;
+  repartidor_id?: string;
+  repartidor_nombre?: string;
   venta_id?: string; // Agrupa todas las partidas que pertenecen a una misma venta
   venta_partida?: number; // Posición de la partida dentro de la venta (base 1)
   venta_total_partidas?: number; // Número total de partidas de la venta
@@ -124,6 +128,10 @@ export interface VentaRegistroInput {
   otros_costos_venta?: number;
   concepto_otros_costos?: string;
   comentarios_venta?: string;
+  ubicacion_entrega_id?: string;
+  ubicacion_entrega_nombre?: string;
+  repartidor_id?: string;
+  repartidor_nombre?: string;
 }
 
 export type TipoCliente = "minorista" | "mayorista" | "emprendedor";
@@ -306,6 +314,24 @@ export interface UnidadMedidaCatalogo {
   desactivado_at?: { seconds: number; nanoseconds: number } | Date;
 }
 
+export interface UbicacionEntregaCatalogo {
+  id: string;
+  nombre: string;
+  activa: boolean;
+  creado?: { seconds: number; nanoseconds: number } | Date;
+  en_papelera?: boolean;
+  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
+}
+
+export interface RepartidorCatalogo {
+  id: string;
+  nombre: string;
+  activa: boolean;
+  creado?: { seconds: number; nanoseconds: number } | Date;
+  en_papelera?: boolean;
+  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
+}
+
 export interface ResumenVentaDiaria {
   id: string; // Formato: YYYY-MM-DD_SKU_almacenId
   fecha_str: string; // YYYY-MM-DD
@@ -412,7 +438,9 @@ export type PapeleraTipo =
   | "color"
   | "talla_ropa"
   | "talla_calzado"
-  | "unidad";
+  | "unidad"
+  | "ubicacion_entrega"
+  | "repartidor";
 
 export interface PapeleraItem {
   key: string;

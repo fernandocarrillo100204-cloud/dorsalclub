@@ -29,7 +29,9 @@ import {
   Shirt,
   Tag,
   Filter,
-  Trash2
+  Trash2,
+  MapPin,
+  Truck
 } from "lucide-react";
 
 interface HistorialProps {
@@ -711,6 +713,22 @@ export default function Historial({
                           >
                             <span className="font-semibold text-zinc-500 dark:text-zinc-400 mr-1 not-italic">💬</span>
                             <span className="italic">{mov.comentarios_venta}</span>
+                          </div>
+                        )}
+                        {(mov.ubicacion_entrega_nombre || mov.repartidor_nombre) && (
+                          <div className="mt-1.5 space-y-1 text-[10px] text-zinc-500 dark:text-zinc-400">
+                            {mov.ubicacion_entrega_nombre && (
+                              <div className="flex items-center gap-1" title={`Ubicación de entrega: ${mov.ubicacion_entrega_nombre}`}>
+                                <MapPin className="w-3 h-3 shrink-0" />
+                                <span className="truncate">{mov.ubicacion_entrega_nombre}</span>
+                              </div>
+                            )}
+                            {mov.repartidor_nombre && (
+                              <div className="flex items-center gap-1" title={`Quién entrega: ${mov.repartidor_nombre}`}>
+                                <Truck className="w-3 h-3 shrink-0" />
+                                <span className="truncate">{mov.repartidor_nombre}</span>
+                              </div>
+                            )}
                           </div>
                         )}
                         {isAnulado && mov.motivo_anulacion && (
