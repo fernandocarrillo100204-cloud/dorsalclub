@@ -650,13 +650,13 @@ export default function GastosHistorial({
                           <Edit className="h-4 w-4" />
                         </button>
 
-                        {/* Eliminar */}
+                        {/* Enviar a Papelera */}
                         <button
                           type="button"
                           id={`btn-eliminar-gasto-${gasto.id}`}
                           onClick={() => setGastoToDelete(gasto)}
-                          title="Eliminar gasto"
-                          aria-label="Eliminar gasto"
+                          title="Enviar gasto a Papelera"
+                          aria-label="Enviar gasto a Papelera"
                           className="p-1.5 text-[#64748B] hover:text-rose-600 dark:text-[#94A3B8] dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-md transition-colors"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -871,12 +871,12 @@ export default function GastosHistorial({
                   <Trash2 className="h-5 w-5" />
                 </div>
                 <h3 className="font-bold text-base text-[#172033] dark:text-[#F8FAFC]">
-                  ¿Eliminar este registro de gasto?
+                  ¿Enviar este gasto a la Papelera?
                 </h3>
               </div>
 
               <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8]">
-                Esta acción eliminará de forma permanente el gasto:
+                El gasto dejará de aparecer en Finanzas, pero podrás restaurarlo posteriormente desde Papelera:
               </p>
               
               <div className="p-3 bg-slate-50 dark:bg-[#0F172A] rounded-lg border border-slate-200 dark:border-slate-800 text-xs space-y-1">
@@ -888,8 +888,8 @@ export default function GastosHistorial({
                 </p>
               </div>
 
-              <p className="text-xs text-rose-600 dark:text-rose-400 font-medium">
-                Esta acción no se puede deshacer.
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                No se eliminará ningún documento de forma permanente.
               </p>
             </div>
 
@@ -908,7 +908,7 @@ export default function GastosHistorial({
                 disabled={deleting}
                 className="px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shadow-xs transition-colors disabled:opacity-50"
               >
-                {deleting ? "Eliminando..." : "Eliminar gasto"}
+                {deleting ? "Enviando..." : "Enviar a Papelera"}
               </button>
             </div>
           </div>
