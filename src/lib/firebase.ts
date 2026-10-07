@@ -14,7 +14,6 @@ import {
   getDoc,
   setDoc,
   addDoc, 
-  deleteDoc,
   onSnapshot, 
   runTransaction, 
   writeBatch,
@@ -61,7 +60,9 @@ import {
   MetodoPagoGasto,
   DatosFinancierosMensuales,
   FinanzasDiaPunto,
-  PeriodoFinancieroIndex
+  PeriodoFinancieroIndex,
+  PapeleraItem,
+  PapeleraTipo
 } from "../types";
 import {
   getPeriodoKey,
@@ -463,9 +464,9 @@ export const firestoreService = {
       snap.forEach(d => {
         list.push({ id: d.id, ...d.data() } as Almacen);
       });
-      return list;
+      return list.filter(almacen => almacen.en_papelera !== true);
     }
-    return getLocalStorageItem<Almacen[]>("almacenes", []);
+    return getLocalStorageItem<Almacen[]>("almacenes", []).filter(almacen => almacen.en_papelera !== true);
   },
 
   getAlmacenesRealtime: (onUpdate: (almacenes: Almacen[]) => void, onError?: (error: any) => void): (() => void) => {
@@ -477,7 +478,7 @@ export const firestoreService = {
           snap.forEach(d => {
             list.push({ id: d.id, ...d.data() } as Almacen);
           });
-          onUpdate(list);
+          onUpdate(list.filter(almacen => almacen.en_papelera !== true));
         },
         (error) => {
           console.error("Error en listener de almacenes:", error);
@@ -489,7 +490,7 @@ export const firestoreService = {
 
     const update = () => {
       const list = getLocalStorageItem<Almacen[]>("almacenes", []);
-      onUpdate(list);
+      onUpdate(list.filter(almacen => almacen.en_papelera !== true));
     };
     update();
     listeners.almacenes.push(update);
@@ -529,14 +530,18 @@ export const firestoreService = {
 
   deleteAlmacen: async (id: string): Promise<void> => {
     if (isConfigured && realDb) {
-      const docRef = doc(realDb, "almacenes", id);
-      await deleteDoc(docRef);
+      await setDoc(doc(realDb, "almacenes", id), {
+        activo: false,
+        en_papelera: true,
+        desactivado_at: Timestamp.now()
+      }, { merge: true });
       return;
     }
     const list = getLocalStorageItem<Almacen[]>("almacenes", []);
-    const filtered = list.filter(a => a.id !== id);
-    setLocalStorageItem("almacenes", filtered);
-    notifyListeners("almacenes", filtered);
+    const index = list.findIndex(a => a.id === id);
+    if (index !== -1) list[index] = { ...list[index], activo: false, en_papelera: true, desactivado_at: new Date() };
+    setLocalStorageItem("almacenes", list);
+    notifyListeners("almacenes", list);
   },
 
   normalizeWarehouseId: (rawId: string, almacenesList: Almacen[] = []): string => {
@@ -574,6 +579,8 @@ export const firestoreService = {
             notas: data.notas || "",
             proximo_seguimiento: data.proximo_seguimiento ? (data.proximo_seguimiento.toDate ? data.proximo_seguimiento.toDate() : data.proximo_seguimiento) : null,
             estado: data.estado || "activo",
+            en_papelera: data.en_papelera === true,
+            desactivado_at: data.desactivado_at ? (data.desactivado_at.toDate ? data.desactivado_at.toDate() : data.desactivado_at) : undefined,
             creado_at: data.creado_at ? (data.creado_at.toDate ? data.creado_at.toDate() : data.creado_at) : new Date(),
             actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date(),
             creado_por: data.creado_por || "sistema"
@@ -585,18 +592,18 @@ export const firestoreService = {
           return tB - tA;
         });
         setLocalStorageItem("clientes", list);
-        return list;
+        return list.filter(cliente => cliente.en_papelera !== true);
       } catch (err: any) {
         console.warn("Consulta Firestore clientes no disponible (reglas o permisos de colección), recurriendo a almacenamiento local:", err?.message || err);
-        return getLocalClientes();
+        return getLocalClientes().filter(cliente => cliente.en_papelera !== true);
       }
     }
-    return getLocalClientes();
+    return getLocalClientes().filter(cliente => cliente.en_papelera !== true);
   },
 
   getClientesRealtime: (onUpdate: (clientes: Cliente[]) => void, onError?: (error: any) => void): (() => void) => {
     // Deliver local cache immediately so UI doesn't stall in loading
-    const localCached = getLocalClientes();
+    const localCached = getLocalClientes().filter(cliente => cliente.en_papelera !== true);
     onUpdate(localCached);
 
     if (isConfigured && realDb) {
@@ -606,7 +613,7 @@ export const firestoreService = {
       // Register local change listener to reflect modifications in real time
       const updateFromLocal = () => {
         const list = getLocalClientes();
-        onUpdate(list);
+        onUpdate(list.filter(cliente => cliente.en_papelera !== true));
       };
       listeners.clientes.push(updateFromLocal);
 
@@ -635,6 +642,8 @@ export const firestoreService = {
                 notas: data.notas || "",
                 proximo_seguimiento: data.proximo_seguimiento ? (data.proximo_seguimiento.toDate ? data.proximo_seguimiento.toDate() : data.proximo_seguimiento) : null,
                 estado: data.estado || "activo",
+                en_papelera: data.en_papelera === true,
+                desactivado_at: data.desactivado_at ? (data.desactivado_at.toDate ? data.desactivado_at.toDate() : data.desactivado_at) : undefined,
                 creado_at: data.creado_at ? (data.creado_at.toDate ? data.creado_at.toDate() : data.creado_at) : new Date(),
                 actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date(),
                 creado_por: data.creado_por || "sistema"
@@ -646,7 +655,7 @@ export const firestoreService = {
               return tB - tA;
             });
             setLocalStorageItem("clientes", list);
-            onUpdate(list);
+            onUpdate(list.filter(cliente => cliente.en_papelera !== true));
           },
           (error: any) => {
             if (isUnsubscribed) return;
@@ -657,14 +666,14 @@ export const firestoreService = {
               console.warn("Aviso en listener de clientes de Firestore:", error);
             }
             const fallbackList = getLocalClientes();
-            onUpdate(fallbackList);
+            onUpdate(fallbackList.filter(cliente => cliente.en_papelera !== true));
             if (onError) onError(error);
           }
         );
       } catch (err) {
         console.warn("Excepción al suscribir listener de clientes:", err);
         const fallbackList = getLocalClientes();
-        onUpdate(fallbackList);
+        onUpdate(fallbackList.filter(cliente => cliente.en_papelera !== true));
         if (onError) onError(err);
       }
 
@@ -681,7 +690,7 @@ export const firestoreService = {
 
     const update = () => {
       const list = getLocalClientes();
-      onUpdate(list);
+      onUpdate(list.filter(cliente => cliente.en_papelera !== true));
     };
     update();
     listeners.clientes.push(update);
@@ -926,6 +935,47 @@ export const firestoreService = {
     await firestoreService.updateCliente(id, { estado: nuevoEstado });
   },
 
+  enviarClientePapelera: async (id: string): Promise<void> => {
+    if (!id) throw new Error("ID de cliente no proporcionado.");
+    const now = isConfigured && realDb ? Timestamp.now() : new Date();
+    if (isConfigured && realDb) {
+      await setDoc(doc(realDb, "clientes", id), {
+        estado: "inactivo",
+        en_papelera: true,
+        desactivado_at: now,
+        actualizado_at: now
+      }, { merge: true });
+    } else {
+      const list = getLocalClientes();
+      const index = list.findIndex(cliente => cliente.id === id);
+      if (index === -1) throw new Error("El cliente no existe.");
+      list[index] = { ...list[index], estado: "inactivo", en_papelera: true, desactivado_at: now, actualizado_at: now };
+      setLocalStorageItem("clientes", list);
+      notifyListeners("clientes", list);
+    }
+  },
+
+  restaurarClientePapelera: async (id: string): Promise<void> => {
+    if (!id) throw new Error("ID de cliente no proporcionado.");
+    if (isConfigured && realDb) {
+      await setDoc(doc(realDb, "clientes", id), {
+        estado: "activo",
+        en_papelera: false,
+        desactivado_at: deleteField(),
+        actualizado_at: Timestamp.now()
+      }, { merge: true });
+    } else {
+      const list = getLocalClientes();
+      const index = list.findIndex(cliente => cliente.id === id);
+      if (index === -1) throw new Error("El cliente no existe.");
+      const restored = { ...list[index], estado: "activo" as EstadoCliente, en_papelera: false, actualizado_at: new Date() };
+      delete restored.desactivado_at;
+      list[index] = restored;
+      setLocalStorageItem("clientes", list);
+      notifyListeners("clientes", list);
+    }
+  },
+
   // --- PRODUCTOS ---
   getProductos: async (): Promise<Producto[]> => {
     if (isConfigured && realDb) {
@@ -934,9 +984,9 @@ export const firestoreService = {
       snap.forEach(d => {
         list.push({ sku: d.id, ...d.data() } as Producto);
       });
-      return list;
+      return list.filter(producto => producto.en_papelera !== true);
     }
-    return getLocalStorageItem<Producto[]>("productos", []);
+    return getLocalStorageItem<Producto[]>("productos", []).filter(producto => producto.en_papelera !== true);
   },
 
   getProductosRealtime: (onUpdate: (productos: Producto[]) => void, onError?: (error: any) => void): (() => void) => {
@@ -948,7 +998,7 @@ export const firestoreService = {
           snap.forEach(d => {
             list.push({ sku: d.id, ...d.data() } as Producto);
           });
-          onUpdate(list);
+          onUpdate(list.filter(producto => producto.en_papelera !== true));
         },
         (error) => {
           console.error("Error en listener de productos:", error);
@@ -960,7 +1010,7 @@ export const firestoreService = {
 
     const update = () => {
       const list = getLocalStorageItem<Producto[]>("productos", []);
-      onUpdate(list);
+      onUpdate(list.filter(producto => producto.en_papelera !== true));
     };
     update();
     listeners.productos.push(update);
@@ -1146,14 +1196,18 @@ export const firestoreService = {
   deleteProduct: async (sku: string): Promise<void> => {
     const cleanSku = sku.trim().toUpperCase();
     if (isConfigured && realDb) {
-      const docRef = doc(realDb, "productos", cleanSku);
-      await deleteDoc(docRef);
+      await setDoc(doc(realDb, "productos", cleanSku), {
+        activo: false,
+        en_papelera: true,
+        desactivado_at: Timestamp.now()
+      }, { merge: true });
       return;
     }
     const list = getLocalStorageItem<Producto[]>("productos", []);
-    const filtered = list.filter(p => p.sku !== cleanSku);
-    setLocalStorageItem("productos", filtered);
-    notifyListeners("productos", filtered);
+    const index = list.findIndex(p => p.sku === cleanSku);
+    if (index !== -1) list[index] = { ...list[index], activo: false, en_papelera: true, desactivado_at: new Date() };
+    setLocalStorageItem("productos", list);
+    notifyListeners("productos", list);
   },
 
   deleteProducto: async (sku: string): Promise<void> => {
@@ -2271,6 +2325,185 @@ export const firestoreService = {
     await firestoreService.anularMovimiento(id, "Anulación directa de registro");
   },
 
+  enviarMovimientoPapelera: async (id: string): Promise<void> => {
+    if (!id) throw new Error("ID de movimiento no proporcionado.");
+    if (isConfigured && realDb) {
+      const initial = await getDoc(doc(realDb, "movimientos", id));
+      if (!initial.exists()) throw new Error("El movimiento no existe.");
+      const initialData = initial.data();
+      if (initialData.compra_id) return firestoreService.enviarCompraPapelera(initialData.compra_id);
+      const snapshots = initialData.venta_id
+        ? (await getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", initialData.venta_id)))).docs
+        : [initial];
+      const periodoDescontado = snapshots.length > 0
+        && snapshots.every(snapshot => snapshot.data().estado !== "anulado")
+        && snapshots.some(snapshot => snapshot.data().tipo === "salida");
+      if (initialData.estado !== "anulado") await firestoreService.anularMovimiento(id, "Movimiento enviado a Papelera");
+      const batch = writeBatch(realDb);
+      snapshots.forEach(snapshot => batch.set(snapshot.ref, {
+        en_papelera: true,
+        desactivado_at: Timestamp.now(),
+        estado_antes_papelera: snapshot.data().estado === "anulado" ? "anulado" : "activo",
+        periodo_descontado_papelera: periodoDescontado
+      }, { merge: true }));
+      await batch.commit();
+      return;
+    }
+    const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const selected = movimientos.find(movimiento => movimiento.id === id);
+    if (!selected) throw new Error("El movimiento no existe.");
+    if (selected.compra_id) return firestoreService.enviarCompraPapelera(selected.compra_id);
+    const previousTargets = movimientos.filter(movimiento => movimiento.id === id || (selected.venta_id && movimiento.venta_id === selected.venta_id));
+    const previousState = new Map<string | undefined, "activo" | "anulado">(
+      previousTargets.map(movimiento => [movimiento.id, movimiento.estado === "anulado" ? "anulado" : "activo"])
+    );
+    const periodoDescontado = previousTargets.length > 0 && previousTargets.every(movimiento => movimiento.estado !== "anulado") && previousTargets.some(movimiento => movimiento.tipo === "salida");
+    if (selected.estado !== "anulado") await firestoreService.anularMovimiento(id, "Movimiento enviado a Papelera");
+    const updated = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const now = new Date();
+    updated.forEach((movimiento, index) => {
+      if (movimiento.id === id || (selected.venta_id && movimiento.venta_id === selected.venta_id)) updated[index] = {
+        ...movimiento,
+        en_papelera: true,
+        desactivado_at: now,
+        estado_antes_papelera: previousState.get(movimiento.id) || "activo",
+        periodo_descontado_papelera: periodoDescontado
+      };
+    });
+    setLocalStorageItem("movimientos", updated);
+    notifyListeners("movimientos", updated);
+  },
+
+  restaurarMovimientoPapelera: async (id: string): Promise<void> => {
+    if (!id) throw new Error("ID de movimiento no proporcionado.");
+    if (isConfigured && realDb) {
+      const initial = await getDoc(doc(realDb, "movimientos", id));
+      if (!initial.exists()) throw new Error("El movimiento no existe.");
+      const initialData = initial.data();
+      if (initialData.compra_id) return firestoreService.restaurarCompraPapelera(initialData.compra_id);
+      const refs = initialData.venta_id
+        ? (await getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", initialData.venta_id)))).docs.map(item => item.ref)
+        : [doc(realDb, "movimientos", id)];
+
+      await runTransaction(realDb, async transaction => {
+        const movementSnaps: any[] = [];
+        for (const ref of refs) movementSnaps.push(await transaction.get(ref));
+        const activeTargets = movementSnaps.filter(snapshot => snapshot.exists() && snapshot.data().en_papelera === true);
+        if (activeTargets.length === 0) throw new Error("El movimiento ya está activo.");
+        const restorableTargets = activeTargets.filter(snapshot => snapshot.data().estado_antes_papelera !== "anulado");
+
+        const stockDeltas = new Map<string, { sku: string; almacenId: string; delta: number; ref: any }>();
+        const addDelta = (sku: string, almacenId: string, delta: number) => {
+          const key = `${sku}_${almacenId}`;
+          const current = stockDeltas.get(key);
+          stockDeltas.set(key, { sku, almacenId, delta: (current?.delta || 0) + delta, ref: doc(realDb!, "stock", key) });
+        };
+        restorableTargets.forEach(snapshot => {
+          const data = snapshot.data();
+          const sku = String(data.sku || "").trim().toUpperCase();
+          const qty = Number(data.cantidad) || 0;
+          if (data.tipo === "salida") addDelta(sku, data.almacen_id, -qty);
+          if (data.tipo === "entrada") addDelta(sku, data.almacen_id, qty);
+          if (data.tipo === "transferencia") {
+            addDelta(sku, data.almacen_id, -qty);
+            if (!data.almacen_destino_id) throw new Error("La transferencia no tiene almacén de destino.");
+            addDelta(sku, data.almacen_destino_id, qty);
+          }
+        });
+        const stockEntries = [...stockDeltas.values()];
+        const stockSnaps: any[] = [];
+        for (const entry of stockEntries) stockSnaps.push(await transaction.get(entry.ref));
+        stockEntries.forEach((entry, index) => {
+          const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
+          if (currentQty + entry.delta < 0) throw new Error(`No hay stock suficiente de ${entry.sku} para reactivar la operación.`);
+        });
+
+        const saleTargets = restorableTargets.filter(snapshot => snapshot.data().tipo === "salida");
+        const summaryEntries = saleTargets.map(snapshot => {
+          const data = snapshot.data();
+          const sku = String(data.sku || "").trim().toUpperCase();
+          const key = `${getLocalDateString(data.fecha)}_${sku}_${data.almacen_id}`;
+          return { ref: doc(realDb!, "resumen_ventas", key), sku, almacenId: data.almacen_id, fecha: data.fecha, fechaStr: getLocalDateString(data.fecha), qty: Number(data.cantidad) || 0 };
+        });
+        const summarySnaps: any[] = [];
+        for (const entry of summaryEntries) summarySnaps.push(await transaction.get(entry.ref));
+        const restorePeriodCount = saleTargets.some(snapshot => snapshot.data().periodo_descontado_papelera === true);
+        const periodoKey = restorePeriodCount ? getPeriodoKey(saleTargets[0].data().fecha) : null;
+        const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+        const now = Timestamp.now();
+
+        stockEntries.forEach((entry, index) => {
+          const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
+          transaction.set(entry.ref, { id: `${entry.sku}_${entry.almacenId}`, sku: entry.sku, almacen_id: entry.almacenId, cantidad: currentQty + entry.delta, actualizado: now }, { merge: true });
+        });
+        summaryEntries.forEach((entry, index) => {
+          const currentQty = summarySnaps[index].exists() ? Number(summarySnaps[index].data()?.cantidad) || 0 : 0;
+          const currentTransactions = summarySnaps[index].exists() ? Number(summarySnaps[index].data()?.total_transacciones) || 0 : 0;
+          transaction.set(entry.ref, { fecha_str: entry.fechaStr, fecha: entry.fecha, sku: entry.sku, almacen_id: entry.almacenId, cantidad: currentQty + entry.qty, total_transacciones: currentTransactions + 1, actualizado: now }, { merge: true });
+        });
+        activeTargets.forEach(snapshot => {
+          const wasCancelled = snapshot.data().estado_antes_papelera === "anulado";
+          transaction.update(snapshot.ref, wasCancelled
+            ? { en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField(), periodo_descontado_papelera: deleteField() }
+            : { estado: "activo", anulado_at: deleteField(), anulado_por: deleteField(), motivo_anulacion: deleteField(), en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField(), periodo_descontado_papelera: deleteField() });
+        });
+        if (periodRef && periodoKey) transaction.set(periodRef, computeNewPeriodIndexData(periodSnap?.exists() ? periodSnap.data() : null, periodoKey, 1, 0, 0), { merge: true });
+      });
+      clearFinanzasCache(); clearPeriodosFinancierosCache();
+      return;
+    }
+
+    const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const selected = movimientos.find(movimiento => movimiento.id === id);
+    if (!selected) throw new Error("El movimiento no existe.");
+    if (selected.compra_id) return firestoreService.restaurarCompraPapelera(selected.compra_id);
+    const targets = movimientos.filter(movimiento => movimiento.id === id || (selected.venta_id && movimiento.venta_id === selected.venta_id));
+    const restorableTargets = targets.filter(movimiento => movimiento.estado_antes_papelera !== "anulado");
+    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
+    const summaryMap = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
+    restorableTargets.forEach(movimiento => {
+      const sku = movimiento.sku.trim().toUpperCase();
+      const qty = Number(movimiento.cantidad) || 0;
+      const originKey = `${sku}_${movimiento.almacen_id}`;
+      const originQty = stockMap[originKey]?.cantidad || 0;
+      if ((movimiento.tipo === "salida" || movimiento.tipo === "transferencia") && originQty < qty) throw new Error(`No hay stock suficiente de ${sku} para restaurar la operación.`);
+    });
+    const now = new Date();
+    targets.forEach(target => {
+      const index = movimientos.findIndex(movimiento => movimiento.id === target.id);
+      const wasCancelled = target.estado_antes_papelera === "anulado";
+      if (wasCancelled) {
+        const restoredCancelled = { ...target, en_papelera: false };
+        delete restoredCancelled.desactivado_at; delete restoredCancelled.estado_antes_papelera; delete restoredCancelled.periodo_descontado_papelera;
+        movimientos[index] = restoredCancelled;
+        return;
+      }
+      const sku = target.sku.trim().toUpperCase();
+      const qty = Number(target.cantidad) || 0;
+      const originKey = `${sku}_${target.almacen_id}`;
+      const originQty = stockMap[originKey]?.cantidad || 0;
+      if (target.tipo === "salida") stockMap[originKey] = { ...(stockMap[originKey] || { id: originKey, sku, almacen_id: target.almacen_id }), cantidad: originQty - qty, actualizado: now } as StockItem;
+      if (target.tipo === "entrada") stockMap[originKey] = { ...(stockMap[originKey] || { id: originKey, sku, almacen_id: target.almacen_id }), cantidad: originQty + qty, actualizado: now } as StockItem;
+      if (target.tipo === "transferencia" && target.almacen_destino_id) {
+        const destKey = `${sku}_${target.almacen_destino_id}`;
+        stockMap[originKey] = { ...stockMap[originKey], cantidad: originQty - qty, actualizado: now };
+        stockMap[destKey] = { ...(stockMap[destKey] || { id: destKey, sku, almacen_id: target.almacen_destino_id }), cantidad: (stockMap[destKey]?.cantidad || 0) + qty, actualizado: now } as StockItem;
+      }
+      if (target.tipo === "salida") {
+        const summaryKey = `${getLocalDateString(target.fecha)}_${sku}_${target.almacen_id}`;
+        const previous = summaryMap[summaryKey];
+        summaryMap[summaryKey] = { id: summaryKey, fecha_str: getLocalDateString(target.fecha), fecha: target.fecha, sku, almacen_id: target.almacen_id, cantidad: (previous?.cantidad || 0) + qty, total_transacciones: (previous?.total_transacciones || 0) + 1, actualizado: now };
+      }
+      const restored = { ...target, estado: "activo" as const, en_papelera: false };
+      delete restored.anulado_at; delete restored.anulado_por; delete restored.motivo_anulacion; delete restored.desactivado_at; delete restored.estado_antes_papelera; delete restored.periodo_descontado_papelera;
+      movimientos[index] = restored;
+    });
+    setLocalStorageItem("stock", stockMap); setLocalStorageItem("resumen_ventas", summaryMap); setLocalStorageItem("movimientos", movimientos);
+    notifyListeners("stock", stockMap); notifyListeners("movimientos", movimientos);
+    clearFinanzasCache(); clearPeriodosFinancierosCache();
+  },
+
   // --- HISTORIAL PAGINADO DE AUDITORÍA (50 EN 50) ---
   getMovimientosPaginated: async (options: {
     pageSize?: number;
@@ -2316,7 +2549,7 @@ export const firestoreService = {
         const itemsToProcess = hasMore ? docs.slice(0, pageSize) : docs;
         const nextLastDoc = itemsToProcess.length > 0 ? itemsToProcess[itemsToProcess.length - 1] : null;
 
-        const list: Movimiento[] = itemsToProcess.map(d => {
+        const list: Movimiento[] = itemsToProcess.filter(d => d.data().en_papelera !== true).map(d => {
           const data = d.data();
           return {
             id: d.id,
@@ -2370,7 +2603,7 @@ export const firestoreService = {
         if (err?.code === "failed-precondition" || (err?.message && err.message.includes("index"))) {
           const qFallback = query(collection(realDb, "movimientos"), limit(pageSize * 2));
           const snap = await getDocs(qFallback);
-          let list: Movimiento[] = snap.docs.map(d => {
+          let list: Movimiento[] = snap.docs.filter(d => d.data().en_papelera !== true).map(d => {
             const data = d.data();
             return {
               id: d.id,
@@ -2437,7 +2670,7 @@ export const firestoreService = {
     }
 
     // Modo local
-    let movs = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    let movs = getLocalStorageItem<Movimiento[]>("movimientos", []).filter(movimiento => movimiento.en_papelera !== true);
     movs = movs.map(m => ({
       ...m,
       fecha: typeof m.fecha === "string" ? new Date(m.fecha) : m.fecha,
@@ -3063,6 +3296,209 @@ export const firestoreService = {
     };
   },
 
+  enviarCompraPapelera: async (compraId: string): Promise<void> => {
+    if (!compraId) throw new Error("ID de compra no proporcionado.");
+    const user = authService.getCurrentUser();
+    const usuarioEmail = user?.email || "sistema@empresa.com";
+
+    if (isConfigured && realDb) {
+      const compraRef = doc(realDb, "compras", compraId);
+      const movementsSnap = await getDocs(query(collection(realDb, "movimientos"), where("compra_id", "==", compraId)));
+      const movementRefs = movementsSnap.docs.map(item => item.ref);
+
+      await runTransaction(realDb, async transaction => {
+        const compraSnap = await transaction.get(compraRef);
+        if (!compraSnap.exists()) throw new Error("La compra no existe.");
+        if (compraSnap.data().estado === "anulada") throw new Error("La compra ya está anulada.");
+
+        const movementSnaps: any[] = [];
+        for (const movementRef of movementRefs) movementSnaps.push(await transaction.get(movementRef));
+
+        const quantitiesByStock = new Map<string, { sku: string; almacenId: string; cantidad: number; ref: any }>();
+        movementSnaps.forEach(snapshot => {
+          if (!snapshot.exists() || snapshot.data().estado === "anulado") return;
+          const data = snapshot.data();
+          const sku = String(data.sku || "").trim().toUpperCase();
+          const almacenId = String(data.almacen_id || "");
+          const key = `${sku}_${almacenId}`;
+          const current = quantitiesByStock.get(key);
+          quantitiesByStock.set(key, {
+            sku,
+            almacenId,
+            cantidad: (current?.cantidad || 0) + (Number(data.cantidad) || 0),
+            ref: doc(realDb!, "stock", key)
+          });
+        });
+
+        const stockEntries = [...quantitiesByStock.values()];
+        const stockSnaps: any[] = [];
+        for (const entry of stockEntries) stockSnaps.push(await transaction.get(entry.ref));
+
+        const periodoKey = getPeriodoKey(compraSnap.data().fecha);
+        const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+
+        stockEntries.forEach((entry, index) => {
+          const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
+          if (currentQty < entry.cantidad) {
+            throw new Error(`No se puede enviar la compra a Papelera: el stock actual de ${entry.sku} es menor que las ${entry.cantidad} unidades que se deben revertir.`);
+          }
+        });
+
+        const now = Timestamp.now();
+        stockEntries.forEach((entry, index) => {
+          const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
+          transaction.set(entry.ref, {
+            id: `${entry.sku}_${entry.almacenId}`,
+            sku: entry.sku,
+            almacen_id: entry.almacenId,
+            cantidad: currentQty - entry.cantidad,
+            actualizado: now
+          }, { merge: true });
+        });
+        movementSnaps.forEach(snapshot => {
+          if (!snapshot.exists()) return;
+          const previousState = snapshot.data().estado === "anulado" ? "anulado" : "activo";
+          transaction.update(snapshot.ref, {
+            estado: "anulado",
+            anulado_at: now,
+            anulado_por: usuarioEmail,
+            motivo_anulacion: "Compra enviada a Papelera",
+            en_papelera: true,
+            desactivado_at: now,
+            estado_antes_papelera: previousState
+          });
+        });
+        transaction.set(compraRef, {
+          estado: "anulada",
+          en_papelera: true,
+          desactivado_at: now,
+          anulado_por: usuarioEmail
+        }, { merge: true });
+
+        if (periodRef && periodoKey) {
+          transaction.set(periodRef, computeNewPeriodIndexData(
+            periodSnap?.exists() ? periodSnap.data() : null,
+            periodoKey,
+            0,
+            -1,
+            0
+          ), { merge: true });
+        }
+      });
+
+      clearFinanzasCache();
+      clearPeriodosFinancierosCache();
+      return;
+    }
+
+    const compras = getLocalStorageItem<Compra[]>("compras", []);
+    const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
+    const compraIndex = compras.findIndex(compra => compra.id === compraId);
+    if (compraIndex === -1) throw new Error("La compra no existe.");
+    if (compras[compraIndex].estado === "anulada") throw new Error("La compra ya está anulada.");
+    const linked = movimientos.filter(movimiento => movimiento.compra_id === compraId && movimiento.estado !== "anulado");
+    const totals = new Map<string, number>();
+    linked.forEach(movimiento => {
+      const key = `${movimiento.sku.trim().toUpperCase()}_${movimiento.almacen_id}`;
+      totals.set(key, (totals.get(key) || 0) + (Number(movimiento.cantidad) || 0));
+    });
+    totals.forEach((cantidad, key) => {
+      if ((stockMap[key]?.cantidad || 0) < cantidad) throw new Error(`No hay stock suficiente para revertir ${key}.`);
+    });
+    const now = new Date();
+    totals.forEach((cantidad, key) => {
+      stockMap[key] = { ...stockMap[key], cantidad: (stockMap[key]?.cantidad || 0) - cantidad, actualizado: now };
+    });
+    movimientos.forEach((movimiento, index) => {
+      if (movimiento.compra_id === compraId) movimientos[index] = { ...movimiento, estado_antes_papelera: movimiento.estado === "anulado" ? "anulado" : "activo", estado: "anulado", anulado_at: now, anulado_por: usuarioEmail, motivo_anulacion: "Compra enviada a Papelera", en_papelera: true, desactivado_at: now };
+    });
+    compras[compraIndex] = { ...compras[compraIndex], estado: "anulada", en_papelera: true, desactivado_at: now };
+    setLocalStorageItem("stock", stockMap);
+    setLocalStorageItem("movimientos", movimientos);
+    setLocalStorageItem("compras", compras);
+    notifyListeners("stock", stockMap);
+    notifyListeners("movimientos", movimientos);
+    notifyListeners("compras", compras);
+    clearFinanzasCache();
+    clearPeriodosFinancierosCache();
+  },
+
+  restaurarCompraPapelera: async (compraId: string): Promise<void> => {
+    if (!compraId) throw new Error("ID de compra no proporcionado.");
+    if (isConfigured && realDb) {
+      const compraRef = doc(realDb, "compras", compraId);
+      const movementsSnap = await getDocs(query(collection(realDb, "movimientos"), where("compra_id", "==", compraId)));
+      const movementRefs = movementsSnap.docs.map(item => item.ref);
+      await runTransaction(realDb, async transaction => {
+        const compraSnap = await transaction.get(compraRef);
+        if (!compraSnap.exists()) throw new Error("La compra no existe.");
+        if (compraSnap.data().en_papelera !== true) throw new Error("La compra ya está activa.");
+        const movementSnaps: any[] = [];
+        for (const movementRef of movementRefs) movementSnaps.push(await transaction.get(movementRef));
+        const quantitiesByStock = new Map<string, { sku: string; almacenId: string; cantidad: number; ref: any }>();
+        movementSnaps.forEach(snapshot => {
+          if (!snapshot.exists()) return;
+          const data = snapshot.data();
+          if (data.estado_antes_papelera === "anulado") return;
+          const sku = String(data.sku || "").trim().toUpperCase();
+          const almacenId = String(data.almacen_id || "");
+          const key = `${sku}_${almacenId}`;
+          const current = quantitiesByStock.get(key);
+          quantitiesByStock.set(key, { sku, almacenId, cantidad: (current?.cantidad || 0) + (Number(data.cantidad) || 0), ref: doc(realDb!, "stock", key) });
+        });
+        const stockEntries = [...quantitiesByStock.values()];
+        const stockSnaps: any[] = [];
+        for (const entry of stockEntries) stockSnaps.push(await transaction.get(entry.ref));
+        const periodoKey = getPeriodoKey(compraSnap.data().fecha);
+        const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+        const now = Timestamp.now();
+        stockEntries.forEach((entry, index) => {
+          const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
+          transaction.set(entry.ref, { id: `${entry.sku}_${entry.almacenId}`, sku: entry.sku, almacen_id: entry.almacenId, cantidad: currentQty + entry.cantidad, actualizado: now }, { merge: true });
+        });
+        movementSnaps.forEach(snapshot => {
+          if (!snapshot.exists()) return;
+          const wasCancelled = snapshot.data().estado_antes_papelera === "anulado";
+          transaction.update(snapshot.ref, wasCancelled
+            ? { en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField() }
+            : { estado: "activo", anulado_at: deleteField(), anulado_por: deleteField(), motivo_anulacion: deleteField(), en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField() });
+        });
+        transaction.set(compraRef, { estado: "completada", en_papelera: false, desactivado_at: deleteField(), anulado_por: deleteField() }, { merge: true });
+        if (periodRef && periodoKey) transaction.set(periodRef, computeNewPeriodIndexData(periodSnap?.exists() ? periodSnap.data() : null, periodoKey, 0, 1, 0), { merge: true });
+      });
+      clearFinanzasCache();
+      clearPeriodosFinancierosCache();
+      return;
+    }
+    const compras = getLocalStorageItem<Compra[]>("compras", []);
+    const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
+    const compraIndex = compras.findIndex(compra => compra.id === compraId);
+    if (compraIndex === -1) throw new Error("La compra no existe.");
+    const now = new Date();
+    movimientos.forEach((movimiento, index) => {
+      if (movimiento.compra_id !== compraId) return;
+      const wasCancelled = movimiento.estado_antes_papelera === "anulado";
+      if (!wasCancelled) {
+        const key = `${movimiento.sku.trim().toUpperCase()}_${movimiento.almacen_id}`;
+        stockMap[key] = { ...(stockMap[key] || { id: key, sku: movimiento.sku, almacen_id: movimiento.almacen_id }), cantidad: (stockMap[key]?.cantidad || 0) + (Number(movimiento.cantidad) || 0), actualizado: now } as StockItem;
+      }
+      const restored = { ...movimiento, estado: wasCancelled ? "anulado" as const : "activo" as const, en_papelera: false };
+      if (!wasCancelled) { delete restored.anulado_at; delete restored.anulado_por; delete restored.motivo_anulacion; }
+      delete restored.desactivado_at; delete restored.estado_antes_papelera;
+      movimientos[index] = restored;
+    });
+    const restoredCompra = { ...compras[compraIndex], estado: "completada" as const, en_papelera: false };
+    delete restoredCompra.desactivado_at;
+    compras[compraIndex] = restoredCompra;
+    setLocalStorageItem("stock", stockMap); setLocalStorageItem("movimientos", movimientos); setLocalStorageItem("compras", compras);
+    notifyListeners("stock", stockMap); notifyListeners("movimientos", movimientos); notifyListeners("compras", compras);
+    clearFinanzasCache(); clearPeriodosFinancierosCache();
+  },
+
   getComprasRealtime: (onUpdate: (compras: Compra[]) => void, onError?: (error: any) => void): (() => void) => {
     if (isConfigured && realDb) {
       const q = query(collection(realDb, "compras"), orderBy("fecha", "desc"), limit(100));
@@ -3072,6 +3508,7 @@ export const firestoreService = {
           const list: Compra[] = [];
           snap.forEach(d => {
             const data = d.data();
+            if (data.en_papelera === true) return;
             list.push({
               id: d.id,
               folio: data.folio,
@@ -3105,7 +3542,7 @@ export const firestoreService = {
 
     const update = () => {
       const list = getLocalStorageItem<Compra[]>("compras", []);
-      const parsed = list.map(c => ({
+      const parsed = list.filter(c => c.en_papelera !== true).map(c => ({
         ...c,
         fecha: c.fecha instanceof Date ? c.fecha : new Date(typeof c.fecha === "string" ? c.fecha : (c.fecha as any).seconds * 1000),
         creado_at: c.creado_at instanceof Date ? c.creado_at : new Date(typeof c.creado_at === "string" ? c.creado_at : (c.creado_at as any).seconds * 1000)
@@ -3128,6 +3565,7 @@ export const firestoreService = {
       const list: Compra[] = [];
       snap.forEach(d => {
         const data = d.data();
+        if (data.en_papelera === true) return;
         list.push({
           id: d.id,
           folio: data.folio,
@@ -3153,7 +3591,7 @@ export const firestoreService = {
     }
 
     const list = getLocalStorageItem<Compra[]>("compras", []);
-    return list.map(c => ({
+    return list.filter(c => c.en_papelera !== true).map(c => ({
       ...c,
       fecha: c.fecha instanceof Date ? c.fecha : new Date(typeof c.fecha === "string" ? c.fecha : (c.fecha as any).seconds * 1000),
       creado_at: c.creado_at instanceof Date ? c.creado_at : new Date(typeof c.creado_at === "string" ? c.creado_at : (c.creado_at as any).seconds * 1000)
@@ -3193,7 +3631,7 @@ export const firestoreService = {
         const itemsToProcess = hasMore ? docs.slice(0, pageSize) : docs;
         const nextLastDoc = itemsToProcess.length > 0 ? itemsToProcess[itemsToProcess.length - 1] : null;
 
-        const list: Compra[] = itemsToProcess.map(d => {
+        const list: Compra[] = itemsToProcess.filter(d => d.data().en_papelera !== true).map(d => {
           const data = d.data();
           return {
             id: d.id,
@@ -3227,7 +3665,7 @@ export const firestoreService = {
         console.warn("Error en query indexado de compras, ejecutando consulta fallback:", err);
         const qFallback = query(collection(realDb, "compras"), limit(pageSize * 2));
         const snap = await getDocs(qFallback);
-        let list: Compra[] = snap.docs.map(d => {
+        let list: Compra[] = snap.docs.filter(d => d.data().en_papelera !== true).map(d => {
           const data = d.data();
           return {
             id: d.id,
@@ -3264,7 +3702,7 @@ export const firestoreService = {
     }
 
     // Modo emulador LocalStorage
-    let list = getLocalStorageItem<Compra[]>("compras", []);
+    let list = getLocalStorageItem<Compra[]>("compras", []).filter(compra => compra.en_papelera !== true);
     let parsed = list.map(c => ({
       ...c,
       fecha: c.fecha instanceof Date ? c.fecha : new Date(typeof c.fecha === "string" ? c.fecha : (c.fecha as any).seconds * 1000),
@@ -3520,14 +3958,14 @@ export const firestoreService = {
       snap.forEach(d => {
         list.push({ id: d.id, ...d.data() } as CategoriaCatalogo);
       });
-      return list;
+      return list.filter(item => item.en_papelera !== true);
     }
     const local = getLocalStorageItem<CategoriaCatalogo[]>("categorias", []);
     if (local.length === 0) {
       const res = await firestoreService.seedAndImportCatalogos();
       return res.categorias;
     }
-    return local;
+    return local.filter(item => item.en_papelera !== true);
   },
 
   getCategoriasRealtime: (onUpdate: (cats: CategoriaCatalogo[]) => void): (() => void) => {
@@ -3539,7 +3977,7 @@ export const firestoreService = {
           snap.forEach(d => {
             list.push({ id: d.id, ...d.data() } as CategoriaCatalogo);
           });
-          onUpdate(list);
+          onUpdate(list.filter(item => item.en_papelera !== true));
         },
         (error) => {
           console.error("Error en listener de categorías:", error);
@@ -3549,7 +3987,7 @@ export const firestoreService = {
 
     const update = () => {
       const list = getLocalStorageItem<CategoriaCatalogo[]>("categorias", []);
-      onUpdate(list);
+      onUpdate(list.filter(item => item.en_papelera !== true));
     };
     update();
     listeners.categorias.push(update);
@@ -3653,14 +4091,14 @@ export const firestoreService = {
 
   deleteCategoria: async (id: string): Promise<void> => {
     if (isConfigured && realDb) {
-      const docRef = doc(realDb, "catalogo_categorias", id);
-      await deleteDoc(docRef);
+      await setDoc(doc(realDb, "catalogo_categorias", id), { activa: false, en_papelera: true, desactivado_at: Timestamp.now() }, { merge: true });
       return;
     }
     const list = getLocalStorageItem<CategoriaCatalogo[]>("categorias", []);
-    const updated = list.filter(c => c.id !== id);
-    setLocalStorageItem("categorias", updated);
-    notifyListeners("categorias", updated);
+    const index = list.findIndex(c => c.id === id);
+    if (index !== -1) list[index] = { ...list[index], activa: false, en_papelera: true, desactivado_at: new Date() };
+    setLocalStorageItem("categorias", list);
+    notifyListeners("categorias", list);
   },
 
   // --- MARCAS ---
@@ -3671,14 +4109,14 @@ export const firestoreService = {
       snap.forEach(d => {
         list.push({ id: d.id, ...d.data() } as MarcaCatalogo);
       });
-      return list;
+      return list.filter(item => item.en_papelera !== true);
     }
     const local = getLocalStorageItem<MarcaCatalogo[]>("marcas", []);
     if (local.length === 0) {
       const res = await firestoreService.seedAndImportCatalogos();
       return res.marcas;
     }
-    return local;
+    return local.filter(item => item.en_papelera !== true);
   },
 
   getMarcasRealtime: (onUpdate: (marcas: MarcaCatalogo[]) => void): (() => void) => {
@@ -3690,7 +4128,7 @@ export const firestoreService = {
           snap.forEach(d => {
             list.push({ id: d.id, ...d.data() } as MarcaCatalogo);
           });
-          onUpdate(list);
+          onUpdate(list.filter(item => item.en_papelera !== true));
         },
         (error) => {
           console.error("Error en listener de marcas:", error);
@@ -3700,7 +4138,7 @@ export const firestoreService = {
 
     const update = () => {
       const list = getLocalStorageItem<MarcaCatalogo[]>("marcas", []);
-      onUpdate(list);
+      onUpdate(list.filter(item => item.en_papelera !== true));
     };
     update();
     listeners.marcas.push(update);
@@ -3764,14 +4202,14 @@ export const firestoreService = {
 
   deleteMarca: async (id: string): Promise<void> => {
     if (isConfigured && realDb) {
-      const docRef = doc(realDb, "catalogo_marcas", id);
-      await deleteDoc(docRef);
+      await setDoc(doc(realDb, "catalogo_marcas", id), { activa: false, en_papelera: true, desactivado_at: Timestamp.now() }, { merge: true });
       return;
     }
     const list = getLocalStorageItem<MarcaCatalogo[]>("marcas", []);
-    const updated = list.filter(m => m.id !== id);
-    setLocalStorageItem("marcas", updated);
-    notifyListeners("marcas", updated);
+    const index = list.findIndex(m => m.id === id);
+    if (index !== -1) list[index] = { ...list[index], activa: false, en_papelera: true, desactivado_at: new Date() };
+    setLocalStorageItem("marcas", list);
+    notifyListeners("marcas", list);
   },
 
   // --- COLORES ---
@@ -3782,14 +4220,14 @@ export const firestoreService = {
       snap.forEach(d => {
         list.push({ id: d.id, ...d.data() } as ColorCatalogo);
       });
-      return list;
+      return list.filter(item => item.en_papelera !== true);
     }
     const local = getLocalStorageItem<ColorCatalogo[]>("colores", []);
     if (local.length === 0) {
       const res = await firestoreService.seedAndImportCatalogos();
       return res.colores;
     }
-    return local;
+    return local.filter(item => item.en_papelera !== true);
   },
 
   getColoresRealtime: (onUpdate: (colores: ColorCatalogo[]) => void): (() => void) => {
@@ -3801,7 +4239,7 @@ export const firestoreService = {
           snap.forEach(d => {
             list.push({ id: d.id, ...d.data() } as ColorCatalogo);
           });
-          onUpdate(list);
+          onUpdate(list.filter(item => item.en_papelera !== true));
         },
         (error) => {
           console.error("Error en listener de colores:", error);
@@ -3811,7 +4249,7 @@ export const firestoreService = {
 
     const update = () => {
       const list = getLocalStorageItem<ColorCatalogo[]>("colores", []);
-      onUpdate(list);
+      onUpdate(list.filter(item => item.en_papelera !== true));
     };
     update();
     listeners.colores.push(update);
@@ -3877,14 +4315,14 @@ export const firestoreService = {
 
   deleteColor: async (id: string): Promise<void> => {
     if (isConfigured && realDb) {
-      const docRef = doc(realDb, "catalogo_colores", id);
-      await deleteDoc(docRef);
+      await setDoc(doc(realDb, "catalogo_colores", id), { activa: false, en_papelera: true, desactivado_at: Timestamp.now() }, { merge: true });
       return;
     }
     const list = getLocalStorageItem<ColorCatalogo[]>("colores", []);
-    const updated = list.filter(c => c.id !== id);
-    setLocalStorageItem("colores", updated);
-    notifyListeners("colores", updated);
+    const index = list.findIndex(c => c.id === id);
+    if (index !== -1) list[index] = { ...list[index], activa: false, en_papelera: true, desactivado_at: new Date() };
+    setLocalStorageItem("colores", list);
+    notifyListeners("colores", list);
   },
 
   // --- TALLAS DE ROPA ---
@@ -3895,14 +4333,14 @@ export const firestoreService = {
       snap.forEach(d => {
         list.push({ id: d.id, ...d.data() } as TallaRopaCatalogo);
       });
-      return list.sort((a, b) => (a.orden || 0) - (b.orden || 0));
+      return list.filter(item => item.en_papelera !== true).sort((a, b) => (a.orden || 0) - (b.orden || 0));
     }
     const local = getLocalStorageItem<TallaRopaCatalogo[]>("tallas_ropa", []);
     if (local.length === 0) {
       const res = await firestoreService.seedAndImportCatalogos();
       return res.tallasRopa;
     }
-    return local.sort((a, b) => (a.orden || 0) - (b.orden || 0));
+    return local.filter(item => item.en_papelera !== true).sort((a, b) => (a.orden || 0) - (b.orden || 0));
   },
 
   getTallasRopaRealtime: (onUpdate: (tallas: TallaRopaCatalogo[]) => void): (() => void) => {
@@ -3914,7 +4352,7 @@ export const firestoreService = {
           snap.forEach(d => {
             list.push({ id: d.id, ...d.data() } as TallaRopaCatalogo);
           });
-          onUpdate(list.sort((a, b) => (a.orden || 0) - (b.orden || 0)));
+          onUpdate(list.filter(item => item.en_papelera !== true).sort((a, b) => (a.orden || 0) - (b.orden || 0)));
         },
         (error) => {
           console.error("Error en listener de tallas ropa:", error);
@@ -3924,7 +4362,7 @@ export const firestoreService = {
 
     const update = () => {
       const list = getLocalStorageItem<TallaRopaCatalogo[]>("tallas_ropa", []);
-      onUpdate(list.sort((a, b) => (a.orden || 0) - (b.orden || 0)));
+      onUpdate(list.filter(item => item.en_papelera !== true).sort((a, b) => (a.orden || 0) - (b.orden || 0)));
     };
     update();
     listeners.tallas_ropa.push(update);
@@ -3991,14 +4429,14 @@ export const firestoreService = {
 
   deleteTallaRopa: async (id: string): Promise<void> => {
     if (isConfigured && realDb) {
-      const docRef = doc(realDb, "catalogo_tallas_ropa", id);
-      await deleteDoc(docRef);
+      await setDoc(doc(realDb, "catalogo_tallas_ropa", id), { activa: false, en_papelera: true, desactivado_at: Timestamp.now() }, { merge: true });
       return;
     }
     const list = getLocalStorageItem<TallaRopaCatalogo[]>("tallas_ropa", []);
-    const updated = list.filter(t => t.id !== id);
-    setLocalStorageItem("tallas_ropa", updated);
-    notifyListeners("tallas_ropa", updated);
+    const index = list.findIndex(t => t.id === id);
+    if (index !== -1) list[index] = { ...list[index], activa: false, en_papelera: true, desactivado_at: new Date() };
+    setLocalStorageItem("tallas_ropa", list);
+    notifyListeners("tallas_ropa", list);
   },
 
   // --- TALLAS DE CALZADO ---
@@ -4009,14 +4447,14 @@ export const firestoreService = {
       snap.forEach(d => {
         list.push({ id: d.id, ...d.data() } as TallaCalzadoCatalogo);
       });
-      return list.sort((a, b) => (Number(a.nombre) || 0) - (Number(b.nombre) || 0));
+      return list.filter(item => item.en_papelera !== true).sort((a, b) => (Number(a.nombre) || 0) - (Number(b.nombre) || 0));
     }
     const local = getLocalStorageItem<TallaCalzadoCatalogo[]>("tallas_calzado", []);
     if (local.length === 0) {
       const res = await firestoreService.seedAndImportCatalogos();
       return res.tallasCalzado;
     }
-    return local.sort((a, b) => (Number(a.nombre) || 0) - (Number(b.nombre) || 0));
+    return local.filter(item => item.en_papelera !== true).sort((a, b) => (Number(a.nombre) || 0) - (Number(b.nombre) || 0));
   },
 
   getTallasCalzadoRealtime: (onUpdate: (tallas: TallaCalzadoCatalogo[]) => void): (() => void) => {
@@ -4028,7 +4466,7 @@ export const firestoreService = {
           snap.forEach(d => {
             list.push({ id: d.id, ...d.data() } as TallaCalzadoCatalogo);
           });
-          onUpdate(list.sort((a, b) => (Number(a.nombre) || 0) - (Number(b.nombre) || 0)));
+          onUpdate(list.filter(item => item.en_papelera !== true).sort((a, b) => (Number(a.nombre) || 0) - (Number(b.nombre) || 0)));
         },
         (error) => {
           console.error("Error en listener de tallas calzado:", error);
@@ -4038,7 +4476,7 @@ export const firestoreService = {
 
     const update = () => {
       const list = getLocalStorageItem<TallaCalzadoCatalogo[]>("tallas_calzado", []);
-      onUpdate(list.sort((a, b) => (Number(a.nombre) || 0) - (Number(b.nombre) || 0)));
+      onUpdate(list.filter(item => item.en_papelera !== true).sort((a, b) => (Number(a.nombre) || 0) - (Number(b.nombre) || 0)));
     };
     update();
     listeners.tallas_calzado.push(update);
@@ -4105,14 +4543,14 @@ export const firestoreService = {
 
   deleteTallaCalzado: async (id: string): Promise<void> => {
     if (isConfigured && realDb) {
-      const docRef = doc(realDb, "catalogo_tallas_calzado", id);
-      await deleteDoc(docRef);
+      await setDoc(doc(realDb, "catalogo_tallas_calzado", id), { activa: false, en_papelera: true, desactivado_at: Timestamp.now() }, { merge: true });
       return;
     }
     const list = getLocalStorageItem<TallaCalzadoCatalogo[]>("tallas_calzado", []);
-    const updated = list.filter(t => t.id !== id);
-    setLocalStorageItem("tallas_calzado", updated);
-    notifyListeners("tallas_calzado", updated);
+    const index = list.findIndex(t => t.id === id);
+    if (index !== -1) list[index] = { ...list[index], activa: false, en_papelera: true, desactivado_at: new Date() };
+    setLocalStorageItem("tallas_calzado", list);
+    notifyListeners("tallas_calzado", list);
   },
 
   // --- UNIDADES DE MEDIDA ---
@@ -4123,14 +4561,14 @@ export const firestoreService = {
       snap.forEach(d => {
         list.push({ id: d.id, ...d.data() } as UnidadMedidaCatalogo);
       });
-      return list;
+      return list.filter(item => item.en_papelera !== true);
     }
     const local = getLocalStorageItem<UnidadMedidaCatalogo[]>("unidades", []);
     if (local.length === 0) {
       const res = await firestoreService.seedAndImportCatalogos();
       return res.unidades;
     }
-    return local;
+    return local.filter(item => item.en_papelera !== true);
   },
 
   getUnidadesRealtime: (onUpdate: (units: UnidadMedidaCatalogo[]) => void): (() => void) => {
@@ -4142,7 +4580,7 @@ export const firestoreService = {
           snap.forEach(d => {
             list.push({ id: d.id, ...d.data() } as UnidadMedidaCatalogo);
           });
-          onUpdate(list);
+          onUpdate(list.filter(item => item.en_papelera !== true));
         },
         (error) => {
           console.error("Error en listener de unidades:", error);
@@ -4152,7 +4590,7 @@ export const firestoreService = {
 
     const update = () => {
       const list = getLocalStorageItem<UnidadMedidaCatalogo[]>("unidades", []);
-      onUpdate(list);
+      onUpdate(list.filter(item => item.en_papelera !== true));
     };
     update();
     listeners.unidades.push(update);
@@ -4274,14 +4712,14 @@ export const firestoreService = {
 
   deleteUnidad: async (id: string): Promise<void> => {
     if (isConfigured && realDb) {
-      const docRef = doc(realDb, "catalogo_unidades", id);
-      await deleteDoc(docRef);
+      await setDoc(doc(realDb, "catalogo_unidades", id), { activa: false, en_papelera: true, desactivado_at: Timestamp.now() }, { merge: true });
       return;
     }
     const list = getLocalStorageItem<UnidadMedidaCatalogo[]>("unidades", []);
-    const updated = list.filter(u => u.id !== id);
-    setLocalStorageItem("unidades", updated);
-    notifyListeners("unidades", updated);
+    const index = list.findIndex(u => u.id === id);
+    if (index !== -1) list[index] = { ...list[index], activa: false, en_papelera: true, desactivado_at: new Date() };
+    setLocalStorageItem("unidades", list);
+    notifyListeners("unidades", list);
   },
 
   // --- MÓDULO DE GASTOS (FINANZAS) ---
@@ -4329,7 +4767,10 @@ export const firestoreService = {
             fecha_str: data.fecha_str || getLocalDateString(data.fecha || new Date()),
             creado_por: data.creado_por || "sistema",
             creado_at: data.creado_at ? (data.creado_at.toDate ? data.creado_at.toDate() : data.creado_at) : new Date(),
-            actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date()
+            actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date(),
+            estado: data.estado || "activo",
+            en_papelera: data.en_papelera === true,
+            desactivado_at: data.desactivado_at ? (data.desactivado_at.toDate ? data.desactivado_at.toDate() : data.desactivado_at) : undefined
           };
           if (data.metodo_pago) item.metodo_pago = data.metodo_pago;
           if (data.almacen_id) item.almacen_id = data.almacen_id;
@@ -4341,7 +4782,7 @@ export const firestoreService = {
         });
 
         return {
-          items: list,
+          items: list.filter(gasto => gasto.en_papelera !== true),
           lastDoc: nextLastDoc,
           hasMore,
           totalLoaded: list.length
@@ -4359,7 +4800,7 @@ export const firestoreService = {
       fecha: g.fecha instanceof Date ? g.fecha : new Date(typeof g.fecha === "string" ? g.fecha : (g.fecha as any).seconds * 1000),
       creado_at: g.creado_at instanceof Date ? g.creado_at : new Date(typeof g.creado_at === "string" ? g.creado_at : (g.creado_at as any).seconds * 1000),
       actualizado_at: g.actualizado_at instanceof Date ? g.actualizado_at : new Date(typeof g.actualizado_at === "string" ? g.actualizado_at : (g.actualizado_at as any).seconds * 1000)
-    }));
+    })).filter(gasto => gasto.en_papelera !== true);
 
     list.sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
 
@@ -4771,6 +5212,9 @@ export const firestoreService = {
           const snap = await tx.get(docRef);
           if (snap.exists()) {
             const data = snap.data();
+            if (data.en_papelera === true) {
+              throw new Error("El gasto ya está en la Papelera.");
+            }
             const periodoKey = getPeriodoKey(data?.fecha);
             let periodSnap: any = null;
             let periodRef: any = null;
@@ -4779,7 +5223,12 @@ export const firestoreService = {
               periodSnap = await tx.get(periodRef);
             }
 
-            tx.delete(docRef);
+            tx.set(docRef, {
+              estado: "inactivo",
+              en_papelera: true,
+              desactivado_at: Timestamp.now(),
+              actualizado_at: Timestamp.now()
+            }, { merge: true });
 
             if (periodRef && periodoKey) {
               const updated = computeNewPeriodIndexData(
@@ -4804,11 +5253,151 @@ export const firestoreService = {
     }
 
     const list = getLocalStorageItem<Gasto[]>("gastos", []);
-    const updated = list.filter(g => g.id !== id);
-    setLocalStorageItem("gastos", updated);
-    notifyListeners("gastos", updated);
+    const index = list.findIndex(g => g.id === id);
+    if (index !== -1) {
+      if (list[index].en_papelera === true) throw new Error("El gasto ya está en la Papelera.");
+      list[index] = { ...list[index], estado: "inactivo", en_papelera: true, desactivado_at: new Date(), actualizado_at: new Date() };
+    }
+    setLocalStorageItem("gastos", list);
+    notifyListeners("gastos", list);
     clearFinanzasCache();
     clearPeriodosFinancierosCache();
+  },
+
+  restaurarGastoPapelera: async (id: string): Promise<void> => {
+    if (!id) throw new Error("ID de gasto no proporcionado.");
+    if (isConfigured && realDb) {
+      const gastoRef = doc(realDb, "gastos", id);
+      await runTransaction(realDb, async transaction => {
+        const gastoSnap = await transaction.get(gastoRef);
+        if (!gastoSnap.exists()) throw new Error("El gasto no existe.");
+        const data = gastoSnap.data();
+        if (data.en_papelera !== true) throw new Error("El gasto ya está activo.");
+        const periodoKey = getPeriodoKey(data.fecha);
+        const periodRef = periodoKey ? doc(realDb!, "periodos_financieros", periodoKey) : null;
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+        transaction.set(gastoRef, { estado: "activo", en_papelera: false, desactivado_at: deleteField(), actualizado_at: Timestamp.now() }, { merge: true });
+        if (periodRef && periodoKey) transaction.set(periodRef, computeNewPeriodIndexData(periodSnap?.exists() ? periodSnap.data() : null, periodoKey, 0, 0, 1), { merge: true });
+      });
+      clearFinanzasCache(); clearPeriodosFinancierosCache();
+      return;
+    }
+    const list = getLocalStorageItem<Gasto[]>("gastos", []);
+    const index = list.findIndex(gasto => gasto.id === id);
+    if (index === -1) throw new Error("El gasto no existe.");
+    const restored = { ...list[index], estado: "activo" as const, en_papelera: false, actualizado_at: new Date() };
+    delete restored.desactivado_at;
+    list[index] = restored;
+    setLocalStorageItem("gastos", list); notifyListeners("gastos", list);
+    clearFinanzasCache(); clearPeriodosFinancierosCache();
+  },
+
+  getPapeleraItems: async (): Promise<PapeleraItem[]> => {
+    const toDateSafe = (value: any): Date | undefined => {
+      if (!value) return undefined;
+      if (value instanceof Date) return value;
+      if (typeof value.toDate === "function") return value.toDate();
+      if (typeof value.seconds === "number") return new Date(value.seconds * 1000);
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+    };
+    const makeItem = (tipo: PapeleraTipo, id: string, titulo: string, detalle: string, data: any, agrupadorId?: string): PapeleraItem => ({
+      key: `${tipo}:${agrupadorId || id}`,
+      tipo,
+      id,
+      titulo,
+      detalle,
+      fecha: toDateSafe(data.desactivado_at || data.anulado_at || data.actualizado_at || data.fecha || data.creado_at),
+      agrupadorId
+    });
+
+    if (isConfigured && realDb) {
+      const collectionNames = [
+        "clientes", "movimientos", "compras", "gastos", "productos", "almacenes",
+        "catalogo_categorias", "catalogo_marcas", "catalogo_colores", "catalogo_tallas_ropa",
+        "catalogo_tallas_calzado", "catalogo_unidades"
+      ] as const;
+      const snapshots = await Promise.all(collectionNames.map(name => getDocs(query(collection(realDb!, name), where("en_papelera", "==", true)))));
+      const byName = new Map(collectionNames.map((name, index) => [name, snapshots[index]]));
+      const items: PapeleraItem[] = [];
+      byName.get("clientes")?.docs.forEach(item => { const data = item.data(); items.push(makeItem("cliente", item.id, data.nombre_completo || "Cliente sin nombre", data.tipo_cliente || "Cliente", data)); });
+
+      const purchaseIds = new Set(byName.get("compras")?.docs.map(item => item.id) || []);
+      byName.get("compras")?.docs.forEach(item => { const data = item.data(); items.push(makeItem("compra", item.id, data.folio || item.id, `${data.proveedor || "Sin proveedor"} · $${Number(data.total || 0).toFixed(2)}`, data)); });
+      const groupedSales = new Set<string>();
+      byName.get("movimientos")?.docs.forEach(item => {
+        const data = item.data();
+        if (data.compra_id && purchaseIds.has(data.compra_id)) return;
+        if (data.venta_id) {
+          if (groupedSales.has(data.venta_id)) return;
+          groupedSales.add(data.venta_id);
+          items.push(makeItem("venta", item.id, data.folio || "Venta", `${data.cliente_nombre || "Mostrador"} · ${data.venta_total_partidas || 1} partida(s)`, data, data.venta_id));
+          return;
+        }
+        items.push(makeItem("movimiento", item.id, data.folio || item.id, `${data.tipo || "movimiento"} · ${data.sku || "Sin SKU"} · ${Number(data.cantidad || 0)} uds`, data));
+      });
+      byName.get("gastos")?.docs.forEach(item => { const data = item.data(); items.push(makeItem("gasto", item.id, data.concepto || "Gasto", `${data.categoria || "Otros"} · $${Number(data.monto || 0).toFixed(2)}`, data)); });
+      byName.get("productos")?.docs.forEach(item => { const data = item.data(); items.push(makeItem("producto", item.id, data.nombre || item.id, `SKU ${item.id}`, data)); });
+      byName.get("almacenes")?.docs.forEach(item => { const data = item.data(); items.push(makeItem("almacen", item.id, data.nombre || "Almacén", data.ubicacion || "Sin ubicación", data)); });
+      const catalogMap: Array<[typeof collectionNames[number], PapeleraTipo]> = [
+        ["catalogo_categorias", "categoria"], ["catalogo_marcas", "marca"], ["catalogo_colores", "color"],
+        ["catalogo_tallas_ropa", "talla_ropa"], ["catalogo_tallas_calzado", "talla_calzado"], ["catalogo_unidades", "unidad"]
+      ];
+      catalogMap.forEach(([collectionName, tipo]) => byName.get(collectionName)?.docs.forEach(item => { const data = item.data(); items.push(makeItem(tipo, item.id, data.nombre || data.abreviatura || item.id, "Elemento de catálogo", data)); }));
+      return items.sort((a, b) => (b.fecha?.getTime() || 0) - (a.fecha?.getTime() || 0));
+    }
+
+    const items: PapeleraItem[] = [];
+    getLocalClientes().filter(item => item.en_papelera).forEach(item => items.push(makeItem("cliente", item.id || "", item.nombre_completo, item.tipo_cliente, item)));
+    const compras = getLocalStorageItem<Compra[]>("compras", []).filter(item => item.en_papelera);
+    const purchaseIds = new Set(compras.map(item => item.id));
+    compras.forEach(item => items.push(makeItem("compra", item.id || "", item.folio, `${item.proveedor} · $${Number(item.total || 0).toFixed(2)}`, item)));
+    const groupedSales = new Set<string>();
+    getLocalStorageItem<Movimiento[]>("movimientos", []).filter(item => item.en_papelera).forEach(item => {
+      if (item.compra_id && purchaseIds.has(item.compra_id)) return;
+      if (item.venta_id) {
+        if (groupedSales.has(item.venta_id)) return;
+        groupedSales.add(item.venta_id);
+        items.push(makeItem("venta", item.id || "", item.folio || "Venta", `${item.cliente_nombre || "Mostrador"} · ${item.venta_total_partidas || 1} partida(s)`, item, item.venta_id));
+      } else items.push(makeItem("movimiento", item.id || "", item.folio || item.id || "Movimiento", `${item.tipo} · ${item.sku} · ${item.cantidad} uds`, item));
+    });
+    getLocalStorageItem<Gasto[]>("gastos", []).filter(item => item.en_papelera).forEach(item => items.push(makeItem("gasto", item.id || "", item.concepto, `${item.categoria} · $${Number(item.monto || 0).toFixed(2)}`, item)));
+    getLocalStorageItem<Producto[]>("productos", []).filter(item => item.en_papelera).forEach(item => items.push(makeItem("producto", item.sku, item.nombre, `SKU ${item.sku}`, item)));
+    getLocalStorageItem<Almacen[]>("almacenes", []).filter(item => item.en_papelera).forEach(item => items.push(makeItem("almacen", item.id, item.nombre, item.ubicacion, item)));
+    const localCatalogs: Array<[string, PapeleraTipo]> = [["categorias", "categoria"], ["marcas", "marca"], ["colores", "color"], ["tallas_ropa", "talla_ropa"], ["tallas_calzado", "talla_calzado"], ["unidades", "unidad"]];
+    localCatalogs.forEach(([key, tipo]) => getLocalStorageItem<any[]>(key, []).filter(item => item.en_papelera).forEach(item => items.push(makeItem(tipo, item.id, item.nombre || item.abreviatura || item.id, "Elemento de catálogo", item))));
+    return items.sort((a, b) => (b.fecha?.getTime() || 0) - (a.fecha?.getTime() || 0));
+  },
+
+  restaurarPapeleraItem: async (item: PapeleraItem): Promise<void> => {
+    if (item.tipo === "cliente") return firestoreService.restaurarClientePapelera(item.id);
+    if (item.tipo === "venta" || item.tipo === "movimiento") return firestoreService.restaurarMovimientoPapelera(item.id);
+    if (item.tipo === "compra") return firestoreService.restaurarCompraPapelera(item.id);
+    if (item.tipo === "gasto") return firestoreService.restaurarGastoPapelera(item.id);
+
+    const config: Record<string, { collection: string; localKey: string; activeField: "activo" | "activa" }> = {
+      producto: { collection: "productos", localKey: "productos", activeField: "activo" },
+      almacen: { collection: "almacenes", localKey: "almacenes", activeField: "activo" },
+      categoria: { collection: "catalogo_categorias", localKey: "categorias", activeField: "activa" },
+      marca: { collection: "catalogo_marcas", localKey: "marcas", activeField: "activa" },
+      color: { collection: "catalogo_colores", localKey: "colores", activeField: "activa" },
+      talla_ropa: { collection: "catalogo_tallas_ropa", localKey: "tallas_ropa", activeField: "activa" },
+      talla_calzado: { collection: "catalogo_tallas_calzado", localKey: "tallas_calzado", activeField: "activa" },
+      unidad: { collection: "catalogo_unidades", localKey: "unidades", activeField: "activa" }
+    };
+    const target = config[item.tipo];
+    if (!target) throw new Error("Tipo de registro no compatible con Papelera.");
+    if (isConfigured && realDb) {
+      await setDoc(doc(realDb, target.collection, item.id), { [target.activeField]: true, en_papelera: false, desactivado_at: deleteField() }, { merge: true });
+      return;
+    }
+    const list = getLocalStorageItem<any[]>(target.localKey, []);
+    const index = list.findIndex(entry => (entry.id || entry.sku) === item.id);
+    if (index === -1) throw new Error("El registro ya no existe.");
+    list[index] = { ...list[index], [target.activeField]: true, en_papelera: false };
+    delete list[index].desactivado_at;
+    setLocalStorageItem(target.localKey, list);
+    notifyListeners(target.localKey as keyof typeof listeners, list);
   },
 
   // --- DASHBOARD FINANCIERO MENSUAL (FLUJO DE DINERO) ---
@@ -4975,7 +5564,9 @@ export const firestoreService = {
               ? (data.actualizado_at as Timestamp).toDate
                 ? (data.actualizado_at as Timestamp).toDate()
                 : new Date(data.actualizado_at)
-              : new Date()
+              : new Date(),
+            estado: data.estado || "activo",
+            en_papelera: data.en_papelera === true
           };
           if (data.metodo_pago) item.metodo_pago = data.metodo_pago;
           if (data.almacen_id) item.almacen_id = data.almacen_id;
@@ -5021,11 +5612,14 @@ export const firestoreService = {
 
       const allGastos = getLocalStorageItem<Gasto[]>("gastos", []);
       rawGastos = allGastos.filter(g => {
+        if (g.en_papelera === true || g.estado === "inactivo") return false;
         const d = g.fecha instanceof Date ? g.fecha : new Date(typeof g.fecha === "string" ? g.fecha : (g.fecha as any).seconds * 1000);
         const t = d.getTime();
         return t >= startTime && t < endTime;
       });
     }
+
+    rawGastos = rawGastos.filter(g => g.en_papelera !== true && g.estado !== "inactivo");
 
     // 1. Filtrar ventas activas (no anuladas)
     const activeVentas = rawVentas.filter(m => (m.estado || "activo") !== "anulado");

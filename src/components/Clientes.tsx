@@ -32,7 +32,8 @@ import {
   Tag,
   FileText,
   X,
-  ArrowUpRight
+  ArrowUpRight,
+  Trash2
 } from "lucide-react";
 
 interface ClientesProps {
@@ -64,6 +65,7 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
 
   // Status toggle in progress ID
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
 
   // Load clients with realtime listener
   useEffect(() => {
@@ -251,6 +253,22 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
       console.error("Error cambiando estado de cliente:", err);
     } finally {
       setTogglingId(null);
+    }
+  };
+
+  const handleEnviarPapelera = async (cliente: Cliente, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!cliente.id) return;
+    if (!window.confirm(`¿Enviar a ${cliente.nombre_completo} a la Papelera? Podrás restaurarlo después.`)) return;
+    setArchivingId(cliente.id);
+    try {
+      await firestoreService.enviarClientePapelera(cliente.id);
+      setClientes(current => current.filter(item => item.id !== cliente.id));
+      if (selectedCliente?.id === cliente.id) setSelectedCliente(null);
+    } catch (err: any) {
+      setError(err?.message || "No se pudo enviar el cliente a la Papelera.");
+    } finally {
+      setArchivingId(null);
     }
   };
 
@@ -616,6 +634,15 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handleEnviarPapelera(c, e)}
+                            disabled={archivingId === c.id}
+                            title="Enviar a Papelera"
+                            className="p-1.5 text-zinc-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-colors disabled:opacity-50"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -661,6 +688,15 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
                   title="Editar cliente"
                 >
                   <Edit2 className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleEnviarPapelera(selectedCliente)}
+                  disabled={archivingId === selectedCliente.id}
+                  className="p-2 text-zinc-500 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors disabled:opacity-50"
+                  title="Enviar a Papelera"
+                >
+                  <Trash2 className="w-4 h-4" />
                 </button>
                 <button
                   type="button"

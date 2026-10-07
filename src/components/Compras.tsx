@@ -97,6 +97,7 @@ export default function Compras({
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedWarehouseFilter, setSelectedWarehouseFilter] = useState("all");
   const [selectedCompraDetail, setSelectedCompraDetail] = useState<Compra | null>(null);
+  const [archivingCompraId, setArchivingCompraId] = useState<string | null>(null);
 
   // Form state (/compras/nueva)
   const [proveedor, setProveedor] = useState("");
@@ -193,6 +194,21 @@ export default function Compras({
   const getWarehouseName = (id: string) => {
     const alm = almacenesMap.get(id);
     return alm ? `${alm.nombre} (${alm.ubicacion})` : id || "Almacén principal";
+  };
+
+  const handleEnviarCompraPapelera = async (compra: Compra) => {
+    if (!compra.id) return;
+    if (!window.confirm(`¿Enviar la compra ${compra.folio} a la Papelera? Se revertirá su stock y podrás restaurarla después.`)) return;
+    setArchivingCompraId(compra.id);
+    try {
+      await firestoreService.enviarCompraPapelera(compra.id);
+      setCompras(current => current.filter(item => item.id !== compra.id));
+      if (selectedCompraDetail?.id === compra.id) setSelectedCompraDetail(null);
+    } catch (err: any) {
+      setFetchError(err?.message || "No se pudo enviar la compra a la Papelera.");
+    } finally {
+      setArchivingCompraId(null);
+    }
   };
 
   // Form Calculations
@@ -1035,13 +1051,24 @@ export default function Compras({
 
                       {/* Detalle */}
                       <td className="py-3 px-3 text-right whitespace-nowrap">
-                        <button
-                          onClick={() => setSelectedCompraDetail(compra)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg transition-colors"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>Ver detalle</span>
-                        </button>
+                        <div className="inline-flex items-center gap-1.5">
+                          <button
+                            onClick={() => setSelectedCompraDetail(compra)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg transition-colors"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Ver detalle</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleEnviarCompraPapelera(compra)}
+                            disabled={archivingCompraId === compra.id}
+                            title="Enviar a Papelera"
+                            className="p-1.5 text-zinc-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-colors disabled:opacity-50"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

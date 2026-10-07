@@ -299,7 +299,7 @@ export default function GestionAlmacenes({
                           <button
                             onClick={() => openDeleteModal(alm)}
                             className="p-1.5 text-[#64748B] dark:text-[#94A3B8] hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-md transition-colors"
-                            title="Eliminar Almacén"
+                            title="Enviar almacén a Papelera"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
@@ -338,7 +338,7 @@ export default function GestionAlmacenes({
                       <button
                         onClick={() => openDeleteModal(alm)}
                         className="p-1.5 text-[#64748B] dark:text-[#94A3B8] hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-md transition-colors"
-                        title="Eliminar Almacén"
+                        title="Enviar almacén a Papelera"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -508,13 +508,13 @@ export default function GestionAlmacenes({
                   </div>
 
                   <h3 className="text-base font-bold text-[#172033] dark:text-[#F8FAFC]">
-                    {hasStock ? "No se puede eliminar el almacén" : "¿Eliminar almacén físico?"}
+                    {hasStock ? "No se puede desactivar el almacén" : "¿Enviar almacén a la Papelera?"}
                   </h3>
                   
                   <p className="text-[#64748B] dark:text-[#94A3B8] text-xs mt-1.5 leading-relaxed">
                     {hasStock 
-                      ? "Este almacén contiene stock registrado en el sistema. Para evitar la pérdida accidental de datos, primero debes transferir o retirar la mercadería existente de esta sede."
-                      : `¿Estás seguro de que deseas eliminar el almacén "${selectedAlmacen.nombre}"? Esta acción no se puede deshacer.`}
+                      ? "Este almacén contiene stock registrado. Primero debes transferir o retirar la mercancía existente de esta sede."
+                      : `El almacén "${selectedAlmacen.nombre}" quedará desactivado y podrás restaurarlo desde Papelera.`}
                   </p>
 
                   {/* Stock Details Box if blocked */}
@@ -550,7 +550,7 @@ export default function GestionAlmacenes({
                         {submitLoading ? (
                           <span className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
                         ) : null}
-                        <span>Eliminar Almacén</span>
+                        <span>Enviar a Papelera</span>
                       </button>
                     )}
                   </div>

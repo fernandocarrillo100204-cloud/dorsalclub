@@ -28,7 +28,8 @@ import {
   ChevronDown,
   Shirt,
   Tag,
-  Filter
+  Filter,
+  Trash2
 } from "lucide-react";
 
 interface HistorialProps {
@@ -67,6 +68,24 @@ export default function Historial({
   const [isAnulando, setIsAnulando] = useState(false);
   const [anularError, setAnularError] = useState<string | null>(null);
   const [anularSuccess, setAnularSuccess] = useState<string | null>(null);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
+
+  const handleEnviarPapelera = async (movimiento: Movimiento) => {
+    if (!movimiento.id) return;
+    const scope = movimiento.venta_id ? "la venta completa" : "este movimiento";
+    if (!window.confirm(`¿Enviar ${scope} a la Papelera? Su efecto en inventario se revertirá y podrás restaurarlo después.`)) return;
+    setArchivingId(movimiento.id);
+    setAnularError(null);
+    try {
+      await firestoreService.enviarMovimientoPapelera(movimiento.id);
+      setMovimientos(current => current.filter(item => item.id !== movimiento.id && (!movimiento.venta_id || item.venta_id !== movimiento.venta_id)));
+      setAnularSuccess("Registro enviado a la Papelera correctamente.");
+    } catch (err: any) {
+      setAnularError(err?.message || "No se pudo enviar el registro a la Papelera.");
+    } finally {
+      setArchivingId(null);
+    }
+  };
 
   // Sync state with prop
   useEffect(() => {
@@ -713,30 +732,34 @@ export default function Historial({
 
                       {/* Action Anular */}
                       <td className="py-3 px-3 text-right">
-                        {isAnulado ? (
-                          <span
-                            className="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-400 py-1 px-2 cursor-not-allowed select-none"
-                            title="Este movimiento ya fue anulado y su stock revertido"
-                          >
-                            <Ban className="h-3.5 w-3.5 opacity-50" />
-                            <span>Anulado</span>
-                          </span>
-                        ) : (
+                        <div className="inline-flex items-center gap-1">
+                          {isAnulado ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-400 py-1 px-2 select-none" title="Este movimiento ya fue anulado y su stock revertido">
+                              <Ban className="h-3.5 w-3.5 opacity-50" />
+                              <span>Anulado</span>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              id={`btn-anular-mov-${mov.id}`}
+                              onClick={() => { setMovToAnular(mov); setMotivoAnulacion(""); setAnularError(null); }}
+                              title="Anular movimiento y revertir stock atómicamente"
+                              className="p-1.5 text-zinc-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg transition-colors border border-transparent hover:border-amber-200 dark:border-amber-800/80 inline-flex items-center gap-1 text-[11px] font-medium"
+                            >
+                              <Ban className="h-3.5 w-3.5 text-amber-600" />
+                              <span className="hidden sm:inline">Anular</span>
+                            </button>
+                          )}
                           <button
                             type="button"
-                            id={`btn-anular-mov-${mov.id}`}
-                            onClick={() => {
-                              setMovToAnular(mov);
-                              setMotivoAnulacion("");
-                              setAnularError(null);
-                            }}
-                            title="Anular movimiento y revertir stock atómicamente"
-                            className="p-1.5 text-zinc-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg transition-colors border border-transparent hover:border-amber-200 dark:border-amber-800/80 inline-flex items-center gap-1 text-[11px] font-medium"
+                            onClick={() => handleEnviarPapelera(mov)}
+                            disabled={archivingId === mov.id}
+                            title="Enviar a Papelera"
+                            className="p-1.5 text-zinc-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors disabled:opacity-50"
                           >
-                            <Ban className="h-3.5 w-3.5 text-amber-600" />
-                            <span className="hidden sm:inline">Anular</span>
+                            <Trash2 className="h-3.5 w-3.5" />
                           </button>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   );

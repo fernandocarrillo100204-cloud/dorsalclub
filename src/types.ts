@@ -7,6 +7,9 @@ export interface Almacen {
   id: string;
   nombre: string;
   ubicacion: string;
+  activo?: boolean;
+  en_papelera?: boolean;
+  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
 }
 
 export interface Producto {
@@ -27,6 +30,8 @@ export interface Producto {
   stock_minimo_almacenes?: Record<string, number>; // Mínimo individual por almacén (0 = alerta desactivada)
   unidad: string; // Unidad de medida (normalmente 'pieza' o 'par')
   activo?: boolean; // Estado activo/inactivo (por defecto true)
+  en_papelera?: boolean;
+  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
   creado_at?: {
     seconds: number;
     nanoseconds: number;
@@ -93,6 +98,10 @@ export interface Movimiento {
   } | Date;
   anulado_por?: string; // Usuario / Email que realizó la anulación
   motivo_anulacion?: string; // Motivo opcional de la anulación
+  en_papelera?: boolean;
+  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
+  estado_antes_papelera?: "activo" | "anulado";
+  periodo_descontado_papelera?: boolean;
 }
 
 export interface VentaPartidaInput {
@@ -151,6 +160,8 @@ export interface Cliente {
     nanoseconds: number;
   } | Date;
   creado_por: string;
+  en_papelera?: boolean;
+  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
 }
 
 export interface Usuario {
@@ -175,6 +186,7 @@ export type NavigationTab =
   | "analisis_clientes"
   | "almacenes" 
   | "catalogo"
+  | "papelera"
   | "ventas" // legacy/alias for sales analysis
   | "movimientos"; // alias for redirect
 
@@ -212,6 +224,8 @@ export interface Compra {
     nanoseconds: number;
   } | Date;
   estado?: "completada" | "anulada";
+  en_papelera?: boolean;
+  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
 }
 
 export type PeriodoVenta = "esta_semana" | "mes_actual" | "ultimos_30_dias" | "personalizado";
@@ -224,6 +238,8 @@ export interface CategoriaCatalogo {
     seconds: number;
     nanoseconds: number;
   } | Date;
+  en_papelera?: boolean;
+  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
 }
 
 export interface MarcaCatalogo {
@@ -234,6 +250,8 @@ export interface MarcaCatalogo {
     seconds: number;
     nanoseconds: number;
   } | Date;
+  en_papelera?: boolean;
+  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
 }
 
 export interface ColorCatalogo {
@@ -245,6 +263,8 @@ export interface ColorCatalogo {
     seconds: number;
     nanoseconds: number;
   } | Date;
+  en_papelera?: boolean;
+  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
 }
 
 export interface TallaRopaCatalogo {
@@ -256,6 +276,8 @@ export interface TallaRopaCatalogo {
     seconds: number;
     nanoseconds: number;
   } | Date;
+  en_papelera?: boolean;
+  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
 }
 
 export interface TallaCalzadoCatalogo {
@@ -267,6 +289,8 @@ export interface TallaCalzadoCatalogo {
     seconds: number;
     nanoseconds: number;
   } | Date;
+  en_papelera?: boolean;
+  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
 }
 
 export interface UnidadMedidaCatalogo {
@@ -278,6 +302,8 @@ export interface UnidadMedidaCatalogo {
     seconds: number;
     nanoseconds: number;
   } | Date;
+  en_papelera?: boolean;
+  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
 }
 
 export interface ResumenVentaDiaria {
@@ -368,6 +394,34 @@ export interface Gasto {
     seconds: number;
     nanoseconds: number;
   } | Date;
+  estado?: "activo" | "inactivo";
+  en_papelera?: boolean;
+  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
+}
+
+export type PapeleraTipo =
+  | "cliente"
+  | "venta"
+  | "movimiento"
+  | "compra"
+  | "gasto"
+  | "producto"
+  | "almacen"
+  | "categoria"
+  | "marca"
+  | "color"
+  | "talla_ropa"
+  | "talla_calzado"
+  | "unidad";
+
+export interface PapeleraItem {
+  key: string;
+  tipo: PapeleraTipo;
+  id: string;
+  titulo: string;
+  detalle: string;
+  fecha?: Date;
+  agrupadorId?: string;
 }
 
 export interface CategoriaGastoDesglose {
@@ -551,4 +605,3 @@ export function getTotalCostosVenta(movimiento: Partial<Movimiento> | null | und
       : 0;
   return Math.round((envio + otros + Number.EPSILON) * 100) / 100;
 }
-

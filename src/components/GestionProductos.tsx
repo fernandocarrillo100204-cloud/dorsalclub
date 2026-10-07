@@ -855,7 +855,7 @@ export default function GestionProductos({
                           setIsDeleteModalOpen(true);
                         }}
                         className="p-1.5 text-zinc-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-colors"
-                        title="Eliminar modelo completo"
+                        title="Enviar modelo a Papelera"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -997,7 +997,7 @@ export default function GestionProductos({
                                       setIsDeleteModalOpen(true);
                                     }}
                                     className="p-1.5 text-zinc-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-colors"
-                                    title="Eliminar variante"
+                                    title="Enviar variante a Papelera"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
@@ -1505,12 +1505,12 @@ export default function GestionProductos({
             </div>
             <div>
               <h3 className="text-base font-bold text-zinc-900 dark:text-white">
-                ¿Eliminar {productToDelete.nombre}?
+                ¿Enviar {productToDelete.nombre} a la Papelera?
               </h3>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
                 {productToDelete.isBase 
-                  ? "Esta acción eliminará el modelo y todas sus variantes asociadas. El historial de movimientos previos se conservará."
-                  : "Esta acción eliminará la variante seleccionada del catálogo."}
+                  ? "El modelo y todas sus variantes quedarán desactivados. Podrás restaurarlos desde Papelera y el historial previo se conservará."
+                  : "La variante quedará desactivada y podrás restaurarla desde Papelera."}
               </p>
             </div>
             <div className="flex gap-2 justify-end pt-2">
@@ -1525,7 +1525,7 @@ export default function GestionProductos({
                 disabled={submitLoading}
                 className="px-4 py-2 text-xs font-semibold rounded-xl bg-rose-600 hover:bg-rose-700 text-white transition-colors disabled:opacity-50"
               >
-                Eliminar
+                Enviar a Papelera
               </button>
             </div>
           </div>
