@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
 import { Almacen, Producto, StockItem, Cliente, TipoCliente, VentaPartidaInput, UbicacionEntregaCatalogo, RepartidorCatalogo, normalizeOptionalMoney } from "../types";
 import ClienteModal from "./ClienteModal";
+import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 import {
   TrendingDown,
   CheckCircle,
@@ -28,7 +29,8 @@ import {
   Truck,
   Check,
   X,
-  Trash2
+  Trash2,
+  Settings
 } from "lucide-react";
 
 interface VentaItemDraft {
@@ -93,6 +95,7 @@ export default function Ventas({
   const [repartidorId, setRepartidorId] = useState("");
   const [deliveryCatalogLoading, setDeliveryCatalogLoading] = useState(true);
   const [deliveryCatalogError, setDeliveryCatalogError] = useState<string | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Client Selection State
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -424,14 +427,9 @@ export default function Ventas({
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 space-y-6" id="ventas-page">
       {/* Header */}
-      <div className="pb-4 border-b border-zinc-200 dark:border-zinc-800">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
-          <ShoppingCart className="w-6 h-6 text-rose-500" />
-          Registrar Venta / Despacho
-        </h1>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-          Descuenta unidades vendidas en mostrador o asociadas a un cliente con trazabilidad comercial completa.
-        </p>
+      <div className="pb-4 border-b border-zinc-200 dark:border-zinc-800 flex items-start justify-between gap-3">
+        <div><h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2"><ShoppingCart className="w-6 h-6 text-rose-500" />Registrar Venta / Despacho</h1><p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Descuenta unidades vendidas en mostrador o asociadas a un cliente con trazabilidad comercial completa.</p></div>
+        <button type="button" onClick={() => setIsSettingsOpen(true)} className="shrink-0 px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"><Settings className="w-4 h-4" />Configurar</button>
       </div>
 
       {/* Feedback Messages */}
@@ -1126,6 +1124,7 @@ export default function Ventas({
           }
         }}
       />
+      <ConfiguracionModuloModal isOpen={isSettingsOpen} module="ventas" onClose={() => setIsSettingsOpen(false)} onSaved={loadDeliveryCatalogs} />
     </div>
   );
 }

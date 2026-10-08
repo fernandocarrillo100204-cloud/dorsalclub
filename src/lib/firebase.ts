@@ -49,6 +49,8 @@ import {
   UnidadMedidaCatalogo,
   UbicacionEntregaCatalogo,
   RepartidorCatalogo,
+  ConfiguracionListasDesplegables,
+  OpcionListaConfigurable,
   ResumenVentaDiaria,
   Compra,
   CompraItem,
@@ -60,6 +62,8 @@ import {
   Gasto,
   CategoriaGasto,
   MetodoPagoGasto,
+  CATEGORIAS_GASTO,
+  METODOS_PAGO_GASTO,
   DatosFinancierosMensuales,
   FinanzasDiaPunto,
   PeriodoFinancieroIndex,
@@ -522,6 +526,35 @@ const deleteCatalogoEntrega = async <T extends CatalogoEntrega>(collectionName: 
   notifyListeners(localKey, list);
 };
 
+const makeConfigOptions = (values: string[], prefix: string): OpcionListaConfigurable[] =>
+  values.map((nombre, index) => ({ id: `${prefix}_${index + 1}`, nombre, activa: true }));
+
+const DEFAULT_LISTAS_DESPLEGABLES: ConfiguracionListasDesplegables = {
+  proveedores_compra: [],
+  tipos_cliente: makeConfigOptions(["minorista", "mayorista", "emprendedor"], "tipo"),
+  canales_contacto: makeConfigOptions(["WhatsApp", "Instagram", "Llamada telefónica", "Correo electrónico", "Otro"], "canal"),
+  origenes_cliente: makeConfigOptions(["Instagram", "Recomendación / Boca a boca", "Tienda física / Showroom", "Evento / Pop-up", "Otro canal"], "origen"),
+  categorias_gasto: makeConfigOptions(CATEGORIAS_GASTO, "categoria"),
+  metodos_pago_gasto: makeConfigOptions(METODOS_PAGO_GASTO, "pago")
+};
+
+const normalizeConfigOptions = (value: unknown, fallback: OpcionListaConfigurable[]): OpcionListaConfigurable[] => {
+  if (!Array.isArray(value)) return fallback.map(item => ({ ...item }));
+  return value
+    .filter(item => item && typeof item === "object" && typeof (item as any).id === "string" && typeof (item as any).nombre === "string")
+    .map(item => ({ id: (item as any).id.trim(), nombre: (item as any).nombre.trim(), activa: (item as any).activa !== false }))
+    .filter(item => item.id && item.nombre);
+};
+
+const normalizeListasConfig = (data?: Partial<ConfiguracionListasDesplegables> | null): ConfiguracionListasDesplegables => ({
+  proveedores_compra: normalizeConfigOptions(data?.proveedores_compra, DEFAULT_LISTAS_DESPLEGABLES.proveedores_compra),
+  tipos_cliente: normalizeConfigOptions(data?.tipos_cliente, DEFAULT_LISTAS_DESPLEGABLES.tipos_cliente),
+  canales_contacto: normalizeConfigOptions(data?.canales_contacto, DEFAULT_LISTAS_DESPLEGABLES.canales_contacto),
+  origenes_cliente: normalizeConfigOptions(data?.origenes_cliente, DEFAULT_LISTAS_DESPLEGABLES.origenes_cliente),
+  categorias_gasto: normalizeConfigOptions(data?.categorias_gasto, DEFAULT_LISTAS_DESPLEGABLES.categorias_gasto),
+  metodos_pago_gasto: normalizeConfigOptions(data?.metodos_pago_gasto, DEFAULT_LISTAS_DESPLEGABLES.metodos_pago_gasto)
+});
+
 // --- SERVICIO DE FIRESTORE / INVENTARIO ---
 export const firestoreService = {
   isConfigured: () => isConfigured,
@@ -531,6 +564,23 @@ export const firestoreService = {
   getPeriodoKey,
   getPeriodContribution,
   applyPeriodIndexDeltas,
+
+  getConfiguracionListasDesplegables: async (): Promise<ConfiguracionListasDesplegables> => {
+    if (isConfigured && realDb) {
+      const snapshot = await getDoc(doc(realDb, "configuracion", "listas_desplegables"));
+      return normalizeListasConfig(snapshot.exists() ? snapshot.data() as Partial<ConfiguracionListasDesplegables> : null);
+    }
+    return normalizeListasConfig(getLocalStorageItem<Partial<ConfiguracionListasDesplegables> | null>("configuracion_listas", null));
+  },
+
+  saveConfiguracionListasDesplegables: async (config: ConfiguracionListasDesplegables): Promise<void> => {
+    const normalized = normalizeListasConfig(config);
+    if (isConfigured && realDb) {
+      await setDoc(doc(realDb, "configuracion", "listas_desplegables"), { ...normalized, actualizado_at: Timestamp.now() }, { merge: true });
+      return;
+    }
+    setLocalStorageItem("configuracion_listas", normalized);
+  },
 
   // --- ALMACENES ---
   getAlmacenes: async (): Promise<Almacen[]> => {
@@ -795,8 +845,8 @@ export const firestoreService = {
     if (!cleanNombre) {
       throw new Error("El nombre completo del cliente es obligatorio.");
     }
-    if (!clienteData.tipo_cliente || !["minorista", "mayorista", "emprendedor"].includes(clienteData.tipo_cliente)) {
-      throw new Error("El tipo de cliente debe ser 'minorista', 'mayorista' o 'emprendedor'.");
+    if (!clienteData.tipo_cliente || !clienteData.tipo_cliente.trim()) {
+      throw new Error("El tipo de cliente es obligatorio.");
     }
 
     const nombre_normalizado = cleanNombre.toLowerCase().replace(/\s+/g, " ");
@@ -935,7 +985,7 @@ export const firestoreService = {
       patch.nombre_normalizado = clean.toLowerCase().replace(/\s+/g, " ");
     }
     if (updates.tipo_cliente !== undefined) {
-      if (!["minorista", "mayorista", "emprendedor"].includes(updates.tipo_cliente)) {
+      if (!updates.tipo_cliente.trim()) {
         throw new Error("Tipo de cliente no válido.");
       }
       patch.tipo_cliente = updates.tipo_cliente;

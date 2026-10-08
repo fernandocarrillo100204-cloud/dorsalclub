@@ -5,7 +5,8 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
-import { Compra, CompraItem, Almacen, Producto } from "../types";
+import { Compra, CompraItem, Almacen, Producto, OpcionListaConfigurable } from "../types";
+import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 import {
   ShoppingBag,
   Plus,
@@ -30,7 +31,8 @@ import {
   Filter,
   RefreshCw,
   Clock,
-  Sparkles
+  Sparkles,
+  Settings
 } from "lucide-react";
 
 interface ComprasProps {
@@ -98,6 +100,8 @@ export default function Compras({
   const [selectedWarehouseFilter, setSelectedWarehouseFilter] = useState("all");
   const [selectedCompraDetail, setSelectedCompraDetail] = useState<Compra | null>(null);
   const [archivingCompraId, setArchivingCompraId] = useState<string | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [proveedores, setProveedores] = useState<OpcionListaConfigurable[]>([]);
 
   // Form state (/compras/nueva)
   const [proveedor, setProveedor] = useState("");
@@ -108,6 +112,17 @@ export default function Compras({
   const [costoEnvio, setCostoEnvio] = useState<number | "">("");
   const [comisiones, setComisiones] = useState<number | "">("");
   const [descuentos, setDescuentos] = useState<number | "">("");
+
+  const loadPurchaseSettings = async () => {
+    try {
+      const config = await firestoreService.getConfiguracionListasDesplegables();
+      setProveedores(config.proveedores_compra.filter(item => item.activa));
+    } catch (error) {
+      console.warn("No se pudo cargar el catálogo de proveedores:", error);
+    }
+  };
+
+  useEffect(() => { loadPurchaseSettings(); }, []);
 
   // Items in the current purchase draft
   const [items, setItems] = useState<NewItemRow[]>([
@@ -428,13 +443,7 @@ export default function Compras({
               Ingresa múltiples productos y variantes en una sola operación. Se incrementará el stock y registrará el folio de auditoría.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={goToHistory}
-            className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-xs"
-          >
-            Volver al historial
-          </button>
+          <div className="flex gap-2"><button type="button" onClick={() => setIsSettingsOpen(true)} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"><Settings className="w-4 h-4" />Configurar</button><button type="button" onClick={goToHistory} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-xs">Volver al historial</button></div>
         </div>
 
         {/* Feedback Messages */}
@@ -470,14 +479,13 @@ export default function Compras({
                 <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
                   Proveedor / Distribuidor <span className="text-rose-500">*</span>
                 </label>
-                <input
-                  type="text"
+                <select
                   required
-                  placeholder="Ej. Nike Oficial, Distribuidora MX..."
                   value={proveedor}
                   onChange={(e) => setProveedor(e.target.value)}
                   className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white transition-all font-medium"
-                />
+                ><option value="">-- Seleccionar proveedor --</option>{proveedores.map(item => <option key={item.id} value={item.nombre}>{item.nombre}</option>)}</select>
+                {proveedores.length === 0 && <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">Agrega proveedores desde Configurar.</p>}
               </div>
 
               {/* Fecha */}
@@ -827,6 +835,7 @@ export default function Compras({
             </div>
           </div>
         </form>
+        <ConfiguracionModuloModal isOpen={isSettingsOpen} module="compras" onClose={() => setIsSettingsOpen(false)} onSaved={loadPurchaseSettings} />
       </div>
     );
   }
@@ -845,14 +854,13 @@ export default function Compras({
           </p>
         </div>
 
-        {/* Primary Action Button */}
-        <button
+        <div className="flex gap-2"><button type="button" onClick={() => setIsSettingsOpen(true)} className="inline-flex items-center gap-2 px-3 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl font-semibold text-xs"><Settings className="w-4 h-4" />Configurar</button><button
           onClick={goToNew}
           className="inline-flex items-center space-x-2 px-4 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-white dark:hover:bg-zinc-100 dark:text-zinc-900 rounded-xl font-bold text-xs transition-all shadow-sm self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
           <span>Registrar compra</span>
-        </button>
+        </button></div>
       </div>
 
       {/* Stats Quick Cards */}
@@ -1228,6 +1236,7 @@ export default function Compras({
           </div>
         </div>
       )}
+      <ConfiguracionModuloModal isOpen={isSettingsOpen} module="compras" onClose={() => setIsSettingsOpen(false)} onSaved={loadPurchaseSettings} />
     </div>
   );
 }

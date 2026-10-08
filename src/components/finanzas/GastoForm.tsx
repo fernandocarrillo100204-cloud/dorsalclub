@@ -23,8 +23,7 @@ import {
   Gasto, 
   CategoriaGasto, 
   MetodoPagoGasto, 
-  CATEGORIAS_GASTO, 
-  METODOS_PAGO_GASTO 
+  OpcionListaConfigurable
 } from "../../types";
 import { firestoreService } from "../../lib/firebase";
 
@@ -34,6 +33,7 @@ interface GastoFormProps {
   almacenes: Almacen[];
   onSuccess: () => void;
   onCancel: () => void;
+  configVersion?: number;
 }
 
 export default function GastoForm({
@@ -41,7 +41,8 @@ export default function GastoForm({
   gastoId,
   almacenes,
   onSuccess,
-  onCancel
+  onCancel,
+  configVersion = 0
 }: GastoFormProps) {
   // STRICT "Empty by default" policy: absolutely no pre-selected, pre-filled or calculated values on new form.
   const [concepto, setConcepto] = useState("");
@@ -58,6 +59,15 @@ export default function GastoForm({
   const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [categorias, setCategorias] = useState<OpcionListaConfigurable[]>([]);
+  const [metodosPago, setMetodosPago] = useState<OpcionListaConfigurable[]>([]);
+
+  useEffect(() => {
+    firestoreService.getConfiguracionListasDesplegables().then(config => {
+      setCategorias(config.categorias_gasto.filter(item => item.activa));
+      setMetodosPago(config.metodos_pago_gasto.filter(item => item.activa));
+    }).catch(error => console.warn("No se pudieron cargar las listas financieras:", error));
+  }, [configVersion]);
 
   // If in edit mode, fetch the existing expense to populate the form
   useEffect(() => {
@@ -311,9 +321,10 @@ export default function GastoForm({
                   className="w-full px-3.5 py-2.5 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] text-[#172033] dark:text-[#F8FAFC] text-sm focus:outline-none focus:ring-2 focus:ring-[#059669] focus:border-transparent transition-all cursor-pointer"
                 >
                   <option value="">-- Seleccionar categoría --</option>
-                  {CATEGORIAS_GASTO.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat}
+                  {categoria && !categorias.some(item => item.nombre === categoria) && <option value={categoria}>{categoria} (inactiva)</option>}
+                  {categorias.map((cat) => (
+                    <option key={cat.id} value={cat.nombre}>
+                      {cat.nombre}
                     </option>
                   ))}
                 </select>
@@ -383,9 +394,10 @@ export default function GastoForm({
                   className="w-full px-3.5 py-2.5 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] text-[#172033] dark:text-[#F8FAFC] text-sm focus:outline-none focus:ring-2 focus:ring-[#059669] focus:border-transparent transition-all cursor-pointer"
                 >
                   <option value="">-- Seleccionar método de pago (opcional) --</option>
-                  {METODOS_PAGO_GASTO.map((met) => (
-                    <option key={met} value={met}>
-                      {met}
+                  {metodoPago && !metodosPago.some(item => item.nombre === metodoPago) && <option value={metodoPago}>{metodoPago} (inactivo)</option>}
+                  {metodosPago.map((met) => (
+                    <option key={met.id} value={met.nombre}>
+                      {met.nombre}
                     </option>
                   ))}
                 </select>

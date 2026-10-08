@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { Cliente, TipoCliente, CanalPreferido, OrigenCliente, EstadoCliente, MarcaCatalogo } from "../types";
+import { Cliente, TipoCliente, CanalPreferido, OrigenCliente, EstadoCliente, MarcaCatalogo, ConfiguracionListasDesplegables } from "../types";
 import { firestoreService } from "../lib/firebase";
 import { X, AlertTriangle, CheckCircle2, User, Phone, Instagram, Mail, MapPin, Calendar, MessageSquare, Tag, Search, ChevronDown, Check, RefreshCw } from "lucide-react";
 
@@ -41,6 +41,7 @@ export default function ClienteModal({
   const [notas, setNotas] = useState("");
   const [proximoSeguimiento, setProximoSeguimiento] = useState("");
   const [estado, setEstado] = useState<EstadoCliente>("activo");
+  const [listasConfig, setListasConfig] = useState<ConfiguracionListasDesplegables | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -100,6 +101,20 @@ export default function ClienteModal({
     setSelectorMarcasOpen(false);
     setMarcaSearch("");
   }, [clienteToEdit, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    firestoreService.getConfiguracionListasDesplegables()
+      .then((config) => {
+        setListasConfig(config);
+        if (!clienteToEdit) {
+          setTipoCliente(config.tipos_cliente.find(item => item.activa)?.nombre || "");
+          setCanalPreferido(config.canales_contacto.find(item => item.activa)?.nombre || "");
+          setOrigen(config.origenes_cliente.find(item => item.activa)?.nombre || "");
+        }
+      })
+      .catch((error) => console.warn("No se pudieron cargar las listas de clientes:", error));
+  }, [isOpen, clienteToEdit]);
 
   const loadMarcas = useCallback(async () => {
     const requestId = ++marcasRequestRef.current;
@@ -397,9 +412,8 @@ export default function ClienteModal({
                 onChange={(e) => setTipoCliente(e.target.value as TipoCliente)}
                 className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
               >
-                <option value="minorista">Minorista</option>
-                <option value="mayorista">Mayorista</option>
-                <option value="emprendedor">Emprendedor</option>
+                {tipoCliente && !listasConfig?.tipos_cliente.some(item => item.activa && item.nombre === tipoCliente) && <option value={tipoCliente}>{tipoCliente} (inactivo)</option>}
+                {listasConfig?.tipos_cliente.filter(item => item.activa).map(item => <option key={item.id} value={item.nombre}>{item.nombre}</option>)}
               </select>
             </div>
           </div>
@@ -485,11 +499,8 @@ export default function ClienteModal({
                 onChange={(e) => setCanalPreferido(e.target.value as CanalPreferido)}
                 className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
               >
-                <option value="WhatsApp">WhatsApp</option>
-                <option value="Instagram">Instagram</option>
-                <option value="llamada">Llamada telefónica</option>
-                <option value="correo">Correo electrónico</option>
-                <option value="otro">Otro</option>
+                {canalPreferido && !listasConfig?.canales_contacto.some(item => item.activa && item.nombre === canalPreferido) && <option value={canalPreferido}>{canalPreferido} (inactivo)</option>}
+                {listasConfig?.canales_contacto.filter(item => item.activa).map(item => <option key={item.id} value={item.nombre}>{item.nombre}</option>)}
               </select>
             </div>
 
@@ -502,11 +513,8 @@ export default function ClienteModal({
                 onChange={(e) => setOrigen(e.target.value as OrigenCliente)}
                 className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
               >
-                <option value="Instagram">Instagram</option>
-                <option value="recomendación">Recomendación / Boca a boca</option>
-                <option value="tienda física">Tienda física / Showroom</option>
-                <option value="evento">Evento / Pop-up</option>
-                <option value="otro">Otro canal</option>
+                {origen && !listasConfig?.origenes_cliente.some(item => item.activa && item.nombre === origen) && <option value={origen}>{origen} (inactivo)</option>}
+                {listasConfig?.origenes_cliente.filter(item => item.activa).map(item => <option key={item.id} value={item.nombre}>{item.nombre}</option>)}
               </select>
             </div>
           </div>
