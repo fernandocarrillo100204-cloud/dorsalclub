@@ -807,7 +807,7 @@ export default function ModalCatalogos({
                   <input
                     type="text"
                     required
-                    placeholder="Ej. dorsalclub, Nike, Stüssy..."
+                    placeholder="Ej. antiorder, Nike, Stüssy..."
                     value={newMarcaNombre}
                     onChange={(e) => setNewMarcaNombre(e.target.value)}
                     className="w-full px-3.5 py-2 text-sm bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white text-zinc-900 dark:text-white"

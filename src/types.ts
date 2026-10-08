@@ -17,7 +17,7 @@ export interface Producto {
   producto_base_id?: string; // Identificador común para agrupar variantes del mismo modelo
   sku: string; // Identificador único de la variante
   nombre: string; // Nombre comercial del producto
-  marca?: string; // Marca (ej. dorsalclub, Nike, Stüssy)
+  marca?: string; // Marca (ej. antiorder, Nike, Stüssy)
   categoria: string; // Categoría (ej. Camisetas, Sudaderas, Tenis)
   color?: string; // Color de la prenda/sneaker
   talla?: string; // Talla (ej. M, L, 27.5, Única)

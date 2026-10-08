@@ -19,7 +19,6 @@ import {
   User as UserIcon,
   Sun,
   Moon,
-  Tag,
   Users,
   UserCheck,
   Receipt,
@@ -197,12 +196,10 @@ export default function Sidebar({ user, activeTab, setActiveTab, onLogout }: Sid
         {/* Brand Header */}
         <div className="px-3.5 py-3 border-b border-[#E2E8F0] dark:border-[#263449]">
           <div className="flex items-center space-x-2.5">
-            <div className="bg-[#0F172A] dark:bg-[#1E293B] border border-[#1E293B] dark:border-[#334155] p-1.5 rounded-lg text-white shrink-0 shadow-xs">
-              <Tag className="h-4 w-4 text-white" />
-            </div>
+            <img src="/antiorder-logo.jpg" alt="Logo de antiorder" className="h-8 w-8 rounded-lg object-cover shrink-0 shadow-xs dark:invert" />
             <div className="min-w-0">
               <h1 className="text-base font-bold tracking-tight text-[#172033] dark:text-[#F8FAFC] leading-tight lowercase">
-                dorsalclub
+                antiorder
               </h1>
               <p className="text-[10px] text-[#64748B] dark:text-[#94A3B8] font-medium leading-tight mt-0.5 truncate">
                 Inventario de streetwear y sneakers
@@ -395,11 +392,9 @@ export default function Sidebar({ user, activeTab, setActiveTab, onLogout }: Sid
         id="mobile-top-header"
       >
         <div className="flex items-center space-x-2">
-          <div className="bg-[#0F172A] dark:bg-[#1E293B] border border-[#1E293B] dark:border-[#334155] p-1 rounded-md text-white shadow-xs">
-            <Tag className="h-3.5 w-3.5 text-white" />
-          </div>
+          <img src="/antiorder-logo.jpg" alt="Logo de antiorder" className="h-7 w-7 rounded-md object-cover shadow-xs dark:invert" />
           <div>
-            <span className="font-bold text-base text-[#172033] dark:text-[#F8FAFC] tracking-tight lowercase">dorsalclub</span>
+            <span className="font-bold text-base text-[#172033] dark:text-[#F8FAFC] tracking-tight lowercase">antiorder</span>
             <p className="text-[10px] text-[#64748B] dark:text-[#94A3B8] font-medium -mt-0.5">Inventario de streetwear y sneakers</p>
           </div>
         </div>

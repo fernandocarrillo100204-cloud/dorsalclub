@@ -102,7 +102,7 @@ export default function Dashboard({
   }, [effectiveProductos]);
 
   const marcas = useMemo(() => {
-    return Array.from(new Set(effectiveProductos.map(p => p.marca || "dorsalclub").filter(Boolean))).sort();
+    return Array.from(new Set(effectiveProductos.map(p => p.marca || "antiorder").filter(Boolean))).sort();
   }, [effectiveProductos]);
 
   // Unique base models count
@@ -264,7 +264,7 @@ export default function Dashboard({
       p.categoria.toLowerCase().includes(search.toLowerCase());
 
     const matchesCategory = categoryFilter === "all" || p.categoria === categoryFilter;
-    const matchesBrand = brandFilter === "all" || (p.marca || "dorsalclub").toLowerCase() === brandFilter.toLowerCase();
+    const matchesBrand = brandFilter === "all" || (p.marca || "antiorder").toLowerCase() === brandFilter.toLowerCase();
 
     const statusInfo = getProductStatusInfo(p, selectedAlmacen);
     const stockQty = selectedAlmacen === "all" 
@@ -535,7 +535,7 @@ export default function Dashboard({
                       {/* Brand */}
                       <td className="py-3 px-3">
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-900 text-white dark:bg-white dark:text-zinc-900">
-                          {prod.marca || "dorsalclub"}
+                          {prod.marca || "antiorder"}
                         </span>
                       </td>
 

@@ -42,7 +42,7 @@ export default function MovimientoForm({
   const [sku, setSku] = useState(preselectedSku);
   const [useCustomSku, setUseCustomSku] = useState(false);
   const [newProductName, setNewProductName] = useState("");
-  const [newProductMarca, setNewProductMarca] = useState("dorsalclub");
+  const [newProductMarca, setNewProductMarca] = useState("antiorder");
   const [newProductCategory, setNewProductCategory] = useState("Camisetas");
   const [newProductColor, setNewProductColor] = useState("Negro");
   const [newProductTalla, setNewProductTalla] = useState("M");
@@ -89,7 +89,7 @@ export default function MovimientoForm({
     setSku("");
     setUseCustomSku(false);
     setNewProductName("");
-    setNewProductMarca("dorsalclub");
+    setNewProductMarca("antiorder");
     setNewProductCategory("Camisetas");
     setNewProductColor("Negro");
     setNewProductTalla("M");
@@ -149,7 +149,7 @@ export default function MovimientoForm({
         map.set(key, {
           baseId: key,
           nombre: p.nombre,
-          marca: p.marca || "dorsalclub"
+          marca: p.marca || "antiorder"
         });
       }
     });
@@ -399,7 +399,7 @@ export default function MovimientoForm({
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-zinc-900 dark:text-white">{currentProduct.nombre}</span>
-                    <span className="px-2 py-0.5 rounded text-[10px] bg-zinc-200 dark:bg-zinc-700 font-semibold">{currentProduct.marca || "dorsalclub"}</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] bg-zinc-200 dark:bg-zinc-700 font-semibold">{currentProduct.marca || "antiorder"}</span>
                   </div>
                   <div className="flex items-center gap-3 mt-1 text-zinc-500 dark:text-zinc-400 text-[11px]">
                     <span>Color: <strong>{currentProduct.color || "—"}</strong></span>

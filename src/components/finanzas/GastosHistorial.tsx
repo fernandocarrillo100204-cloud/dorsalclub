@@ -279,7 +279,7 @@ export default function GastosHistorial({
               Gastos Operativos
             </h1>
             <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8] mt-0.5">
-              Registro, consulta y administración del historial de egresos de Dorsalclub
+              Registro, consulta y administración del historial de egresos de antiorder
             </p>
           </div>
         </div>

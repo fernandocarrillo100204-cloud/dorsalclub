@@ -5,7 +5,7 @@
 
 import React, { useState } from "react";
 import { authService } from "../lib/firebase";
-import { LogIn, Database, Mail, Lock, AlertCircle, Tag } from "lucide-react";
+import { LogIn, Database, Mail, Lock, AlertCircle } from "lucide-react";
 import { motion } from "motion/react";
 
 interface LoginProps {
@@ -61,10 +61,8 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       >
         {/* Brand Header */}
         <div className="flex flex-col items-center mb-6">
-          <div className="bg-[#0F172A] dark:bg-[#1E293B] border border-[#1E293B] dark:border-[#334155] p-3 rounded-2xl text-white mb-3 shadow-xs">
-            <Tag className="h-8 w-8 text-white" id="login-brand-icon" />
-          </div>
-          <h1 className="text-2xl font-bold text-[#172033] dark:text-[#F8FAFC] tracking-tight lowercase">dorsalclub</h1>
+          <img src="/antiorder-logo.jpg" alt="Logo de antiorder" className="h-20 w-20 rounded-2xl object-cover mb-3 shadow-xs dark:invert" id="login-brand-icon" />
+          <h1 className="text-2xl font-bold text-[#172033] dark:text-[#F8FAFC] tracking-tight lowercase">antiorder</h1>
           <p className="text-xs text-[#64748B] dark:text-[#94A3B8] mt-1 text-center font-medium">
             Inventario de streetwear y sneakers
           </p>
@@ -209,7 +207,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
 
         <div className="mt-5 pt-3.5 border-t border-[#E2E8F0] dark:border-[#263449] text-center">
           <p className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
-            © {new Date().getFullYear()} dorsalclub. Todos los derechos reservados.
+            © {new Date().getFullYear()} antiorder. Todos los derechos reservados.
           </p>
         </div>
       </motion.div>
