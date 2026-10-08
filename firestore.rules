@@ -107,7 +107,8 @@ service cloud.firestore {
       allow create, update: if isSignedIn()
         && isValidId(clienteId)
         && incoming().nombre_completo is string && incoming().nombre_completo.size() > 0
-        && incoming().tipo_cliente in ['minorista', 'mayorista', 'emprendedor'];
+        && incoming().tipo_cliente is string
+        && incoming().tipo_cliente.size() > 0 && incoming().tipo_cliente.size() <= 80;
       allow delete: if false;
     }
 
@@ -117,28 +118,14 @@ service cloud.firestore {
       allow create, update: if isSignedIn()
         && isValidId(gastoId)
         && incoming().concepto is string && incoming().concepto.size() > 0 && incoming().concepto.size() <= 200
-        && incoming().categoria in [
-          'Envíos y paquetería',
-          'Empaque',
-          'Publicidad',
-          'Comisiones de plataformas',
-          'Comisiones bancarias',
-          'Transporte y gasolina',
-          'Renta',
-          'Servicios',
-          'Sueldos',
-          'Impuestos y aranceles',
-          'Mantenimiento',
-          'Devoluciones',
-          'Otros'
-        ]
+        && incoming().categoria is string
+        && incoming().categoria.size() > 0 && incoming().categoria.size() <= 100
         && incoming().monto is number && incoming().monto > 0
         && incoming().fecha is timestamp
         && incoming().fecha_str is string && incoming().fecha_str.size() > 0
         && (!('metodo_pago' in incoming()) || (
           incoming().metodo_pago is string 
-          && incoming().metodo_pago.size() > 0 
-          && incoming().metodo_pago in ['Efectivo', 'Transferencia', 'Tarjeta de débito', 'Tarjeta de crédito', 'Otro']
+          && incoming().metodo_pago.size() > 0 && incoming().metodo_pago.size() <= 100
         ));
       allow delete: if false;
     }

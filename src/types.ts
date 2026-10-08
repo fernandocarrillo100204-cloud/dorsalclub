@@ -134,25 +134,25 @@ export interface VentaRegistroInput {
   repartidor_nombre?: string;
 }
 
-export type TipoCliente = "minorista" | "mayorista" | "emprendedor";
-export type CanalPreferido = "WhatsApp" | "Instagram" | "llamada" | "correo" | "otro";
-export type OrigenCliente = "Instagram" | "recomendación" | "tienda física" | "evento" | "otro";
+export type TipoCliente = string;
+export type CanalPreferido = string;
+export type OrigenCliente = string;
 export type EstadoCliente = "activo" | "inactivo";
 
 export interface Cliente {
   id?: string;
   nombre_completo: string; // obligatorio
   nombre_normalizado: string; // automático, en minúsculas y sin espacios sobrantes
-  tipo_cliente: TipoCliente; // obligatorio; solo minorista, mayorista o emprendedor
+  tipo_cliente: TipoCliente; // obligatorio; valor administrado desde la configuración de clientes
   instagram?: string; // opcional
   instagram_normalizado?: string; // automático, sin @ y en minúsculas
   telefono?: string; // opcional y siempre como string
   email?: string; // opcional
   ciudad?: string; // opcional
-  canal_preferido?: CanalPreferido | string; // WhatsApp, Instagram, llamada, correo u otro
+  canal_preferido?: CanalPreferido | string; // valor opcional administrado desde la configuración de clientes
   intereses?: string; // opcional
   marcas_favoritas_ids?: string[]; // IDs de catalogo_marcas; intereses se conserva solo por compatibilidad
-  origen?: OrigenCliente | string; // Instagram, recomendación, tienda física, evento u otro
+  origen?: OrigenCliente | string; // valor opcional administrado desde la configuración de clientes
   notas?: string; // opcional
   proximo_seguimiento?: {
     seconds: number;
@@ -332,6 +332,21 @@ export interface RepartidorCatalogo {
   desactivado_at?: { seconds: number; nanoseconds: number } | Date;
 }
 
+export interface OpcionListaConfigurable {
+  id: string;
+  nombre: string;
+  activa: boolean;
+}
+
+export interface ConfiguracionListasDesplegables {
+  proveedores_compra: OpcionListaConfigurable[];
+  tipos_cliente: OpcionListaConfigurable[];
+  canales_contacto: OpcionListaConfigurable[];
+  origenes_cliente: OpcionListaConfigurable[];
+  categorias_gasto: OpcionListaConfigurable[];
+  metodos_pago_gasto: OpcionListaConfigurable[];
+}
+
 export interface ResumenVentaDiaria {
   id: string; // Formato: YYYY-MM-DD_SKU_almacenId
   fecha_str: string; // YYYY-MM-DD
@@ -349,20 +364,7 @@ export interface ResumenVentaDiaria {
   } | Date;
 }
 
-export type CategoriaGasto =
-  | "Envíos y paquetería"
-  | "Empaque"
-  | "Publicidad"
-  | "Comisiones de plataformas"
-  | "Comisiones bancarias"
-  | "Transporte y gasolina"
-  | "Renta"
-  | "Servicios"
-  | "Sueldos"
-  | "Impuestos y aranceles"
-  | "Mantenimiento"
-  | "Devoluciones"
-  | "Otros";
+export type CategoriaGasto = string;
 
 export const CATEGORIAS_GASTO: CategoriaGasto[] = [
   "Envíos y paquetería",
@@ -380,12 +382,7 @@ export const CATEGORIAS_GASTO: CategoriaGasto[] = [
   "Otros"
 ];
 
-export type MetodoPagoGasto =
-  | "Efectivo"
-  | "Transferencia"
-  | "Tarjeta de débito"
-  | "Tarjeta de crédito"
-  | "Otro";
+export type MetodoPagoGasto = string;
 
 export const METODOS_PAGO_GASTO: MetodoPagoGasto[] = [
   "Efectivo",

@@ -4,9 +4,10 @@
  */
 
 import React, { useState, useEffect, useMemo } from "react";
-import { Cliente, Movimiento, TipoCliente, EstadoCliente, MarcaCatalogo, getTotalCobradoVenta } from "../types";
+import { Cliente, Movimiento, TipoCliente, EstadoCliente, MarcaCatalogo, ConfiguracionListasDesplegables, getTotalCobradoVenta } from "../types";
 import { firestoreService } from "../lib/firebase";
 import ClienteModal from "./ClienteModal";
+import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 import {
   Users,
   Search,
@@ -33,7 +34,8 @@ import {
   FileText,
   X,
   ArrowUpRight,
-  Trash2
+  Trash2,
+  Settings
 } from "lucide-react";
 
 interface ClientesProps {
@@ -56,6 +58,15 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
 
   // Modal create/edit
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [listasConfig, setListasConfig] = useState<ConfiguracionListasDesplegables | null>(null);
+
+  const loadClientSettings = async () => {
+    try { setListasConfig(await firestoreService.getConfiguracionListasDesplegables()); }
+    catch (error) { console.warn("No se pudieron cargar los tipos de cliente:", error); }
+  };
+
+  useEffect(() => { loadClientSettings(); }, []);
   const [clienteToEdit, setClienteToEdit] = useState<Cliente | null>(null);
 
   // Detail Drawer / Modal
@@ -335,6 +346,7 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
         </div>
 
         <div className="flex items-center gap-2">
+          <button type="button" onClick={() => setIsSettingsOpen(true)} className="px-3 py-2 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 rounded-xl font-semibold text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors flex items-center gap-2"><Settings className="w-4 h-4" /><span>Configurar</span></button>
           <button
             type="button"
             onClick={openCreateModal}
@@ -416,9 +428,7 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
             className="bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
           >
             <option value="todos">Todos los tipos</option>
-            <option value="minorista">Minorista</option>
-            <option value="mayorista">Mayorista</option>
-            <option value="emprendedor">Emprendedor</option>
+            {listasConfig?.tipos_cliente.filter(item => item.activa).map(item => <option key={item.id} value={item.nombre}>{item.nombre}</option>)}
           </select>
 
           {/* Estado filter */}
@@ -981,6 +991,7 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
           }
         }}
       />
+      <ConfiguracionModuloModal isOpen={isSettingsOpen} module="clientes" onClose={() => setIsSettingsOpen(false)} onSaved={loadClientSettings} />
     </div>
   );
 }

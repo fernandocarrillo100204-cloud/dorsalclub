@@ -28,8 +28,7 @@ import {
 import { 
   Almacen, 
   Gasto, 
-  CATEGORIAS_GASTO, 
-  METODOS_PAGO_GASTO 
+  OpcionListaConfigurable
 } from "../../types";
 import { firestoreService, isRealFirebase } from "../../lib/firebase";
 
@@ -37,12 +36,14 @@ interface GastosHistorialProps {
   almacenes: Almacen[];
   onNuevoGasto: () => void;
   onEditarGasto: (gastoId: string) => void;
+  configVersion?: number;
 }
 
 export default function GastosHistorial({
   almacenes,
   onNuevoGasto,
-  onEditarGasto
+  onEditarGasto,
+  configVersion = 0
 }: GastosHistorialProps) {
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,6 +61,15 @@ export default function GastosHistorial({
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [proveedorFilter, setProveedorFilter] = useState<string>("");
+  const [categoriasConfig, setCategoriasConfig] = useState<OpcionListaConfigurable[]>([]);
+  const [metodosPagoConfig, setMetodosPagoConfig] = useState<OpcionListaConfigurable[]>([]);
+
+  useEffect(() => {
+    firestoreService.getConfiguracionListasDesplegables().then(config => {
+      setCategoriasConfig(config.categorias_gasto);
+      setMetodosPagoConfig(config.metodos_pago_gasto);
+    }).catch(error => console.warn("No se pudieron cargar los filtros financieros:", error));
+  }, [configVersion]);
 
   // Modals state
   const [selectedGastoDetail, setSelectedGastoDetail] = useState<Gasto | null>(null);
@@ -360,9 +370,9 @@ export default function GastosHistorial({
               className="w-full px-3 py-2 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] text-xs sm:text-sm text-[#172033] dark:text-[#F8FAFC] focus:outline-none focus:ring-2 focus:ring-[#059669] focus:border-transparent transition-all cursor-pointer"
             >
               <option value="all">Todas las categorías</option>
-              {CATEGORIAS_GASTO.map((c) => (
-                <option key={c} value={c}>
-                  {c}
+              {categoriasConfig.map((c) => (
+                <option key={c.id} value={c.nombre}>
+                  {c.nombre}{c.activa ? "" : " (inactiva)"}
                 </option>
               ))}
             </select>
@@ -377,9 +387,9 @@ export default function GastosHistorial({
               className="w-full px-3 py-2 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] text-xs sm:text-sm text-[#172033] dark:text-[#F8FAFC] focus:outline-none focus:ring-2 focus:ring-[#059669] focus:border-transparent transition-all cursor-pointer"
             >
               <option value="all">Todos los métodos de pago</option>
-              {METODOS_PAGO_GASTO.map((m) => (
-                <option key={m} value={m}>
-                  {m}
+              {metodosPagoConfig.map((m) => (
+                <option key={m.id} value={m.nombre}>
+                  {m.nombre}{m.activa ? "" : " (inactivo)"}
                 </option>
               ))}
               <option value="sin_especificar">Sin especificar</option>

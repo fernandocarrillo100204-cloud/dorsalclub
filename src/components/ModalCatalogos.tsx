@@ -45,6 +45,7 @@ interface ModalCatalogosProps {
   isOpen: boolean;
   onClose: () => void;
   productos: Producto[];
+  showDeliveryCatalogs?: boolean;
 }
 
 type TabType = "marcas" | "categorias" | "colores" | "tallas_ropa" | "tallas_calzado" | "unidades" | "ubicaciones_entrega" | "repartidores";
@@ -137,7 +138,8 @@ function SimpleCatalogTable({
 export default function ModalCatalogos({
   isOpen,
   onClose,
-  productos
+  productos,
+  showDeliveryCatalogs = false
 }: ModalCatalogosProps) {
   const [activeTab, setActiveTab] = useState<TabType>("marcas");
 
@@ -241,8 +243,8 @@ export default function ModalCatalogos({
       setUnidades(data);
     });
 
-    const unsubLocations = firestoreService.getUbicacionesEntregaRealtime(setUbicacionesEntrega);
-    const unsubDeliveryPeople = firestoreService.getRepartidoresRealtime(setRepartidores);
+    const unsubLocations = showDeliveryCatalogs ? firestoreService.getUbicacionesEntregaRealtime(setUbicacionesEntrega) : () => {};
+    const unsubDeliveryPeople = showDeliveryCatalogs ? firestoreService.getRepartidoresRealtime(setRepartidores) : () => {};
 
     return () => {
       unsubMarcas();
@@ -254,7 +256,7 @@ export default function ModalCatalogos({
       unsubLocations();
       unsubDeliveryPeople();
     };
-  }, [isOpen]);
+  }, [isOpen, showDeliveryCatalogs]);
 
   const handleTabChange = (tab: TabType) => {
     setActiveTab(tab);
@@ -652,7 +654,7 @@ export default function ModalCatalogos({
                 Administrar Catálogos
               </h2>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Productos, medidas y opciones de entrega
+                {showDeliveryCatalogs ? "Productos, medidas y opciones de entrega" : "Marcas, categorías, colores, tallas y unidades"}
               </p>
             </div>
           </div>
@@ -745,7 +747,7 @@ export default function ModalCatalogos({
             Unidades ({unidades.length})
           </button>
 
-          <button
+          {showDeliveryCatalogs && <button
             id="tab-ubicaciones-entrega"
             onClick={() => handleTabChange("ubicaciones_entrega")}
             className={`flex items-center gap-2 py-3 px-3 text-xs font-semibold border-b-2 whitespace-nowrap transition-all ${
@@ -756,9 +758,9 @@ export default function ModalCatalogos({
           >
             <MapPin className="w-4 h-4" />
             Ubicaciones ({ubicacionesEntrega.length})
-          </button>
+          </button>}
 
-          <button
+          {showDeliveryCatalogs && <button
             id="tab-repartidores"
             onClick={() => handleTabChange("repartidores")}
             className={`flex items-center gap-2 py-3 px-3 text-xs font-semibold border-b-2 whitespace-nowrap transition-all ${
@@ -769,7 +771,7 @@ export default function ModalCatalogos({
           >
             <UserRound className="w-4 h-4" />
             Quién entrega ({repartidores.length})
-          </button>
+          </button>}
         </div>
 
         {/* Global Feedback Banners */}
@@ -985,7 +987,7 @@ export default function ModalCatalogos({
               </form>
             )}
 
-            {activeTab === "ubicaciones_entrega" && (
+            {showDeliveryCatalogs && activeTab === "ubicaciones_entrega" && (
               <form onSubmit={handleAddUbicacionEntrega} className="flex flex-col sm:flex-row gap-3 items-end">
                 <div className="flex-1 w-full">
                   <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
@@ -1007,7 +1009,7 @@ export default function ModalCatalogos({
               </form>
             )}
 
-            {activeTab === "repartidores" && (
+            {showDeliveryCatalogs && activeTab === "repartidores" && (
               <form onSubmit={handleAddRepartidor} className="flex flex-col sm:flex-row gap-3 items-end">
                 <div className="flex-1 w-full">
                   <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
@@ -1785,7 +1787,7 @@ export default function ModalCatalogos({
               </table>
             )}
 
-            {activeTab === "ubicaciones_entrega" && (
+            {showDeliveryCatalogs && activeTab === "ubicaciones_entrega" && (
               <SimpleCatalogTable
                 items={ubicacionesEntrega}
                 searchQuery={searchQuery}
@@ -1800,7 +1802,7 @@ export default function ModalCatalogos({
               />
             )}
 
-            {activeTab === "repartidores" && (
+            {showDeliveryCatalogs && activeTab === "repartidores" && (
               <SimpleCatalogTable
                 items={repartidores}
                 searchQuery={searchQuery}

@@ -45,7 +45,8 @@ import {
   Copy,
   Barcode,
   DollarSign,
-  Power
+  Power,
+  Settings
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -675,8 +676,8 @@ export default function GestionProductos({
             onClick={() => setIsCatalogosOpen(true)}
             className="px-4 py-2.5 text-xs font-semibold rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700 transition-colors flex items-center gap-2"
           >
-            <Bookmark className="w-4 h-4" />
-            Catálogos (Marcas, Colores, Tallas)
+            <Settings className="w-4 h-4" />
+            Configurar productos
           </button>
 
           <button
