@@ -223,7 +223,7 @@ export default function Transferencias({
                 <div>
                   <span className="font-bold text-zinc-900 dark:text-white block">{selectedProduct.nombre}</span>
                   <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                    Marca: {selectedProduct.marca || "dorsalclub"} • Color: {selectedProduct.color || "—"} • Talla: {selectedProduct.talla || "U"}
+                    Marca: {selectedProduct.marca || "antiorder"} • Color: {selectedProduct.color || "—"} • Talla: {selectedProduct.talla || "U"}
                   </span>
                 </div>
                 <div className="text-right font-mono text-[11px] text-zinc-400">

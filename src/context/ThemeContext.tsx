@@ -13,14 +13,14 @@ interface ThemeContextType {
   setTheme: (theme: ThemeMode) => void;
 }
 
-const THEME_STORAGE_KEY = "dorsalclub_theme";
+const THEME_STORAGE_KEY = "antiorder_theme";
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setThemeState] = useState<ThemeMode>(() => {
     try {
-      const savedTheme = (localStorage.getItem(THEME_STORAGE_KEY) || localStorage.getItem("stockmaster_theme")) as ThemeMode | null;
+      const savedTheme = (localStorage.getItem(THEME_STORAGE_KEY) || localStorage.getItem("dorsalclub_theme") || localStorage.getItem("stockmaster_theme")) as ThemeMode | null;
       if (savedTheme === "dark" || savedTheme === "light") {
         return savedTheme;
       }

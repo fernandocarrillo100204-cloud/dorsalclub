@@ -238,6 +238,21 @@ const normalizeMarcasFavoritasIds = (value: unknown): string[] => {
   )];
 };
 
+const rebrandLegacyName = (value?: string): string | undefined => {
+  if (!value) return value;
+  return value.trim().toLowerCase() === "dorsalclub" ? "antiorder" : value;
+};
+
+const rebrandLegacyProduct = (producto: Producto): Producto => ({
+  ...producto,
+  marca: rebrandLegacyName(producto.marca)
+});
+
+const rebrandLegacyCatalogBrand = (marca: MarcaCatalogo): MarcaCatalogo => ({
+  ...marca,
+  nombre: rebrandLegacyName(marca.nombre) || marca.nombre
+});
+
 const getLocalClientes = (): Cliente[] => (
   getLocalStorageItem<Cliente[]>("clientes", []).map(cliente => ({
     ...cliente,
@@ -317,7 +332,7 @@ export const authService = {
     } else {
       const userObj: Usuario = {
         uid: "local_user_google",
-        email: "usuario@dorsalclub.com",
+        email: "usuario@antiorder.com",
         nombre: "Usuario"
       };
       setLocalStorageItem("currentUser", userObj);
@@ -857,7 +872,7 @@ export const firestoreService = {
       : "";
 
     const estado: EstadoCliente = clienteData.estado || "activo";
-    const userEmail = user?.email || "sistema@dorsalclub.com";
+    const userEmail = user?.email || "sistema@antiorder.com";
     const marcasFavoritasIds = normalizeMarcasFavoritasIds(clienteData.marcas_favoritas_ids);
 
     if (isConfigured && realDb) {
@@ -1110,9 +1125,9 @@ export const firestoreService = {
       snap.forEach(d => {
         list.push({ sku: d.id, ...d.data() } as Producto);
       });
-      return list.filter(producto => producto.en_papelera !== true);
+      return list.filter(producto => producto.en_papelera !== true).map(rebrandLegacyProduct);
     }
-    return getLocalStorageItem<Producto[]>("productos", []).filter(producto => producto.en_papelera !== true);
+    return getLocalStorageItem<Producto[]>("productos", []).filter(producto => producto.en_papelera !== true).map(rebrandLegacyProduct);
   },
 
   getProductosRealtime: (onUpdate: (productos: Producto[]) => void, onError?: (error: any) => void): (() => void) => {
@@ -1124,7 +1139,7 @@ export const firestoreService = {
           snap.forEach(d => {
             list.push({ sku: d.id, ...d.data() } as Producto);
           });
-          onUpdate(list.filter(producto => producto.en_papelera !== true));
+          onUpdate(list.filter(producto => producto.en_papelera !== true).map(rebrandLegacyProduct));
         },
         (error) => {
           console.error("Error en listener de productos:", error);
@@ -1136,7 +1151,7 @@ export const firestoreService = {
 
     const update = () => {
       const list = getLocalStorageItem<Producto[]>("productos", []);
-      onUpdate(list.filter(producto => producto.en_papelera !== true));
+      onUpdate(list.filter(producto => producto.en_papelera !== true).map(rebrandLegacyProduct));
     };
     update();
     listeners.productos.push(update);
@@ -3916,7 +3931,7 @@ export const firestoreService = {
     ];
 
     const defaultMarcas: MarcaCatalogo[] = [
-      { id: "mar_dc", nombre: "dorsalclub", activa: true },
+      { id: "mar_antiorder", nombre: "antiorder", activa: true },
       { id: "mar_nik", nombre: "Nike", activa: true },
       { id: "mar_jor", nombre: "Jordan", activa: true },
       { id: "mar_adi", nombre: "Adidas", activa: true },
@@ -4106,14 +4121,14 @@ export const firestoreService = {
       snap.forEach(d => {
         list.push({ id: d.id, ...d.data() } as CategoriaCatalogo);
       });
-      return list.filter(item => item.en_papelera !== true);
+      return list.filter(item => item.en_papelera !== true).map(rebrandLegacyCatalogBrand);
     }
     const local = getLocalStorageItem<CategoriaCatalogo[]>("categorias", []);
     if (local.length === 0) {
       const res = await firestoreService.seedAndImportCatalogos();
       return res.categorias;
     }
-    return local.filter(item => item.en_papelera !== true);
+    return local.filter(item => item.en_papelera !== true).map(rebrandLegacyCatalogBrand);
   },
 
   getCategoriasRealtime: (onUpdate: (cats: CategoriaCatalogo[]) => void): (() => void) => {
@@ -4125,7 +4140,7 @@ export const firestoreService = {
           snap.forEach(d => {
             list.push({ id: d.id, ...d.data() } as CategoriaCatalogo);
           });
-          onUpdate(list.filter(item => item.en_papelera !== true));
+          onUpdate(list.filter(item => item.en_papelera !== true).map(rebrandLegacyCatalogBrand));
         },
         (error) => {
           console.error("Error en listener de categorías:", error);
@@ -4135,7 +4150,7 @@ export const firestoreService = {
 
     const update = () => {
       const list = getLocalStorageItem<CategoriaCatalogo[]>("categorias", []);
-      onUpdate(list.filter(item => item.en_papelera !== true));
+      onUpdate(list.filter(item => item.en_papelera !== true).map(rebrandLegacyCatalogBrand));
     };
     update();
     listeners.categorias.push(update);
@@ -5078,7 +5093,7 @@ export const firestoreService = {
     }
 
     const fecha_str = gastoData.fecha_str || getLocalDateString(gastoData.fecha);
-    const userEmail = user?.email || "sistema@dorsalclub.com";
+    const userEmail = user?.email || "sistema@antiorder.com";
 
     const payload: any = {
       concepto: cleanConcepto,

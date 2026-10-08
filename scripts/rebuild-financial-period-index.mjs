@@ -3,7 +3,7 @@
 /**
  * Reconstrucción manual e idempotente del índice de periodos financieros.
  *
- * Este script consulta los registros contables históricos reales de Dorsalclub:
+ * Este script consulta los registros contables históricos reales de antiorder:
  * - Ventas activas (colección 'movimientos' con tipo == 'salida' y estado activo)
  * - Compras activas (colección 'compras' con estado no anulado)
  * - Gastos activos (colección 'gastos' con monto válido)

@@ -19,14 +19,14 @@ function lazyWithRetry<T extends React.ComponentType<any>>(
     try {
       const module = await componentImport();
       // Limpiar indicador de recarga cuando la importación tiene éxito
-      sessionStorage.removeItem("dorsalclub_module_retry");
+      sessionStorage.removeItem("antiorder_module_retry");
       return module;
     } catch (error: any) {
       console.warn("Reintentando carga dinámica del módulo...", error);
       try {
         await new Promise((resolve) => setTimeout(resolve, 250));
         const module = await componentImport();
-        sessionStorage.removeItem("dorsalclub_module_retry");
+        sessionStorage.removeItem("antiorder_module_retry");
         return module;
       } catch (retryError: any) {
         const isDynamicImportErr =
@@ -35,7 +35,7 @@ function lazyWithRetry<T extends React.ComponentType<any>>(
           error?.name === "ChunkLoadError";
 
         if (isDynamicImportErr) {
-          const sessionKey = "dorsalclub_module_retry";
+          const sessionKey = "antiorder_module_retry";
           const hasReloaded = sessionStorage.getItem(sessionKey);
           if (!hasReloaded) {
             sessionStorage.setItem(sessionKey, "true");

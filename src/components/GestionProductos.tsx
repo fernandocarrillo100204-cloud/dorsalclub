@@ -214,7 +214,7 @@ export default function GestionProductos({
         groups[baseKey] = {
           baseId: baseKey,
           nombre: p.nombre,
-          marca: p.marca || "dorsalclub",
+          marca: p.marca || "antiorder",
           categoria: p.categoria || "General",
           tipo_talla: p.tipo_talla || "ropa",
           unidad: p.unidad || "pieza",
