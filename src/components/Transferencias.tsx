@@ -37,7 +37,6 @@ export default function Transferencias({
   const [almacenOrigenId, setAlmacenOrigenId] = useState<string>(preselectedAlmacenId || almacenes[0]?.id || "");
   const [almacenDestinoId, setAlmacenDestinoId] = useState<string>(almacenes[1]?.id || "");
   const [cantidad, setCantidad] = useState<number | string>(1);
-  const [referencia, setReferencia] = useState("");
 
   const [stockList, setStockList] = useState<StockItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -142,7 +141,7 @@ export default function Transferencias({
         almacen_destino_id: almacenDestinoId,
         tipo: "transferencia",
         cantidad: numQty,
-        referencia: referencia.trim() || "Transferencia interna de inventario"
+        referencia: "Transferencia interna de inventario"
       });
 
       setFormSuccess(
@@ -150,7 +149,6 @@ export default function Transferencias({
       );
 
       setCantidad(1);
-      setReferencia("");
 
       if (onSuccess) {
         setTimeout(() => onSuccess(), 1500);
@@ -314,8 +312,8 @@ export default function Transferencias({
             </div>
           </div>
 
-          {/* Cantidad & Referencia */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Cantidad */}
+          <div>
             <div>
               <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
                 Cantidad a Transferir <span className="text-rose-500">*</span>
@@ -331,18 +329,6 @@ export default function Transferencias({
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                Referencia / Motivo del Traslado
-              </label>
-              <input
-                type="text"
-                placeholder="Ej. Reabastecimiento de mostrador, pedido sucursal..."
-                value={referencia}
-                onChange={(e) => setReferencia(e.target.value)}
-                className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
-              />
-            </div>
           </div>
         </div>
 

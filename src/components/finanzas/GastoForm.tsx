@@ -52,7 +52,6 @@ export default function GastoForm({
   const [metodoPago, setMetodoPago] = useState<string>("");
   const [almacenId, setAlmacenId] = useState<string>("");
   const [proveedor, setProveedor] = useState("");
-  const [referencia, setReferencia] = useState("");
   const [notas, setNotas] = useState("");
 
   const [loadingInitial, setLoadingInitial] = useState(mode === "edit");
@@ -87,7 +86,6 @@ export default function GastoForm({
           setMetodoPago(g.metodo_pago || "");
           setAlmacenId(g.almacen_id || "");
           setProveedor(g.proveedor || "");
-          setReferencia(g.referencia || "");
           setNotas(g.notas || "");
         })
         .catch((err) => {
@@ -151,7 +149,6 @@ export default function GastoForm({
           almacen_id: almacenId ? almacenId : undefined,
           almacen_nombre: almacenNombre,
           proveedor: proveedor.trim() ? proveedor.trim() : undefined,
-          referencia: referencia.trim() ? referencia.trim() : undefined,
           notas: notas.trim() ? notas.trim() : undefined
         });
       } else if (mode === "edit" && gastoId) {
@@ -165,7 +162,6 @@ export default function GastoForm({
           almacen_id: almacenId ? almacenId : "",
           almacen_nombre: almacenNombre ? almacenNombre : "",
           proveedor: proveedor.trim(),
-          referencia: referencia.trim(),
           notas: notas.trim()
         });
       }
@@ -450,26 +446,6 @@ export default function GastoForm({
                   className="w-full px-3.5 py-2.5 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] text-[#172033] dark:text-[#F8FAFC] text-sm placeholder-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#059669] focus:border-transparent transition-all"
                 />
               </div>
-            </div>
-          </div>
-
-          {/* Referencia o Folio */}
-          <div>
-            <label 
-              htmlFor="gasto-referencia"
-              className="block text-xs font-semibold uppercase tracking-wider text-[#475569] dark:text-[#94A3B8] mb-1.5"
-            >
-              Referencia / Comprobante / Folio <span className="text-[#94A3B8] font-normal lowercase">(opcional)</span>
-            </label>
-            <div className="relative">
-              <input
-                type="text"
-                id="gasto-referencia"
-                value={referencia}
-                onChange={(e) => setReferencia(e.target.value)}
-                placeholder="Ej. Factura #A-4921, Folio de transferencia #88194, Ticket #102..."
-                className="w-full px-3.5 py-2.5 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] text-[#172033] dark:text-[#F8FAFC] text-sm placeholder-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#059669] focus:border-transparent transition-all"
-              />
             </div>
           </div>
 

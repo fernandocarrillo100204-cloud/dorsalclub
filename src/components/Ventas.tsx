@@ -78,8 +78,6 @@ export default function Ventas({
       initialProduct?.precio_venta ?? ""
     )];
   });
-  const [referencia, setReferencia] = useState("");
-
   // Opciones y ajustes de venta (envío y costos adicionales)
   const [isAjustesOpen, setIsAjustesOpen] = useState(false);
   const [envioCobradoCliente, setEnvioCobradoCliente] = useState<string>("");
@@ -356,12 +354,7 @@ export default function Ventas({
       const clienteTipo = isMostrador ? undefined : selectedCliente?.tipo_cliente;
       const clienteId = isMostrador ? undefined : selectedCliente?.id;
 
-      const fullReference = [
-        referencia.trim() ? `Ref: ${referencia.trim()}` : "",
-        `Cliente: ${clienteNombre}`
-      ]
-        .filter(Boolean)
-        .join(" | ");
+      const fullReference = `Cliente: ${clienteNombre}`;
 
       const envioCobradoFinal = envioCobradoValidated > 0 ? envioCobradoValidated : undefined;
       const otrosCargosFinal = otrosCargosValidated > 0 ? otrosCargosValidated : undefined;
@@ -400,7 +393,6 @@ export default function Ventas({
       );
 
       setItems([createVentaItem("", almacenes[0]?.id || "")]);
-      setReferencia("");
       setSelectedClienteId("");
       setEnvioCobradoCliente("");
       setOtrosCargosCliente("");
@@ -614,10 +606,10 @@ export default function Ventas({
             </div>
           </div>
 
-          {/* Customer Selection & Ticket Reference */}
+          {/* Customer and delivery information */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Searchable Client Selector */}
-            <div className="relative" ref={clientDropdownRef}>
+            <div className="relative sm:col-span-2" ref={clientDropdownRef}>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
                   <Users className="w-3.5 h-3.5 text-rose-500" />
@@ -762,25 +754,8 @@ export default function Ventas({
               )}
             </div>
 
-            {/* Ticket reference */}
-            <div>
-              <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                Folio Ticket / Pedido E-commerce (Opcional)
-              </label>
-              <input
-                type="text"
-                placeholder="Ej. TICKET-#1045 o SHOP-9821"
-                value={referencia}
-                onChange={(e) => setReferencia(e.target.value)}
-                className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white font-mono"
-              />
-              <p className="text-[11px] text-zinc-400 mt-1">
-                Identificador de venta externa o canal de despacho.
-              </p>
-            </div>
-
             {/* Datos opcionales de entrega */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label htmlFor="ubicacion-entrega-select" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
                   Ubicación de entrega (Opcional)
@@ -821,7 +796,7 @@ export default function Ventas({
             </div>
 
             {/* Comentarios de la venta */}
-            <div>
+            <div className="sm:col-span-2">
               <div className="flex justify-between items-center mb-1.5">
                 <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
                   Comentarios / Observaciones (Opcional)
