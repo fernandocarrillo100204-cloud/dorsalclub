@@ -5,7 +5,7 @@
 
 import React, { useState } from "react";
 import { authService } from "../lib/firebase";
-import { LogIn, Database, Mail, Lock, AlertCircle } from "lucide-react";
+import { LogIn, Mail, Lock, AlertCircle } from "lucide-react";
 import { motion } from "motion/react";
 
 interface LoginProps {
@@ -63,26 +63,6 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         <div className="flex flex-col items-center mb-6">
           <img src="/antiorder-logo.jpg" alt="Logo de antiorder" className="h-20 w-20 rounded-2xl object-cover mb-3 shadow-xs dark:invert" id="login-brand-icon" />
           <h1 className="text-2xl font-bold text-[#172033] dark:text-[#F8FAFC] tracking-tight lowercase">antiorder</h1>
-        </div>
-
-        {/* Entorno Firebase Conectado */}
-        <div className="bg-[#F8FAFC] dark:bg-[#182235] border border-[#E2E8F0] dark:border-[#263449] rounded-xl p-3.5 mb-5">
-          <div className="flex items-start space-x-2.5">
-            <Database className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
-            <div>
-              <div className="flex items-center gap-1.5">
-                <h3 className="text-xs font-semibold text-[#172033] dark:text-[#F8FAFC]">
-                  Entorno Firebase Conectado
-                </h3>
-                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300">
-                  Activo
-                </span>
-              </div>
-              <p className="text-xs text-[#64748B] dark:text-[#94A3B8] mt-1 leading-relaxed">
-                Inicia sesión con una cuenta registrada y autorizada en Firebase.
-              </p>
-            </div>
-          </div>
         </div>
 
         {/* Form Error */}
