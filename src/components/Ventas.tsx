@@ -812,9 +812,6 @@ export default function Ventas({
                 </select>
               </div>
               {deliveryCatalogLoading && <p className="sm:col-span-2 text-[11px] text-zinc-400">Cargando opciones de entrega…</p>}
-              {!deliveryCatalogLoading && !deliveryCatalogError && (ubicacionesEntrega.length === 0 || repartidores.length === 0) && (
-                <p className="sm:col-span-2 text-[11px] text-amber-600 dark:text-amber-400">Agrega ubicaciones y personas desde Administrar Catálogos para habilitar todas las opciones.</p>
-              )}
               {deliveryCatalogError && (
                 <div className="sm:col-span-2 flex items-center gap-2 text-[11px] text-rose-600 dark:text-rose-400">
                   <span>{deliveryCatalogError}</span>
