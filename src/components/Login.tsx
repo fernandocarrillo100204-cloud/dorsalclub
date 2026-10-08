@@ -63,9 +63,6 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         <div className="flex flex-col items-center mb-6">
           <img src="/antiorder-logo.jpg" alt="Logo de antiorder" className="h-20 w-20 rounded-2xl object-cover mb-3 shadow-xs dark:invert" id="login-brand-icon" />
           <h1 className="text-2xl font-bold text-[#172033] dark:text-[#F8FAFC] tracking-tight lowercase">antiorder</h1>
-          <p className="text-xs text-[#64748B] dark:text-[#94A3B8] mt-1 text-center font-medium">
-            Inventario de streetwear y sneakers
-          </p>
         </div>
 
         {/* Entorno Firebase Conectado */}
