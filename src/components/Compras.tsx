@@ -107,7 +107,6 @@ export default function Compras({
   const [proveedor, setProveedor] = useState("");
   const [fecha, setFecha] = useState(() => new Date().toISOString().split("T")[0]);
   const [almacenId, setAlmacenId] = useState(almacenes[0]?.id || "");
-  const [referencia, setReferencia] = useState("");
   const [notas, setNotas] = useState("");
   const [costoEnvio, setCostoEnvio] = useState<number | "">("");
   const [comisiones, setComisiones] = useState<number | "">("");
@@ -367,7 +366,6 @@ export default function Compras({
         costo_envio: typeof costoEnvio === "number" ? costoEnvio : 0,
         comisiones: typeof comisiones === "number" ? comisiones : 0,
         descuentos: typeof descuentos === "number" ? descuentos : 0,
-        referencia: referencia.trim(),
         notas: notas.trim()
       });
 
@@ -375,7 +373,6 @@ export default function Compras({
 
       // Reset form immediately without artificial delay
       setProveedor("");
-      setReferencia("");
       setNotas("");
       setCostoEnvio("");
       setComisiones("");
@@ -508,7 +505,7 @@ export default function Compras({
               </div>
 
               {/* Almacén de recepción */}
-              <div>
+              <div className="sm:col-span-2">
                 <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
                   Almacén de Recepción <span className="text-rose-500">*</span>
                 </label>
@@ -529,20 +526,6 @@ export default function Compras({
                     ))}
                   </select>
                 </div>
-              </div>
-
-              {/* Referencia / Factura */}
-              <div>
-                <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                  Factura / Folio Externo / Referencia
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ej. FAC-2026-8941"
-                  value={referencia}
-                  onChange={(e) => setReferencia(e.target.value)}
-                  className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white transition-all font-mono"
-                />
               </div>
 
               {/* Notas */}

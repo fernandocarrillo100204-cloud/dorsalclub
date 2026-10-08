@@ -64,7 +64,6 @@ export default function MovimientoForm({
   const [almacenDestinoId, setAlmacenDestinoId] = useState<string>("");
   const [tipo, setTipo] = useState<"entrada" | "salida" | "transferencia">("entrada");
   const [cantidad, setCantidad] = useState<number | string>(1);
-  const [referencia, setReferencia] = useState("");
   
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -100,7 +99,6 @@ export default function MovimientoForm({
     setAlmacenDestinoId("");
     setTipo("entrada");
     setCantidad(1);
-    setReferencia("");
     setFormError(null);
     setAlmacenError(null);
     setAlmacenDestinoError(null);
@@ -256,7 +254,7 @@ export default function MovimientoForm({
         almacen_destino_id: tipo === "transferencia" ? almacenDestinoId : undefined,
         tipo,
         cantidad: qty,
-        referencia: referencia.trim() || undefined
+        referencia: `Movimiento de ${tipo}`
       });
 
       setFormSuccess(`Movimiento de ${tipo} registrado exitosamente para ${cleanSku}.`);
@@ -449,8 +447,8 @@ export default function MovimientoForm({
               </div>
             </div>
 
-            {/* Cantidad & Referencia */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Cantidad */}
+            <div>
               <div>
                 <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
                   Cantidad (Unidades) *
@@ -466,18 +464,6 @@ export default function MovimientoForm({
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                  Motivo / Referencia (Opcional)
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ej. Reabastecimiento drop #2, Venta web, Devolución..."
-                  value={referencia}
-                  onChange={(e) => setReferencia(e.target.value)}
-                  className="w-full px-3.5 py-2 text-xs bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-zinc-900 dark:text-white focus:outline-none"
-                />
-              </div>
             </div>
 
             {/* Almacenes Selection */}
