@@ -117,10 +117,13 @@ const getTabFromPath = (path: string): NavigationTab => {
   if (normalized === "/catalogo" || normalized === "/productos") {
     return "catalogo";
   }
-  if (normalized === "/dashboard" || normalized === "" || normalized === "/") {
+  if (normalized === "/dashboard") {
     return "dashboard";
   }
-  return "dashboard";
+  if (normalized === "" || normalized === "/") {
+    return "compras";
+  }
+  return "compras";
 };
 
 const getPathFromTab = (tab: NavigationTab): string => {
@@ -329,8 +332,7 @@ export default function App() {
       <Login 
         onLoginSuccess={(u) => {
           setUser(u);
-          const targetTab = getTabFromPath(window.location.pathname);
-          setActiveTab(targetTab);
+          navigateTo("compras");
         }} 
       />
     );
