@@ -451,8 +451,10 @@ export default function App() {
                     transition={{ duration: 0.25, ease: "easeInOut" }}
                   >
                     <Clientes
+                      preselectedClienteId={preselectedClienteId}
                       onNavigateToVenta={(clienteId) => navigateTo("ventas_nueva", { clienteId })}
                       onNavigateToHistory={(clienteId) => navigateTo("historial", { clienteId })}
+                      onNavigateToPedidos={() => navigateTo("ventas_pedidos")}
                     />
                   </motion.div>
                 )}
