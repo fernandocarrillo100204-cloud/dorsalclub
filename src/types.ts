@@ -104,6 +104,15 @@ export interface Movimiento {
   venta_saldo_pendiente?: number;
   ingreso_reconocido?: number;
   estado_pago?: "pagado" | "anticipo" | "pendiente";
+  pedido_estado?: "pedido" | "pagado" | "entregado";
+  pedido_fecha_estimada?: string;
+  pedido_comentarios?: string;
+  pedido_entregado_at?: {
+    seconds: number;
+    nanoseconds: number;
+  } | Date;
+  subtipo?: "abono_venta" | "seguimiento_pedido";
+  venta_relacionada_id?: string;
   estado?: "activo" | "anulado"; // Estado del movimiento (por defecto activo)
   anulado_at?: {
     seconds: number;
@@ -165,6 +174,25 @@ export interface ConfiguracionVentas {
   canales: Record<CanalVentaId, CanalVentaConfig>;
 }
 
+export interface PedidoVenta {
+  venta_id: string;
+  folio: string;
+  cliente_id?: string;
+  cliente_nombre: string;
+  canal_venta: "bajo_pedido" | "mayoreo";
+  canal_venta_nombre: string;
+  fecha: Date;
+  total: number;
+  recibido: number;
+  saldo: number;
+  estado: "pedido" | "pagado" | "entregado";
+  fecha_estimada?: string;
+  comentarios?: string;
+  ubicacion_entrega_nombre?: string;
+  repartidor_nombre?: string;
+  items: Array<{ sku: string; cantidad: number; precio_unitario: number; total: number }>;
+}
+
 export type TipoCliente = string;
 export type CanalPreferido = string;
 export type OrigenCliente = string;
@@ -218,6 +246,7 @@ export type NavigationTab =
   | "ventas_bajo_pedido"
   | "ventas_emprendedor"
   | "ventas_mayoreo"
+  | "ventas_pedidos"
   | "clientes"
   | "transferencias_nueva"
   | "historial" 
