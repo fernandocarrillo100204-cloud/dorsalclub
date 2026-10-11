@@ -94,7 +94,19 @@ const getTabFromPath = (path: string): NavigationTab => {
     return "compras";
   }
   if (normalized === "/ventas/nueva") {
-    return "ventas_nueva";
+    return "ventas_stock";
+  }
+  if (normalized === "/ventas/stock") {
+    return "ventas_stock";
+  }
+  if (normalized === "/ventas/bajo-pedido") {
+    return "ventas_bajo_pedido";
+  }
+  if (normalized === "/ventas/paquete-emprendedor") {
+    return "ventas_emprendedor";
+  }
+  if (normalized === "/ventas/mayoreo") {
+    return "ventas_mayoreo";
   }
   if (normalized === "/transferencias/nueva") {
     return "transferencias_nueva";
@@ -133,7 +145,14 @@ const getPathFromTab = (tab: NavigationTab): string => {
     case "compras_nueva":
       return "/compras/nueva";
     case "ventas_nueva":
-      return "/ventas/nueva";
+    case "ventas_stock":
+      return "/ventas/stock";
+    case "ventas_bajo_pedido":
+      return "/ventas/bajo-pedido";
+    case "ventas_emprendedor":
+      return "/ventas/paquete-emprendedor";
+    case "ventas_mayoreo":
+      return "/ventas/mayoreo";
     case "transferencias_nueva":
       return "/transferencias/nueva";
     case "analisis_ventas":
@@ -383,7 +402,7 @@ export default function App() {
                 )}
 
                 {/* Ventas: Registro de Salida Comercial */}
-                {activeTab === "ventas_nueva" && (
+                {(["ventas_nueva", "ventas_stock", "ventas_bajo_pedido", "ventas_emprendedor", "ventas_mayoreo"] as NavigationTab[]).includes(activeTab) && (
                   <motion.div
                     key="ventas_nueva"
                     initial={{ opacity: 0, y: 15 }}
@@ -397,6 +416,7 @@ export default function App() {
                       preselectedSku={preselectedSku}
                       preselectedAlmacenId={preselectedAlmacenId}
                       preselectedClienteId={preselectedClienteId}
+                      canal={activeTab === "ventas_bajo_pedido" ? "bajo_pedido" : activeTab === "ventas_emprendedor" ? "paquete_emprendedor" : activeTab === "ventas_mayoreo" ? "mayoreo" : "stock"}
                       onSuccess={() => navigateTo("dashboard")}
                       onCancel={() => navigateTo("dashboard")}
                     />

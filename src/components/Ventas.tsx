@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
-import { Almacen, Producto, StockItem, Cliente, TipoCliente, VentaPartidaInput, UbicacionEntregaCatalogo, RepartidorCatalogo, normalizeOptionalMoney } from "../types";
+import { Almacen, Producto, StockItem, Cliente, TipoCliente, VentaPartidaInput, UbicacionEntregaCatalogo, RepartidorCatalogo, CanalVentaId, ConfiguracionVentas, normalizeOptionalMoney } from "../types";
 import ClienteModal from "./ClienteModal";
 import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 import {
@@ -59,6 +59,7 @@ interface VentasProps {
   preselectedClienteId?: string;
   onSuccess?: () => void;
   onCancel?: () => void;
+  canal: CanalVentaId;
 }
 
 export default function Ventas({
@@ -68,7 +69,8 @@ export default function Ventas({
   preselectedAlmacenId = "",
   preselectedClienteId = "",
   onSuccess,
-  onCancel
+  onCancel,
+  canal
 }: VentasProps) {
   const [items, setItems] = useState<VentaItemDraft[]>(() => {
     const initialProduct = productos.find((product) => product.sku === preselectedSku);
@@ -94,6 +96,8 @@ export default function Ventas({
   const [deliveryCatalogLoading, setDeliveryCatalogLoading] = useState(true);
   const [deliveryCatalogError, setDeliveryCatalogError] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [salesConfig, setSalesConfig] = useState<ConfiguracionVentas | null>(null);
+  const [customMarkup, setCustomMarkup] = useState<string>("");
 
   // Client Selection State
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -119,7 +123,7 @@ export default function Ventas({
           ...item,
           sku: nextSku,
           almacenId: preselectedAlmacenId || item.almacenId,
-          precioUnitario: preselectedSku ? selectedProduct?.precio_venta ?? "" : item.precioUnitario
+          precioUnitario: preselectedSku ? calculateChannelPrice(selectedProduct) : item.precioUnitario
         };
       }));
     }
@@ -157,12 +161,14 @@ export default function Ventas({
     setDeliveryCatalogLoading(true);
     setDeliveryCatalogError(null);
     try {
-      const [locations, deliveryPeople] = await Promise.all([
+      const [locations, deliveryPeople, channelConfig] = await Promise.all([
         firestoreService.getUbicacionesEntrega(),
-        firestoreService.getRepartidores()
+        firestoreService.getRepartidores(),
+        firestoreService.getConfiguracionVentas()
       ]);
       setUbicacionesEntrega(locations.filter(item => item.activa));
       setRepartidores(deliveryPeople.filter(item => item.activa));
+      setSalesConfig(channelConfig);
     } catch (error: any) {
       setDeliveryCatalogError(error?.message || "No se pudieron cargar las opciones de entrega.");
     } finally {
@@ -173,6 +179,26 @@ export default function Ventas({
   useEffect(() => {
     loadDeliveryCatalogs();
   }, []);
+
+  const channelConfig = salesConfig?.canales[canal] || null;
+  const appliedMarkup = canal === "mayoreo" ? Number(customMarkup) : Number(channelConfig?.porcentaje);
+  const hasValidMarkup = Number.isFinite(appliedMarkup) && appliedMarkup >= 0;
+  const affectsStock = channelConfig?.afecta_stock !== false;
+  const requiredDepositPercent = channelConfig?.anticipo_porcentaje ?? (affectsStock ? 100 : 50);
+
+  const calculateChannelPrice = (product?: Producto | null): number | string => {
+    const cost = Number(product?.precio_costo);
+    if (!product || !Number.isFinite(cost) || cost < 0 || !hasValidMarkup) return "";
+    return Math.round((cost * (1 + appliedMarkup / 100) + Number.EPSILON) * 100) / 100;
+  };
+
+  useEffect(() => {
+    if (!channelConfig || !hasValidMarkup) return;
+    setItems(current => current.map(item => {
+      const product = productos.find(candidate => candidate.sku === item.sku);
+      return item.sku ? { ...item, precioUnitario: calculateChannelPrice(product) } : item;
+    }));
+  }, [canal, channelConfig, customMarkup, productos]);
 
   // Selected client details
   const selectedCliente = useMemo(() => {
@@ -207,7 +233,7 @@ export default function Ventas({
     const selectedProduct = productos.find((product) => product.sku === nextSku);
     updateItem(id, {
       sku: nextSku,
-      precioUnitario: selectedProduct?.precio_venta ?? ""
+      precioUnitario: calculateChannelPrice(selectedProduct)
     });
   };
 
@@ -251,6 +277,8 @@ export default function Ventas({
   const otrosCostosNum = parseNumField(otrosCostosVenta);
 
   const totalCobrado = totalMercancia + envioCobradoNum + otrosCargosNum;
+  const totalRecibido = Math.round((totalCobrado * requiredDepositPercent / 100 + Number.EPSILON) * 100) / 100;
+  const saldoPendiente = Math.max(0, Math.round((totalCobrado - totalRecibido + Number.EPSILON) * 100) / 100);
   const totalCostosVenta = costoEnvioNum + otrosCostosNum;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -260,6 +288,22 @@ export default function Ventas({
 
     if (items.length === 0) {
       setFormError("Agrega al menos un producto a la venta.");
+      return;
+    }
+    if (!channelConfig) {
+      setFormError("No se pudo cargar la configuración del canal de venta.");
+      return;
+    }
+    if (!hasValidMarkup) {
+      setFormError("Captura un porcentaje válido para esta venta de mayoreo.");
+      return;
+    }
+    if (totalUnidades < channelConfig.minimo_piezas) {
+      setFormError(`${channelConfig.nombre} requiere un mínimo de ${channelConfig.minimo_piezas} piezas.`);
+      return;
+    }
+    if (!affectsStock && (!selectedClienteId || selectedClienteId === "mostrador")) {
+      setFormError("Selecciona un cliente para registrar el anticipo y saldo pendiente de esta venta bajo pedido.");
       return;
     }
 
@@ -276,7 +320,7 @@ export default function Ventas({
         setFormError(`Selecciona el producto de la partida ${index + 1}.`);
         return;
       }
-      if (!item.almacenId) {
+      if (affectsStock && !item.almacenId) {
         setFormError(`Selecciona el almacén de la partida ${index + 1}.`);
         return;
       }
@@ -288,16 +332,23 @@ export default function Ventas({
         setFormError(`El precio de la partida ${index + 1} debe ser un número válido mayor o igual a cero.`);
         return;
       }
+      const product = productos.find(candidate => candidate.sku === cleanSku);
+      const productCost = Number(product?.precio_costo);
+      if (!Number.isFinite(productCost) || productCost < 0) {
+        setFormError(`El producto ${cleanSku} no tiene un costo válido registrado.`);
+        return;
+      }
 
-      const stockKey = `${cleanSku}_${item.almacenId}`;
+      const itemWarehouse = affectsStock ? item.almacenId : "bajo_pedido";
+      const stockKey = `${cleanSku}_${itemWarehouse}`;
       if (usedStockKeys.has(stockKey)) {
         setFormError(`El producto ${cleanSku} está repetido para el mismo almacén. Unifica su cantidad en una sola partida.`);
         return;
       }
       usedStockKeys.add(stockKey);
 
-      const availableStock = getAvailableStock(item);
-      if (availableStock !== null && availableStock < quantity) {
+      const availableStock = affectsStock ? getAvailableStock(item) : null;
+      if (affectsStock && availableStock !== null && availableStock < quantity) {
         setFormError(
           `Stock insuficiente para ${cleanSku}. Disponible: ${availableStock} uds, solicitado: ${quantity} uds.`
         );
@@ -306,7 +357,7 @@ export default function Ventas({
 
       normalizedItems.push({
         sku: cleanSku,
-        almacen_id: item.almacenId,
+        almacen_id: itemWarehouse,
         cantidad: quantity,
         precio_unitario_venta: unitPrice
       });
@@ -385,7 +436,13 @@ export default function Ventas({
         ubicacion_entrega_id: selectedDeliveryLocation?.id,
         ubicacion_entrega_nombre: selectedDeliveryLocation?.nombre,
         repartidor_id: selectedDeliveryPerson?.id,
-        repartidor_nombre: selectedDeliveryPerson?.nombre
+        repartidor_nombre: selectedDeliveryPerson?.nombre,
+        canal_venta: canal,
+        canal_venta_nombre: channelConfig.nombre,
+        porcentaje_precio: appliedMarkup,
+        afecta_stock: affectsStock,
+        anticipo_porcentaje: requiredDepositPercent,
+        minimo_piezas: channelConfig.minimo_piezas
       });
 
       setFormSuccess(
@@ -401,6 +458,7 @@ export default function Ventas({
       setOtrosCostosVenta("");
       setConceptoOtrosCostos("");
       setComentariosVenta("");
+      setCustomMarkup("");
       setUbicacionEntregaId("");
       setRepartidorId("");
       setIsAjustesOpen(false);
@@ -420,7 +478,7 @@ export default function Ventas({
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 space-y-6" id="ventas-page">
       {/* Header */}
       <div className="pb-4 border-b border-zinc-200 dark:border-zinc-800 flex items-start justify-between gap-3">
-        <div><h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2"><ShoppingCart className="w-6 h-6 text-rose-500" />Registrar Venta / Despacho</h1><p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Descuenta unidades vendidas en mostrador o asociadas a un cliente con trazabilidad comercial completa.</p></div>
+        <div><h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2"><ShoppingCart className="w-6 h-6 text-rose-500" />{channelConfig?.nombre || "Registrar venta"}</h1><p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{affectsStock ? "Venta con mercancía disponible; descuenta existencias al confirmar." : "Venta bajo pedido; registra el anticipo sin descontar existencias."}</p></div>
         <button type="button" onClick={() => setIsSettingsOpen(true)} className="shrink-0 px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"><Settings className="w-4 h-4" />Configurar</button>
       </div>
 
@@ -436,6 +494,20 @@ export default function Ventas({
         <div className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-2xl flex items-center gap-3 text-rose-800 dark:text-rose-300 text-xs">
           <AlertCircle className="w-5 h-5 shrink-0 text-rose-600 dark:text-rose-400" />
           <p className="font-semibold">{formError}</p>
+        </div>
+      )}
+
+      {channelConfig && (
+        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <div><span className="block text-[10px] uppercase text-zinc-400">Modalidad</span><strong className="text-zinc-900 dark:text-white">{affectsStock ? "Stock" : "Bajo pedido"}</strong></div>
+          <div><span className="block text-[10px] uppercase text-zinc-400">Mínimo</span><strong className="text-zinc-900 dark:text-white">{channelConfig.minimo_piezas} piezas</strong></div>
+          <div><span className="block text-[10px] uppercase text-zinc-400">Anticipo</span><strong className="text-zinc-900 dark:text-white">{requiredDepositPercent}%</strong></div>
+          <div><span className="block text-[10px] uppercase text-zinc-400">Precio</span><strong className="text-zinc-900 dark:text-white">{canal === "mayoreo" ? "Por definir" : `Costo + ${channelConfig.porcentaje}%`}</strong></div>
+          {canal === "mayoreo" && (
+            <label className="col-span-2 sm:col-span-4 text-xs font-semibold text-zinc-700 dark:text-zinc-300">Porcentaje especial para esta venta
+              <div className="relative mt-1 max-w-xs"><input type="number" min="0" step="1" value={customMarkup} onChange={(event) => setCustomMarkup(event.target.value)} placeholder="Ej. 80" className="w-full px-3 py-2 pr-8 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white" /><span className="absolute right-3 top-2 text-zinc-400">%</span></div>
+            </label>
+          )}
         </div>
       )}
 
@@ -511,14 +583,14 @@ export default function Ventas({
                         {productos.map((product) => (
                           <option key={product.sku} value={product.sku}>
                             [{product.sku}] {product.nombre} {product.talla ? `- Talla: ${product.talla}` : ""}{" "}
-                            {product.color ? `(${product.color})` : ""} - ${product.precio_venta || 0}
+                            {product.color ? `(${product.color})` : ""}{hasValidMarkup ? ` - $${calculateChannelPrice(product) || 0}` : ""}
                           </option>
                         ))}
                       </select>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                      <div className="lg:col-span-2">
+                      {affectsStock && <div className="lg:col-span-2">
                         <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
                           Almacén de despacho
                         </label>
@@ -531,7 +603,7 @@ export default function Ventas({
                             <option key={warehouse.id} value={warehouse.id}>{warehouse.nombre}</option>
                           ))}
                         </select>
-                      </div>
+                      </div>}
 
                       <div>
                         <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
@@ -560,9 +632,9 @@ export default function Ventas({
                             min="0"
                             step="0.01"
                             value={item.precioUnitario}
-                            onChange={(event) => updateItem(item.id, { precioUnitario: event.target.value })}
+                            readOnly
                             placeholder="0.00"
-                            className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl pl-9 pr-3 py-2.5 text-xs font-bold text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white font-mono"
+                            className="w-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl pl-9 pr-3 py-2.5 text-xs font-bold text-zinc-900 dark:text-white font-mono"
                           />
                         </div>
                       </div>
@@ -577,7 +649,7 @@ export default function Ventas({
                             {selectedProduct.talla ? ` · Talla ${selectedProduct.talla}` : ""}
                           </span>
                         )}
-                        {item.sku && (
+                        {item.sku && affectsStock && (
                           <span className={`px-2 py-0.5 rounded-full font-mono font-bold ${
                             (availableStock || 0) >= quantity
                               ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400"
@@ -585,6 +657,9 @@ export default function Ventas({
                           }`}>
                             Stock: {availableStock ?? 0} uds
                           </span>
+                        )}
+                        {selectedProduct && Number.isFinite(Number(selectedProduct.precio_costo)) && (
+                          <span className="text-zinc-400">Costo: ${Number(selectedProduct.precio_costo).toFixed(2)} · +{hasValidMarkup ? appliedMarkup : 0}%</span>
                         )}
                       </div>
                       <div className="font-mono text-sm font-bold text-zinc-900 dark:text-white">
@@ -1021,6 +1096,18 @@ export default function Ventas({
               <span>= Total a cobrar al cliente</span>
               <span className="font-mono text-rose-600 dark:text-rose-400">${totalCobrado.toFixed(2)} MXN</span>
             </div>
+            {requiredDepositPercent < 100 && (
+              <>
+                <div className="flex justify-between items-center text-emerald-700 dark:text-emerald-400 font-semibold">
+                  <span>Anticipo requerido ({requiredDepositPercent}%)</span>
+                  <span className="font-mono">${totalRecibido.toFixed(2)} MXN</span>
+                </div>
+                <div className="flex justify-between items-center text-amber-700 dark:text-amber-400">
+                  <span>Saldo pendiente</span>
+                  <span className="font-mono">${saldoPendiente.toFixed(2)} MXN</span>
+                </div>
+              </>
+            )}
           </div>
 
           {(costoEnvioNum > 0 || otrosCostosNum > 0) && (
@@ -1077,7 +1164,7 @@ export default function Ventas({
             ) : (
               <>
                 <ShoppingCart className="w-4 h-4" />
-                <span>Confirmar Venta (${totalCobrado.toFixed(2)} MXN)</span>
+                <span>{requiredDepositPercent < 100 ? `Registrar anticipo ($${totalRecibido.toFixed(2)} MXN)` : `Confirmar venta ($${totalCobrado.toFixed(2)} MXN)`}</span>
               </>
             )}
           </button>

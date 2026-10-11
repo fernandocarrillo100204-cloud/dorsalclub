@@ -44,7 +44,7 @@ interface NavItem {
   matchActive?: (current: NavigationTab) => boolean;
 }
 
-type NavGroupId = "clientes" | "inventario" | "finanzas";
+type NavGroupId = "ventas" | "clientes" | "inventario" | "finanzas";
 
 interface NavGroup {
   id: NavGroupId;
@@ -61,12 +61,6 @@ const DIRECT_NAV_ITEMS: NavItem[] = [
     icon: ShoppingBag,
     matchActive: (curr) => curr === "compras" || curr === "compras_nueva"
   },
-  { 
-    id: "ventas_nueva", 
-    label: "Ventas", 
-    icon: ShoppingCart,
-    matchActive: (curr) => curr === "ventas_nueva"
-  }
 ];
 
 const UTILITY_NAV_ITEMS: NavItem[] = [
@@ -79,6 +73,18 @@ const UTILITY_NAV_ITEMS: NavItem[] = [
 ];
 
 const NAV_GROUPS: NavGroup[] = [
+  {
+    id: "ventas",
+    label: "Ventas",
+    icon: ShoppingCart,
+    matchActive: (curr) => ["ventas_nueva", "ventas_stock", "ventas_bajo_pedido", "ventas_emprendedor", "ventas_mayoreo"].includes(curr),
+    items: [
+      { id: "ventas_stock", label: "Stock", icon: Package, matchActive: (curr) => curr === "ventas_stock" || curr === "ventas_nueva" },
+      { id: "ventas_bajo_pedido", label: "Bajo pedido", icon: ShoppingCart, matchActive: (curr) => curr === "ventas_bajo_pedido" },
+      { id: "ventas_emprendedor", label: "Paq. emprendedor", icon: Boxes, matchActive: (curr) => curr === "ventas_emprendedor" },
+      { id: "ventas_mayoreo", label: "Mayoreo", icon: ShoppingBag, matchActive: (curr) => curr === "ventas_mayoreo" }
+    ]
+  },
   {
     id: "clientes",
     label: "Clientes",

@@ -95,6 +95,15 @@ export interface Movimiento {
   venta_subtotal?: number; // Subtotal completo de mercancía de la venta
   venta_total_cobrado?: number; // Total completo cobrado al cliente
   venta_total_costos?: number; // Costos adicionales completos asumidos por el negocio
+  canal_venta?: CanalVentaId;
+  canal_venta_nombre?: string;
+  porcentaje_precio?: number;
+  afecta_stock?: boolean;
+  anticipo_porcentaje?: number;
+  venta_total_recibido?: number;
+  venta_saldo_pendiente?: number;
+  ingreso_reconocido?: number;
+  estado_pago?: "pagado" | "anticipo" | "pendiente";
   estado?: "activo" | "anulado"; // Estado del movimiento (por defecto activo)
   anulado_at?: {
     seconds: number;
@@ -132,6 +141,28 @@ export interface VentaRegistroInput {
   ubicacion_entrega_nombre?: string;
   repartidor_id?: string;
   repartidor_nombre?: string;
+  canal_venta: CanalVentaId;
+  canal_venta_nombre: string;
+  porcentaje_precio: number;
+  afecta_stock: boolean;
+  anticipo_porcentaje: number;
+  minimo_piezas: number;
+}
+
+export type CanalVentaId = "stock" | "bajo_pedido" | "paquete_emprendedor" | "mayoreo";
+
+export interface CanalVentaConfig {
+  id: CanalVentaId;
+  nombre: string;
+  porcentaje: number | null;
+  minimo_piezas: number;
+  afecta_stock: boolean;
+  anticipo_porcentaje: number;
+  precio_visible: boolean;
+}
+
+export interface ConfiguracionVentas {
+  canales: Record<CanalVentaId, CanalVentaConfig>;
 }
 
 export type TipoCliente = string;
@@ -183,6 +214,10 @@ export type NavigationTab =
   | "compras" 
   | "compras_nueva"
   | "ventas_nueva"
+  | "ventas_stock"
+  | "ventas_bajo_pedido"
+  | "ventas_emprendedor"
+  | "ventas_mayoreo"
   | "clientes"
   | "transferencias_nueva"
   | "historial" 
