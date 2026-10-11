@@ -50,6 +50,8 @@ import {
   UbicacionEntregaCatalogo,
   RepartidorCatalogo,
   ConfiguracionListasDesplegables,
+  ConfiguracionVentas,
+  CanalVentaId,
   OpcionListaConfigurable,
   ResumenVentaDiaria,
   Compra,
@@ -570,6 +572,36 @@ const normalizeListasConfig = (data?: Partial<ConfiguracionListasDesplegables> |
   metodos_pago_gasto: normalizeConfigOptions(data?.metodos_pago_gasto, DEFAULT_LISTAS_DESPLEGABLES.metodos_pago_gasto)
 });
 
+const DEFAULT_CONFIGURACION_VENTAS: ConfiguracionVentas = {
+  canales: {
+    stock: { id: "stock", nombre: "Stock", porcentaje: 150, minimo_piezas: 1, afecta_stock: true, anticipo_porcentaje: 100, precio_visible: true },
+    bajo_pedido: { id: "bajo_pedido", nombre: "Bajo pedido", porcentaje: 125, minimo_piezas: 3, afecta_stock: false, anticipo_porcentaje: 50, precio_visible: true },
+    paquete_emprendedor: { id: "paquete_emprendedor", nombre: "Paquete emprendedor", porcentaje: 110, minimo_piezas: 10, afecta_stock: true, anticipo_porcentaje: 100, precio_visible: true },
+    mayoreo: { id: "mayoreo", nombre: "Mayoreo", porcentaje: null, minimo_piezas: 30, afecta_stock: false, anticipo_porcentaje: 50, precio_visible: false }
+  }
+};
+
+const normalizeConfiguracionVentas = (data?: Partial<ConfiguracionVentas> | null): ConfiguracionVentas => {
+  const canales = { ...DEFAULT_CONFIGURACION_VENTAS.canales };
+  (Object.keys(canales) as CanalVentaId[]).forEach((id) => {
+    const fallback = canales[id];
+    const source = data?.canales?.[id];
+    if (!source) return;
+    const porcentaje = source.porcentaje === null
+      ? null
+      : Number.isFinite(Number(source.porcentaje)) && Number(source.porcentaje) >= 0
+        ? Number(source.porcentaje)
+        : fallback.porcentaje;
+    canales[id] = {
+      ...fallback,
+      porcentaje,
+      minimo_piezas: Number.isInteger(Number(source.minimo_piezas)) && Number(source.minimo_piezas) > 0 ? Number(source.minimo_piezas) : fallback.minimo_piezas,
+      anticipo_porcentaje: Number.isFinite(Number(source.anticipo_porcentaje)) ? Math.min(100, Math.max(0, Number(source.anticipo_porcentaje))) : fallback.anticipo_porcentaje
+    };
+  });
+  return { canales };
+};
+
 // --- SERVICIO DE FIRESTORE / INVENTARIO ---
 export const firestoreService = {
   isConfigured: () => isConfigured,
@@ -595,6 +627,23 @@ export const firestoreService = {
       return;
     }
     setLocalStorageItem("configuracion_listas", normalized);
+  },
+
+  getConfiguracionVentas: async (): Promise<ConfiguracionVentas> => {
+    if (isConfigured && realDb) {
+      const snapshot = await getDoc(doc(realDb, "configuracion", "ventas"));
+      return normalizeConfiguracionVentas(snapshot.exists() ? snapshot.data() as Partial<ConfiguracionVentas> : null);
+    }
+    return normalizeConfiguracionVentas(getLocalStorageItem<Partial<ConfiguracionVentas> | null>("configuracion_ventas", null));
+  },
+
+  saveConfiguracionVentas: async (config: ConfiguracionVentas): Promise<void> => {
+    const normalized = normalizeConfiguracionVentas(config);
+    if (isConfigured && realDb) {
+      await setDoc(doc(realDb, "configuracion", "ventas"), { ...normalized, actualizado_at: Timestamp.now() }, { merge: true });
+      return;
+    }
+    setLocalStorageItem("configuracion_ventas", normalized);
   },
 
   // --- ALMACENES ---
@@ -1401,6 +1450,18 @@ export const firestoreService = {
       throw new Error("El mismo producto y almacén aparece más de una vez. Unifica su cantidad en una sola partida.");
     }
 
+    const totalUnidadesVenta = normalizedItems.reduce((sum, item) => sum + item.cantidad, 0);
+    const minimoPiezas = Math.max(1, Math.floor(Number(venta.minimo_piezas) || 1));
+    if (totalUnidadesVenta < minimoPiezas) {
+      throw new Error(`${venta.canal_venta_nombre} requiere un mínimo de ${minimoPiezas} piezas.`);
+    }
+    const afectaStock = venta.afecta_stock !== false;
+    const anticipoPorcentaje = Math.min(100, Math.max(0, Number(venta.anticipo_porcentaje) || 0));
+    const porcentajePrecio = Number(venta.porcentaje_precio);
+    if (!Number.isFinite(porcentajePrecio) || porcentajePrecio < 0) {
+      throw new Error("El porcentaje aplicado al precio no es válido.");
+    }
+
     const normalizeOptionalAmount = (value: number | undefined, label: string): number => {
       if (value === undefined) return 0;
       const amount = Number(value);
@@ -1416,6 +1477,9 @@ export const firestoreService = {
     const otrosCostos = normalizeOptionalAmount(venta.otros_costos_venta, "Los otros costos");
     const ventaSubtotal = Math.round((normalizedItems.reduce((sum, item) => sum + item.total_venta, 0) + Number.EPSILON) * 100) / 100;
     const ventaTotalCobrado = Math.round((ventaSubtotal + envioCobrado + otrosCargos + Number.EPSILON) * 100) / 100;
+    const ventaTotalRecibido = Math.round((ventaTotalCobrado * anticipoPorcentaje / 100 + Number.EPSILON) * 100) / 100;
+    const ventaSaldoPendiente = Math.max(0, Math.round((ventaTotalCobrado - ventaTotalRecibido + Number.EPSILON) * 100) / 100);
+    const estadoPago = ventaSaldoPendiente > 0 ? "anticipo" : "pagado";
     const ventaTotalCostos = Math.round((costoEnvio + otrosCostos + Number.EPSILON) * 100) / 100;
     const now = new Date();
     const todayStr = getLocalDateString(now);
@@ -1425,14 +1489,14 @@ export const firestoreService = {
       const counterRef = doc(realDb, "contadores", "salida");
       const movementRefs = normalizedItems.map(() => doc(collection(realDb, "movimientos")));
       const ventaId = movementRefs[0].id;
-      const stockRefs = normalizedItems.map((item) => {
+      const stockRefs = afectaStock ? normalizedItems.map((item) => {
         const key = `${item.sku}_${item.almacen_id}`;
         return { key, ref: doc(realDb!, "stock", key) };
-      });
-      const summaryRefs = normalizedItems.map((item) => {
+      }) : [];
+      const summaryRefs = afectaStock ? normalizedItems.map((item) => {
         const key = `${todayStr}_${item.sku}_${item.almacen_id}`;
         return { key, ref: doc(realDb!, "resumen_ventas", key) };
-      });
+      }) : [];
       const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
       let generatedFolio = "";
 
@@ -1455,7 +1519,7 @@ export const firestoreService = {
 
         const periodSnap = periodRef ? await transaction.get(periodRef) : null;
 
-        normalizedItems.forEach((item, index) => {
+        if (afectaStock) normalizedItems.forEach((item, index) => {
           const currentQty = stockSnaps[index].exists()
             ? Number(stockSnaps[index].data()?.cantidad) || 0
             : 0;
@@ -1469,35 +1533,37 @@ export const firestoreService = {
         const operationTimestamp = Timestamp.now();
 
         normalizedItems.forEach((item, index) => {
-          const currentQty = stockSnaps[index].exists()
+          const currentQty = afectaStock && stockSnaps[index]?.exists()
             ? Number(stockSnaps[index].data()?.cantidad) || 0
             : 0;
-          const previousSummaryQty = summarySnaps[index].exists()
+          const previousSummaryQty = afectaStock && summarySnaps[index]?.exists()
             ? Number(summarySnaps[index].data()?.cantidad) || 0
             : 0;
-          const previousSummaryTransactions = summarySnaps[index].exists()
+          const previousSummaryTransactions = afectaStock && summarySnaps[index]?.exists()
             ? Number(summarySnaps[index].data()?.total_transacciones) || 0
             : 0;
           const isPrimaryItem = index === 0;
 
-          transaction.set(stockRefs[index].ref, {
-            id: stockRefs[index].key,
-            sku: item.sku,
-            almacen_id: item.almacen_id,
-            cantidad: currentQty - item.cantidad,
-            actualizado: operationTimestamp
-          }, { merge: true });
+          if (afectaStock) {
+            transaction.set(stockRefs[index].ref, {
+              id: stockRefs[index].key,
+              sku: item.sku,
+              almacen_id: item.almacen_id,
+              cantidad: currentQty - item.cantidad,
+              actualizado: operationTimestamp
+            }, { merge: true });
 
-          transaction.set(summaryRefs[index].ref, {
-            id: summaryRefs[index].key,
-            fecha_str: todayStr,
-            fecha: operationTimestamp,
-            sku: item.sku,
-            almacen_id: item.almacen_id,
-            cantidad: previousSummaryQty + item.cantidad,
-            total_transacciones: previousSummaryTransactions + 1,
-            actualizado: operationTimestamp
-          }, { merge: true });
+            transaction.set(summaryRefs[index].ref, {
+              id: summaryRefs[index].key,
+              fecha_str: todayStr,
+              fecha: operationTimestamp,
+              sku: item.sku,
+              almacen_id: item.almacen_id,
+              cantidad: previousSummaryQty + item.cantidad,
+              total_transacciones: previousSummaryTransactions + 1,
+              actualizado: operationTimestamp
+            }, { merge: true });
+          }
 
           transaction.set(movementRefs[index], {
             folio: generatedFolio,
@@ -1507,6 +1573,15 @@ export const firestoreService = {
             venta_subtotal: ventaSubtotal,
             venta_total_cobrado: ventaTotalCobrado,
             venta_total_costos: ventaTotalCostos,
+            canal_venta: venta.canal_venta,
+            canal_venta_nombre: venta.canal_venta_nombre,
+            porcentaje_precio: porcentajePrecio,
+            afecta_stock: afectaStock,
+            anticipo_porcentaje: anticipoPorcentaje,
+            venta_total_recibido: ventaTotalRecibido,
+            venta_saldo_pendiente: ventaSaldoPendiente,
+            estado_pago: estadoPago,
+            ...(isPrimaryItem ? { ingreso_reconocido: ventaTotalRecibido } : {}),
             sku: item.sku,
             almacen_id: item.almacen_id,
             tipo: "salida",
@@ -1558,7 +1633,7 @@ export const firestoreService = {
     }
 
     const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
-    normalizedItems.forEach((item) => {
+    if (afectaStock) normalizedItems.forEach((item) => {
       const key = `${item.sku}_${item.almacen_id}`;
       const currentQty = stockMap[key]?.cantidad || 0;
       if (currentQty < item.cantidad) {
@@ -1578,24 +1653,26 @@ export const firestoreService = {
       const previousSummary = summaryMap[summaryKey];
       const isPrimaryItem = index === 0;
 
-      stockMap[stockKey] = {
-        id: stockKey,
-        sku: item.sku,
-        almacen_id: item.almacen_id,
-        cantidad: currentQty - item.cantidad,
-        actualizado: now
-      };
+      if (afectaStock) {
+        stockMap[stockKey] = {
+          id: stockKey,
+          sku: item.sku,
+          almacen_id: item.almacen_id,
+          cantidad: currentQty - item.cantidad,
+          actualizado: now
+        };
 
-      summaryMap[summaryKey] = {
-        id: summaryKey,
-        fecha_str: todayStr,
-        fecha: now,
-        sku: item.sku,
-        almacen_id: item.almacen_id,
-        cantidad: (previousSummary?.cantidad || 0) + item.cantidad,
-        total_transacciones: (previousSummary?.total_transacciones || 0) + 1,
-        actualizado: now
-      };
+        summaryMap[summaryKey] = {
+          id: summaryKey,
+          fecha_str: todayStr,
+          fecha: now,
+          sku: item.sku,
+          almacen_id: item.almacen_id,
+          cantidad: (previousSummary?.cantidad || 0) + item.cantidad,
+          total_transacciones: (previousSummary?.total_transacciones || 0) + 1,
+          actualizado: now
+        };
+      }
 
       movimientos.push({
         id: `${ventaId}_${index + 1}`,
@@ -1606,6 +1683,15 @@ export const firestoreService = {
         venta_subtotal: ventaSubtotal,
         venta_total_cobrado: ventaTotalCobrado,
         venta_total_costos: ventaTotalCostos,
+        canal_venta: venta.canal_venta,
+        canal_venta_nombre: venta.canal_venta_nombre,
+        porcentaje_precio: porcentajePrecio,
+        afecta_stock: afectaStock,
+        anticipo_porcentaje: anticipoPorcentaje,
+        venta_total_recibido: ventaTotalRecibido,
+        venta_saldo_pendiente: ventaSaldoPendiente,
+        estado_pago: estadoPago,
+        ...(isPrimaryItem ? { ingreso_reconocido: ventaTotalRecibido } : {}),
         sku: item.sku,
         almacen_id: item.almacen_id,
         tipo: "salida",
@@ -2080,13 +2166,14 @@ export const firestoreService = {
           throw new Error("La agrupación contiene movimientos incompatibles y no puede anularse como venta.");
         }
 
-        const stockEntries = activeMovements.map(({ data }) => {
+        const inventoryMovements = activeMovements.filter(({ data }) => data.afecta_stock !== false);
+        const stockEntries = inventoryMovements.map(({ data }) => {
           const sku = String(data.sku || "").trim().toUpperCase();
           const almacenId = String(data.almacen_id || "").trim();
           const key = `${sku}_${almacenId}`;
           return { sku, almacenId, key, ref: doc(realDb!, "stock", key), cantidad: Number(data.cantidad) || 0 };
         });
-        const summaryEntries = activeMovements.map(({ data }) => {
+        const summaryEntries = inventoryMovements.map(({ data }) => {
           const sku = String(data.sku || "").trim().toUpperCase();
           const almacenId = String(data.almacen_id || "").trim();
           const fechaStr = getLocalDateString(data.fecha);
@@ -2167,24 +2254,26 @@ export const firestoreService = {
 
     activeItems.forEach(({ movement, index }) => {
       const sku = movement.sku.trim().toUpperCase();
-      const stockKey = `${sku}_${movement.almacen_id}`;
-      const currentQty = stockMap[stockKey]?.cantidad || 0;
-      stockMap[stockKey] = {
-        id: stockKey,
-        sku,
-        almacen_id: movement.almacen_id,
-        cantidad: currentQty + (Number(movement.cantidad) || 0),
-        actualizado: cancellationDate
-      };
-
-      const summaryKey = `${getLocalDateString(movement.fecha)}_${sku}_${movement.almacen_id}`;
-      if (summaryMap[summaryKey]) {
-        summaryMap[summaryKey] = {
-          ...summaryMap[summaryKey],
-          cantidad: Math.max(0, summaryMap[summaryKey].cantidad - (Number(movement.cantidad) || 0)),
-          total_transacciones: Math.max(0, summaryMap[summaryKey].total_transacciones - 1),
+      if (movement.afecta_stock !== false) {
+        const stockKey = `${sku}_${movement.almacen_id}`;
+        const currentQty = stockMap[stockKey]?.cantidad || 0;
+        stockMap[stockKey] = {
+          id: stockKey,
+          sku,
+          almacen_id: movement.almacen_id,
+          cantidad: currentQty + (Number(movement.cantidad) || 0),
           actualizado: cancellationDate
         };
+
+        const summaryKey = `${getLocalDateString(movement.fecha)}_${sku}_${movement.almacen_id}`;
+        if (summaryMap[summaryKey]) {
+          summaryMap[summaryKey] = {
+            ...summaryMap[summaryKey],
+            cantidad: Math.max(0, summaryMap[summaryKey].cantidad - (Number(movement.cantidad) || 0)),
+            total_transacciones: Math.max(0, summaryMap[summaryKey].total_transacciones - 1),
+            actualizado: cancellationDate
+          };
+        }
       }
 
       movimientos[index] = {
@@ -2547,7 +2636,7 @@ export const firestoreService = {
           const data = snapshot.data();
           const sku = String(data.sku || "").trim().toUpperCase();
           const qty = Number(data.cantidad) || 0;
-          if (data.tipo === "salida") addDelta(sku, data.almacen_id, -qty);
+          if (data.tipo === "salida" && data.afecta_stock !== false) addDelta(sku, data.almacen_id, -qty);
           if (data.tipo === "entrada") addDelta(sku, data.almacen_id, qty);
           if (data.tipo === "transferencia") {
             addDelta(sku, data.almacen_id, -qty);
@@ -2564,7 +2653,8 @@ export const firestoreService = {
         });
 
         const saleTargets = restorableTargets.filter(snapshot => snapshot.data().tipo === "salida");
-        const summaryEntries = saleTargets.map(snapshot => {
+        const inventorySaleTargets = saleTargets.filter(snapshot => snapshot.data().afecta_stock !== false);
+        const summaryEntries = inventorySaleTargets.map(snapshot => {
           const data = snapshot.data();
           const sku = String(data.sku || "").trim().toUpperCase();
           const key = `${getLocalDateString(data.fecha)}_${sku}_${data.almacen_id}`;
@@ -2612,7 +2702,7 @@ export const firestoreService = {
       const qty = Number(movimiento.cantidad) || 0;
       const originKey = `${sku}_${movimiento.almacen_id}`;
       const originQty = stockMap[originKey]?.cantidad || 0;
-      if ((movimiento.tipo === "salida" || movimiento.tipo === "transferencia") && originQty < qty) throw new Error(`No hay stock suficiente de ${sku} para restaurar la operación.`);
+      if (((movimiento.tipo === "salida" && movimiento.afecta_stock !== false) || movimiento.tipo === "transferencia") && originQty < qty) throw new Error(`No hay stock suficiente de ${sku} para restaurar la operación.`);
     });
     const now = new Date();
     targets.forEach(target => {
@@ -2628,14 +2718,14 @@ export const firestoreService = {
       const qty = Number(target.cantidad) || 0;
       const originKey = `${sku}_${target.almacen_id}`;
       const originQty = stockMap[originKey]?.cantidad || 0;
-      if (target.tipo === "salida") stockMap[originKey] = { ...(stockMap[originKey] || { id: originKey, sku, almacen_id: target.almacen_id }), cantidad: originQty - qty, actualizado: now } as StockItem;
+      if (target.tipo === "salida" && target.afecta_stock !== false) stockMap[originKey] = { ...(stockMap[originKey] || { id: originKey, sku, almacen_id: target.almacen_id }), cantidad: originQty - qty, actualizado: now } as StockItem;
       if (target.tipo === "entrada") stockMap[originKey] = { ...(stockMap[originKey] || { id: originKey, sku, almacen_id: target.almacen_id }), cantidad: originQty + qty, actualizado: now } as StockItem;
       if (target.tipo === "transferencia" && target.almacen_destino_id) {
         const destKey = `${sku}_${target.almacen_destino_id}`;
         stockMap[originKey] = { ...stockMap[originKey], cantidad: originQty - qty, actualizado: now };
         stockMap[destKey] = { ...(stockMap[destKey] || { id: destKey, sku, almacen_id: target.almacen_destino_id }), cantidad: (stockMap[destKey]?.cantidad || 0) + qty, actualizado: now } as StockItem;
       }
-      if (target.tipo === "salida") {
+      if (target.tipo === "salida" && target.afecta_stock !== false) {
         const summaryKey = `${getLocalDateString(target.fecha)}_${sku}_${target.almacen_id}`;
         const previous = summaryMap[summaryKey];
         summaryMap[summaryKey] = { id: summaryKey, fecha_str: getLocalDateString(target.fecha), fecha: target.fecha, sku, almacen_id: target.almacen_id, cantidad: (previous?.cantidad || 0) + qty, total_transacciones: (previous?.total_transacciones || 0) + 1, actualizado: now };
@@ -2705,6 +2795,15 @@ export const firestoreService = {
             venta_subtotal: typeof data.venta_subtotal === "number" ? data.venta_subtotal : undefined,
             venta_total_cobrado: typeof data.venta_total_cobrado === "number" ? data.venta_total_cobrado : undefined,
             venta_total_costos: typeof data.venta_total_costos === "number" ? data.venta_total_costos : undefined,
+            canal_venta: data.canal_venta || undefined,
+            canal_venta_nombre: data.canal_venta_nombre || undefined,
+            porcentaje_precio: typeof data.porcentaje_precio === "number" ? data.porcentaje_precio : undefined,
+            afecta_stock: typeof data.afecta_stock === "boolean" ? data.afecta_stock : undefined,
+            anticipo_porcentaje: typeof data.anticipo_porcentaje === "number" ? data.anticipo_porcentaje : undefined,
+            venta_total_recibido: typeof data.venta_total_recibido === "number" ? data.venta_total_recibido : undefined,
+            venta_saldo_pendiente: typeof data.venta_saldo_pendiente === "number" ? data.venta_saldo_pendiente : undefined,
+            ingreso_reconocido: typeof data.ingreso_reconocido === "number" ? data.ingreso_reconocido : undefined,
+            estado_pago: data.estado_pago || undefined,
             sku: data.sku,
             almacen_id: data.almacen_id,
             tipo: data.tipo,
@@ -2763,6 +2862,15 @@ export const firestoreService = {
               venta_subtotal: typeof data.venta_subtotal === "number" ? data.venta_subtotal : undefined,
               venta_total_cobrado: typeof data.venta_total_cobrado === "number" ? data.venta_total_cobrado : undefined,
               venta_total_costos: typeof data.venta_total_costos === "number" ? data.venta_total_costos : undefined,
+              canal_venta: data.canal_venta || undefined,
+              canal_venta_nombre: data.canal_venta_nombre || undefined,
+              porcentaje_precio: typeof data.porcentaje_precio === "number" ? data.porcentaje_precio : undefined,
+              afecta_stock: typeof data.afecta_stock === "boolean" ? data.afecta_stock : undefined,
+              anticipo_porcentaje: typeof data.anticipo_porcentaje === "number" ? data.anticipo_porcentaje : undefined,
+              venta_total_recibido: typeof data.venta_total_recibido === "number" ? data.venta_total_recibido : undefined,
+              venta_saldo_pendiente: typeof data.venta_saldo_pendiente === "number" ? data.venta_saldo_pendiente : undefined,
+              ingreso_reconocido: typeof data.ingreso_reconocido === "number" ? data.ingreso_reconocido : undefined,
+              estado_pago: data.estado_pago || undefined,
               sku: data.sku,
               almacen_id: data.almacen_id,
               tipo: data.tipo,
@@ -2920,6 +3028,15 @@ export const firestoreService = {
             venta_subtotal: typeof data.venta_subtotal === "number" ? data.venta_subtotal : undefined,
             venta_total_cobrado: typeof data.venta_total_cobrado === "number" ? data.venta_total_cobrado : undefined,
             venta_total_costos: typeof data.venta_total_costos === "number" ? data.venta_total_costos : undefined,
+            canal_venta: data.canal_venta || undefined,
+            canal_venta_nombre: data.canal_venta_nombre || undefined,
+            porcentaje_precio: typeof data.porcentaje_precio === "number" ? data.porcentaje_precio : undefined,
+            afecta_stock: typeof data.afecta_stock === "boolean" ? data.afecta_stock : undefined,
+            anticipo_porcentaje: typeof data.anticipo_porcentaje === "number" ? data.anticipo_porcentaje : undefined,
+            venta_total_recibido: typeof data.venta_total_recibido === "number" ? data.venta_total_recibido : undefined,
+            venta_saldo_pendiente: typeof data.venta_saldo_pendiente === "number" ? data.venta_saldo_pendiente : undefined,
+            ingreso_reconocido: typeof data.ingreso_reconocido === "number" ? data.ingreso_reconocido : undefined,
+            estado_pago: data.estado_pago || undefined,
             sku: data.sku,
             almacen_id: data.almacen_id,
             tipo: data.tipo,
@@ -3100,6 +3217,15 @@ export const firestoreService = {
             venta_subtotal: typeof data.venta_subtotal === "number" ? data.venta_subtotal : undefined,
             venta_total_cobrado: typeof data.venta_total_cobrado === "number" ? data.venta_total_cobrado : undefined,
             venta_total_costos: typeof data.venta_total_costos === "number" ? data.venta_total_costos : undefined,
+            canal_venta: data.canal_venta || undefined,
+            canal_venta_nombre: data.canal_venta_nombre || undefined,
+            porcentaje_precio: typeof data.porcentaje_precio === "number" ? data.porcentaje_precio : undefined,
+            afecta_stock: typeof data.afecta_stock === "boolean" ? data.afecta_stock : undefined,
+            anticipo_porcentaje: typeof data.anticipo_porcentaje === "number" ? data.anticipo_porcentaje : undefined,
+            venta_total_recibido: typeof data.venta_total_recibido === "number" ? data.venta_total_recibido : undefined,
+            venta_saldo_pendiente: typeof data.venta_saldo_pendiente === "number" ? data.venta_saldo_pendiente : undefined,
+            ingreso_reconocido: typeof data.ingreso_reconocido === "number" ? data.ingreso_reconocido : undefined,
+            estado_pago: data.estado_pago || undefined,
             sku: data.sku,
             almacen_id: data.almacen_id,
             tipo: "salida",
@@ -5672,6 +5798,15 @@ export const firestoreService = {
             venta_subtotal: typeof data.venta_subtotal === "number" ? data.venta_subtotal : undefined,
             venta_total_cobrado: typeof data.venta_total_cobrado === "number" ? data.venta_total_cobrado : undefined,
             venta_total_costos: typeof data.venta_total_costos === "number" ? data.venta_total_costos : undefined,
+            canal_venta: data.canal_venta || undefined,
+            canal_venta_nombre: data.canal_venta_nombre || undefined,
+            porcentaje_precio: typeof data.porcentaje_precio === "number" ? data.porcentaje_precio : undefined,
+            afecta_stock: typeof data.afecta_stock === "boolean" ? data.afecta_stock : undefined,
+            anticipo_porcentaje: typeof data.anticipo_porcentaje === "number" ? data.anticipo_porcentaje : undefined,
+            venta_total_recibido: typeof data.venta_total_recibido === "number" ? data.venta_total_recibido : undefined,
+            venta_saldo_pendiente: typeof data.venta_saldo_pendiente === "number" ? data.venta_saldo_pendiente : undefined,
+            ingreso_reconocido: typeof data.ingreso_reconocido === "number" ? data.ingreso_reconocido : undefined,
+            estado_pago: data.estado_pago || undefined,
             sku: data.sku,
             almacen_id: data.almacen_id,
             tipo: data.tipo,
@@ -5846,8 +5981,11 @@ export const firestoreService = {
       const qty = Number(v.cantidad) || 0;
       unidadesVendidas += qty;
 
+      const usaIngresoReconocido = typeof v.venta_total_recibido === "number" && !isNaN(v.venta_total_recibido);
       let mercanciaVal = 0;
-      if (typeof v.total_venta === "number" && !isNaN(v.total_venta)) {
+      if (usaIngresoReconocido) {
+        mercanciaVal = typeof v.ingreso_reconocido === "number" && !isNaN(v.ingreso_reconocido) ? Math.max(0, v.ingreso_reconocido) : 0;
+      } else if (typeof v.total_venta === "number" && !isNaN(v.total_venta)) {
         mercanciaVal = v.total_venta;
       } else if (typeof v.precio_unitario_venta === "number" && !isNaN(v.precio_unitario_venta)) {
         mercanciaVal = v.precio_unitario_venta * qty;
@@ -5855,10 +5993,10 @@ export const firestoreService = {
         ventasSinImporteIds.add(ventaKey);
       }
 
-      const envioCobrado = typeof v.envio_cobrado_cliente === "number" && !isNaN(v.envio_cobrado_cliente)
+      const envioCobrado = !usaIngresoReconocido && typeof v.envio_cobrado_cliente === "number" && !isNaN(v.envio_cobrado_cliente)
         ? Math.max(0, v.envio_cobrado_cliente)
         : 0;
-      const otrosCargos = typeof v.otros_cargos_cliente === "number" && !isNaN(v.otros_cargos_cliente)
+      const otrosCargos = !usaIngresoReconocido && typeof v.otros_cargos_cliente === "number" && !isNaN(v.otros_cargos_cliente)
         ? Math.max(0, v.otros_cargos_cliente)
         : 0;
 
@@ -5962,7 +6100,9 @@ export const firestoreService = {
       const day = getDayFromItemDate(v.fecha);
       if (day >= 1 && day <= daysInMonth) {
         let ingresoVenta = 0;
-        if (typeof v.total_cobrado === "number" && !isNaN(v.total_cobrado)) {
+        if (typeof v.venta_total_recibido === "number" && !isNaN(v.venta_total_recibido)) {
+          ingresoVenta = typeof v.ingreso_reconocido === "number" && !isNaN(v.ingreso_reconocido) ? Math.max(0, v.ingreso_reconocido) : 0;
+        } else if (typeof v.total_cobrado === "number" && !isNaN(v.total_cobrado)) {
           ingresoVenta = v.total_cobrado;
         } else {
           let mercancia = 0;

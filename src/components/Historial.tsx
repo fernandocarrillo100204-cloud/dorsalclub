@@ -703,9 +703,20 @@ export default function Historial({
 
                       {/* Reference string & Comments */}
                       <td className="py-3 px-3 text-zinc-500 text-xs max-w-xs">
+                        {isSalida && mov.canal_venta_nombre && (
+                          <div className="flex flex-wrap gap-1 mb-1.5">
+                            <span className="px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-[10px] font-semibold text-zinc-700 dark:text-zinc-300">{mov.canal_venta_nombre}</span>
+                            {mov.afecta_stock === false && <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-[10px] font-semibold text-amber-700 dark:text-amber-300">Bajo pedido</span>}
+                          </div>
+                        )}
                         <div className="truncate" title={mov.referencia}>
                           {mov.referencia || "—"}
                         </div>
+                        {mov.venta_partida === 1 && typeof mov.venta_total_recibido === "number" && typeof mov.venta_saldo_pendiente === "number" && mov.venta_saldo_pendiente > 0 && (
+                          <div className="mt-1.5 text-[10px] text-emerald-700 dark:text-emerald-400">
+                            Anticipo: <span className="font-mono font-bold">${mov.venta_total_recibido.toFixed(2)}</span> · Saldo: <span className="font-mono font-bold text-amber-700 dark:text-amber-400">${mov.venta_saldo_pendiente.toFixed(2)}</span>
+                          </div>
+                        )}
                         {mov.comentarios_venta && (
                           <div
                             className="text-[11px] text-zinc-700 dark:text-zinc-300 mt-1 p-1.5 rounded-lg bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-100 dark:border-zinc-700/60 line-clamp-2"

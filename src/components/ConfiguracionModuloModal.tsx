@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Check, Edit3, MapPin, Plus, Power, Settings, Trash2, UserRound, X } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
-import { ConfiguracionListasDesplegables, OpcionListaConfigurable } from "../types";
+import { CanalVentaId, ConfiguracionListasDesplegables, ConfiguracionVentas, OpcionListaConfigurable } from "../types";
 
 export type ModuloConfigurable = "ventas" | "compras" | "clientes" | "finanzas";
 type ConfigKey = keyof ConfiguracionListasDesplegables;
@@ -28,11 +28,12 @@ interface Props {
 
 export default function ConfiguracionModuloModal({ isOpen, module, onClose, onSaved }: Props) {
   const definitions = useMemo(() => module === "ventas"
-    ? [{ key: "ubicaciones", label: "Ubicaciones de entrega", singular: "ubicación" }, { key: "repartidores", label: "Quién entrega", singular: "persona" }]
+    ? [{ key: "canales", label: "Canales de venta", singular: "canal" }, { key: "ubicaciones", label: "Ubicaciones de entrega", singular: "ubicación" }, { key: "repartidores", label: "Quién entrega", singular: "persona" }]
     : MODULE_LISTS[module], [module]);
   const [activeKey, setActiveKey] = useState<string>(definitions[0].key);
   const [config, setConfig] = useState<ConfiguracionListasDesplegables | null>(null);
   const [salesLists, setSalesLists] = useState<Record<string, OpcionListaConfigurable[]>>({ ubicaciones: [], repartidores: [] });
+  const [salesConfig, setSalesConfig] = useState<ConfiguracionVentas | null>(null);
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
@@ -45,8 +46,9 @@ export default function ConfiguracionModuloModal({ isOpen, module, onClose, onSa
     setError(null);
     try {
       if (module === "ventas") {
-        const [ubicaciones, repartidores] = await Promise.all([firestoreService.getUbicacionesEntrega(), firestoreService.getRepartidores()]);
+        const [ubicaciones, repartidores, ventaConfig] = await Promise.all([firestoreService.getUbicacionesEntrega(), firestoreService.getRepartidores(), firestoreService.getConfiguracionVentas()]);
         setSalesLists({ ubicaciones, repartidores });
+        setSalesConfig(ventaConfig);
       } else {
         setConfig(await firestoreService.getConfiguracionListasDesplegables());
       }
@@ -68,6 +70,28 @@ export default function ConfiguracionModuloModal({ isOpen, module, onClose, onSa
   if (!isOpen) return null;
   const currentDefinition = definitions.find(item => item.key === activeKey) || definitions[0];
   const items = module === "ventas" ? salesLists[activeKey] || [] : config?.[activeKey as ConfigKey] || [];
+
+  const saveSalesChannel = async (id: CanalVentaId, field: "porcentaje" | "minimo_piezas" | "anticipo_porcentaje", value: number) => {
+    if (!salesConfig) return;
+    const channel = salesConfig.canales[id];
+    const nextValue = field === "minimo_piezas"
+      ? Math.max(1, Math.floor(value || 1))
+      : Math.max(0, field === "anticipo_porcentaje" ? Math.min(100, value || 0) : value || 0);
+    const next: ConfiguracionVentas = {
+      canales: { ...salesConfig.canales, [id]: { ...channel, [field]: nextValue } }
+    };
+    setSaving(true);
+    setError(null);
+    try {
+      await firestoreService.saveConfiguracionVentas(next);
+      setSalesConfig(next);
+      onSaved?.();
+    } catch (err: any) {
+      setError(err?.message || "No se pudo guardar la configuración de ventas.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const persist = async (nextItems: OpcionListaConfigurable[]) => {
     if (!config) return;
@@ -154,6 +178,28 @@ export default function ConfiguracionModuloModal({ isOpen, module, onClose, onSa
           {definitions.map(definition => <button key={definition.key} type="button" onClick={() => { setActiveKey(definition.key); setEditingId(null); }} className={`px-4 py-3 text-xs font-semibold whitespace-nowrap border-b-2 ${activeKey === definition.key ? "border-zinc-900 dark:border-white text-zinc-900 dark:text-white" : "border-transparent text-zinc-500"}`}>{definition.label}</button>)}
         </div>
         <div className="p-5 overflow-y-auto space-y-4">
+          {module === "ventas" && activeKey === "canales" && salesConfig ? (
+            <div className="space-y-3">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">El precio se calcula como costo + porcentaje. Ejemplo: costo $100 + 150% = $250.</p>
+              {(Object.keys(salesConfig.canales) as CanalVentaId[]).map((id) => {
+                const channel = salesConfig.canales[id];
+                return (
+                  <div key={id} className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div><h3 className="text-sm font-bold text-zinc-900 dark:text-white">{channel.nombre}</h3><p className="text-[11px] text-zinc-500">{channel.afecta_stock ? "Descuenta existencias" : "Bajo pedido · no descuenta existencias"}</p></div>
+                      {id === "mayoreo" && <span className="text-[10px] px-2 py-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">Porcentaje por venta</span>}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <label className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">Porcentaje sobre costo<input key={`${id}-porcentaje-${channel.porcentaje}`} type="number" min="0" step="1" defaultValue={channel.porcentaje ?? ""} disabled={id === "mayoreo" || saving} onBlur={(event) => saveSalesChannel(id, "porcentaje", Number(event.target.value))} className="mt-1 w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 disabled:opacity-50" placeholder={id === "mayoreo" ? "Se captura por venta" : "0"} /></label>
+                      <label className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">Mínimo de piezas<input key={`${id}-minimo-${channel.minimo_piezas}`} type="number" min="1" step="1" defaultValue={channel.minimo_piezas} disabled={saving} onBlur={(event) => saveSalesChannel(id, "minimo_piezas", Number(event.target.value))} className="mt-1 w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800" /></label>
+                      <label className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">Anticipo requerido (%)<input key={`${id}-anticipo-${channel.anticipo_porcentaje}`} type="number" min="0" max="100" step="1" defaultValue={channel.anticipo_porcentaje} disabled={saving} onBlur={(event) => saveSalesChannel(id, "anticipo_porcentaje", Number(event.target.value))} className="mt-1 w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800" /></label>
+                    </div>
+                  </div>
+                );
+              })}
+              {error && <div className="text-xs text-rose-600 dark:text-rose-400">{error} <button type="button" onClick={load} className="underline font-semibold">Reintentar</button></div>}
+            </div>
+          ) : <>
           <div className="flex flex-col sm:flex-row gap-2">
             <input value={newName} onChange={event => setNewName(event.target.value)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); add(); } }} placeholder={`Nueva ${currentDefinition.singular}`} className="flex-1 px-3 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white" />
             <button type="button" onClick={add} disabled={saving || !newName.trim()} className="px-4 py-2 rounded-xl bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-xs font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50"><Plus className="w-4 h-4" />Agregar</button>
@@ -167,6 +213,7 @@ export default function ConfiguracionModuloModal({ isOpen, module, onClose, onSa
               {editingId === item.id ? <><button type="button" onClick={() => { const nombre = editingName.trim(); if (nombre) update(item, { nombre }).then(() => setEditingId(null)); }} className="p-1.5 text-emerald-600"><Check className="w-4 h-4" /></button><button type="button" onClick={() => setEditingId(null)} className="p-1.5 text-zinc-400"><X className="w-4 h-4" /></button></> : <><button type="button" onClick={() => { setEditingId(item.id); setEditingName(item.nombre); }} className="p-1.5 text-zinc-500" title="Editar"><Edit3 className="w-4 h-4" /></button><button type="button" onClick={() => update(item, { activa: !item.activa })} className="p-1.5 text-zinc-500" title={item.activa ? "Desactivar" : "Activar"}><Power className="w-4 h-4" /></button>{item.activa && <button type="button" onClick={() => archive(item)} className="p-1.5 text-rose-500" title="Quitar"><Trash2 className="w-4 h-4" /></button>}</>}
             </div>)}
           </div>}
+          </>}
         </div>
         <div className="px-5 py-4 border-t border-zinc-200 dark:border-zinc-800 flex justify-end"><button type="button" onClick={onClose} className="px-5 py-2 rounded-xl bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-xs font-bold">Listo</button></div>
       </div>
