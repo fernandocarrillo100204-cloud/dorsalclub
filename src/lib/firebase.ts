@@ -3331,32 +3331,8 @@ export const firestoreService = {
           hasMore
         };
       } catch (err: any) {
-        console.warn("Error en query indexado de cliente en Firestore, ejecutando fallback:", err);
-        // Fallback local o sin índice compuesto
-        let movs = getLocalStorageItem<Movimiento[]>("movimientos", []);
-        movs = movs.filter(m => m.cliente_id === options.clienteId && m.tipo === "salida");
-        movs = movs.map(m => ({
-          ...m,
-          fecha: typeof m.fecha === "string" ? new Date(m.fecha) : (m.fecha as any)?.toDate ? (m.fecha as any).toDate() : m.fecha,
-          estado: m.estado || "activo",
-          anulado_at: m.anulado_at ? (typeof m.anulado_at === "string" ? new Date(m.anulado_at) : (m.anulado_at as any)?.toDate ? (m.anulado_at as any).toDate() : m.anulado_at) : undefined
-        }));
-        movs.sort((a, b) => {
-          const timeA = a.fecha instanceof Date ? a.fecha.getTime() : new Date((a.fecha as any).seconds * 1000).getTime();
-          const timeB = b.fecha instanceof Date ? b.fecha.getTime() : new Date((b.fecha as any).seconds * 1000).getTime();
-          return timeB - timeA;
-        });
-
-        const startIndex = typeof options.lastDoc === "number" ? options.lastDoc : 0;
-        const pageItems = movs.slice(startIndex, startIndex + pageSize);
-        const nextIndex = startIndex + pageItems.length;
-        const hasMore = nextIndex < movs.length;
-
-        return {
-          items: pageItems,
-          lastDoc: nextIndex,
-          hasMore
-        };
+        console.error("Error en consulta indexada de movimientos por cliente:", err);
+        throw err;
       }
     }
 

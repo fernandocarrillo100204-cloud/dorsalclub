@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from "react";
-import { Cliente, Movimiento, TipoCliente, EstadoCliente, MarcaCatalogo, ConfiguracionListasDesplegables, getTotalCobradoVenta } from "../types";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { Cliente, Movimiento, TipoCliente, EstadoCliente, MarcaCatalogo, ConfiguracionListasDesplegables, PedidoVenta, getTotalCobradoVenta } from "../types";
 import { firestoreService } from "../lib/firebase";
 import ClienteModal from "./ClienteModal";
 import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
@@ -39,11 +39,13 @@ import {
 } from "lucide-react";
 
 interface ClientesProps {
+  preselectedClienteId?: string;
   onNavigateToVenta?: (clienteId?: string) => void;
   onNavigateToHistory?: (clienteId?: string) => void;
+  onNavigateToPedidos?: () => void;
 }
 
-export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: ClientesProps) {
+export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNavigateToHistory, onNavigateToPedidos }: ClientesProps) {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [marcas, setMarcas] = useState<MarcaCatalogo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,7 +74,10 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
   // Detail Drawer / Modal
   const [selectedCliente, setSelectedCliente] = useState<Cliente | null>(null);
   const [clienteMovimientos, setClienteMovimientos] = useState<Movimiento[]>([]);
+  const [clientePedidos, setClientePedidos] = useState<PedidoVenta[]>([]);
   const [loadingMovimientos, setLoadingMovimientos] = useState(false);
+  const [clienteDetalleError, setClienteDetalleError] = useState("");
+  const openedFromRouteRef = useRef("");
 
   // Status toggle in progress ID
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -133,36 +138,39 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
     [marcas]
   );
 
+  useEffect(() => {
+    if (!preselectedClienteId || openedFromRouteRef.current === preselectedClienteId) return;
+    const target = clientes.find(cliente => cliente.id === preselectedClienteId);
+    if (!target) return;
+    openedFromRouteRef.current = preselectedClienteId;
+    setSelectedCliente(target);
+  }, [clientes, preselectedClienteId]);
+
   // Fetch client movements when detail drawer is opened
   useEffect(() => {
     if (!selectedCliente?.id) {
       setClienteMovimientos([]);
+      setClientePedidos([]);
       return;
     }
 
     let isMounted = true;
     setLoadingMovimientos(true);
+    setClienteDetalleError("");
 
-    // Fetch movements to inspect sales for this client
-    firestoreService.getMovimientosPaginated({ pageSize: 150 })
-      .then((res) => {
+    Promise.all([
+      firestoreService.getMovimientosByClientePaginated({ clienteId: selectedCliente.id, pageSize: 200 }),
+      firestoreService.getPedidosVenta()
+    ])
+      .then(([res, pedidos]) => {
         if (!isMounted) return;
-        // Filter by salidas matching this client ID or normalized name
         const cId = selectedCliente.id;
-        const cNorm = selectedCliente.nombre_normalizado;
-
-        const filtered = res.items.filter((m) => {
-          if (m.tipo !== "salida") return false;
-          if (m.cliente_id && m.cliente_id === cId) return true;
-          if (m.cliente_nombre && m.cliente_nombre.toLowerCase().trim() === selectedCliente.nombre_completo.toLowerCase().trim()) return true;
-          if (m.referencia && cNorm && m.referencia.toLowerCase().includes(cNorm)) return true;
-          return false;
-        });
-
-        setClienteMovimientos(filtered);
+        setClienteMovimientos(res.items.filter(m => m.tipo === "salida"));
+        setClientePedidos(pedidos.filter(pedido => pedido.cliente_id === cId));
       })
       .catch((err) => {
         console.warn("Error cargando compras del cliente:", err);
+        if (isMounted) setClienteDetalleError("No fue posible cargar el historial y los pedidos de este cliente.");
       })
       .finally(() => {
         if (isMounted) setLoadingMovimientos(false);
@@ -174,47 +182,47 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
   }, [selectedCliente]);
 
   // Client metrics calculated on the fly
-  const clientMetrics = useMemo(() => {
-    if (!clienteMovimientos.length) {
-      return {
-        totalComprado: 0,
-        pedidosCount: 0,
-        ticketPromedio: 0,
-        ultimaCompra: null as Date | null
-      };
-    }
-
-    const activeMovs = clienteMovimientos.filter(m => m.estado !== "anulado");
-    let total = 0;
-    let latestDate: Date | null = null;
-
-    activeMovs.forEach((m) => {
-      const saleTotal = getTotalCobradoVenta(m);
-      total += saleTotal;
-
-      const dateObj = m.fecha instanceof Date 
-        ? m.fecha 
-        : (m.fecha as any)?.toDate 
-          ? (m.fecha as any).toDate() 
-          : new Date((m.fecha as any)?.seconds ? (m.fecha as any).seconds * 1000 : (m.fecha as any));
-
-      if (!latestDate || dateObj > latestDate) {
-        latestDate = dateObj;
-      }
+  const groupedSales = useMemo(() => {
+    const groups = new Map<string, Movimiento[]>();
+    clienteMovimientos.filter(m => m.estado !== "anulado" && !m.subtipo).forEach(m => {
+      const key = m.venta_id || m.folio || m.id || `${m.sku}-${groups.size}`;
+      groups.set(key, [...(groups.get(key) || []), m]);
     });
-
-    const pedidosCount = new Set(
-      activeMovs.map((movimiento) => movimiento.venta_id || movimiento.folio || movimiento.id)
-    ).size;
-    const ticketPromedio = pedidosCount > 0 ? total / pedidosCount : 0;
-
-    return {
-      totalComprado: total,
-      pedidosCount,
-      ticketPromedio,
-      ultimaCompra: latestDate
-    };
+    return Array.from(groups.values()).map(items => {
+      const ordered = [...items].sort((a, b) => (a.venta_partida || 0) - (b.venta_partida || 0));
+      const primary = ordered[0];
+      const total = typeof primary.venta_total_cobrado === "number"
+        ? primary.venta_total_cobrado
+        : ordered.reduce((sum, item) => sum + getTotalCobradoVenta(item), 0);
+      return {
+        key: primary.venta_id || primary.folio || primary.id || `${primary.sku}-${primary.fecha}`,
+        folio: primary.folio || "Venta",
+        fecha: primary.fecha,
+        canal: primary.canal_venta_nombre,
+        total,
+        unidades: ordered.reduce((sum, item) => sum + (Number(item.cantidad) || 0), 0),
+        items: ordered,
+        estado: primary.estado
+      };
+    }).sort((a, b) => {
+      const toTime = (value: any) => value instanceof Date ? value.getTime() : value?.toDate ? value.toDate().getTime() : new Date(value?.seconds ? value.seconds * 1000 : value).getTime();
+      return toTime(b.fecha) - toTime(a.fecha);
+    });
   }, [clienteMovimientos]);
+
+  const clientMetrics = useMemo(() => {
+    const totalComprado = groupedSales.reduce((sum, sale) => sum + sale.total, 0);
+    const pedidosPendientes = clientePedidos.filter(pedido => pedido.estado !== "entregado");
+    return {
+      totalComprado,
+      ventasCount: groupedSales.length,
+      unidadesCompradas: groupedSales.reduce((sum, sale) => sum + sale.unidades, 0),
+      ticketPromedio: groupedSales.length > 0 ? totalComprado / groupedSales.length : 0,
+      ultimaCompra: groupedSales[0]?.fecha || null,
+      pedidosPendientes: pedidosPendientes.length,
+      saldoPendiente: pedidosPendientes.reduce((sum, pedido) => sum + pedido.saldo, 0)
+    };
+  }, [groupedSales, clientePedidos]);
 
   // Filtered clients list
   const filteredClientes = useMemo(() => {
@@ -721,6 +729,11 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
 
             {/* Drawer Body */}
             <div className="flex-1 overflow-y-auto p-5 space-y-6">
+              {clienteDetalleError && (
+                <div className="p-3 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30 text-xs text-rose-700 dark:text-rose-300">
+                  {clienteDetalleError}
+                </div>
+              )}
               {/* Quick Actions & Status banner */}
               <div className="flex items-center justify-between p-3.5 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800 rounded-2xl">
                 <div className="flex items-center gap-2">
@@ -761,7 +774,7 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
                 <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2.5">
                   Métricas Comerciales
                 </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                   <div className="p-3 bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-800 rounded-xl">
                     <span className="text-[10px] text-zinc-400 uppercase font-bold block">Total Comprado</span>
                     <span className="text-sm font-bold text-zinc-900 dark:text-white font-mono mt-0.5 block">
@@ -770,9 +783,9 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
                   </div>
 
                   <div className="p-3 bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-800 rounded-xl">
-                    <span className="text-[10px] text-zinc-400 uppercase font-bold block">Pedidos / Salidas</span>
+                    <span className="text-[10px] text-zinc-400 uppercase font-bold block">Ventas</span>
                     <span className="text-sm font-bold text-zinc-900 dark:text-white font-mono mt-0.5 block">
-                      {clientMetrics.pedidosCount}
+                      {clientMetrics.ventasCount}
                     </span>
                   </div>
 
@@ -780,6 +793,27 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
                     <span className="text-[10px] text-zinc-400 uppercase font-bold block">Ticket Promedio</span>
                     <span className="text-sm font-bold text-zinc-900 dark:text-white font-mono mt-0.5 block">
                       ${clientMetrics.ticketPromedio.toFixed(2)}
+                    </span>
+                  </div>
+
+                  <div className="p-3 bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-800 rounded-xl">
+                    <span className="text-[10px] text-zinc-400 uppercase font-bold block">Unidades</span>
+                    <span className="text-sm font-bold text-zinc-900 dark:text-white font-mono mt-0.5 block">
+                      {clientMetrics.unidadesCompradas}
+                    </span>
+                  </div>
+
+                  <div className="p-3 bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-800 rounded-xl">
+                    <span className="text-[10px] text-zinc-400 uppercase font-bold block">Pedidos abiertos</span>
+                    <span className="text-sm font-bold text-zinc-900 dark:text-white font-mono mt-0.5 block">
+                      {clientMetrics.pedidosPendientes}
+                    </span>
+                  </div>
+
+                  <div className="p-3 bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-800 rounded-xl">
+                    <span className="text-[10px] text-zinc-400 uppercase font-bold block">Saldo pendiente</span>
+                    <span className={`text-sm font-bold font-mono mt-0.5 block ${clientMetrics.saldoPendiente > 0 ? "text-amber-600" : "text-zinc-900 dark:text-white"}`}>
+                      ${clientMetrics.saldoPendiente.toFixed(2)}
                     </span>
                   </div>
 
@@ -801,16 +835,12 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <span className="text-[11px] text-zinc-400 block">Teléfono / WhatsApp:</span>
-                    <span className="font-medium text-zinc-800 dark:text-zinc-200 font-mono">
-                      {selectedCliente.telefono || "No registrado"}
-                    </span>
+                    {formatWhatsAppLink(selectedCliente.telefono) ? <a href={formatWhatsAppLink(selectedCliente.telefono)!} target="_blank" rel="noreferrer" className="font-medium text-emerald-600 dark:text-emerald-400 font-mono hover:underline">{selectedCliente.telefono}</a> : <span className="font-medium text-zinc-800 dark:text-zinc-200">No registrado</span>}
                   </div>
 
                   <div>
                     <span className="text-[11px] text-zinc-400 block">Instagram:</span>
-                    <span className="font-medium text-zinc-800 dark:text-zinc-200">
-                      {selectedCliente.instagram ? `@${selectedCliente.instagram.replace(/^@+/, "")}` : "No registrado"}
-                    </span>
+                    {formatInstagramLink(selectedCliente.instagram) ? <a href={formatInstagramLink(selectedCliente.instagram)!} target="_blank" rel="noreferrer" className="font-medium text-pink-600 dark:text-pink-400 hover:underline">@{selectedCliente.instagram?.replace(/^@+/, "")}</a> : <span className="font-medium text-zinc-800 dark:text-zinc-200">No registrado</span>}
                   </div>
 
                   <div>
@@ -891,6 +921,41 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
                 )}
               </div>
 
+              {clientePedidos.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-amber-500" />
+                      Pedidos y saldos
+                    </h3>
+                    {onNavigateToPedidos && (
+                      <button type="button" onClick={onNavigateToPedidos} className="text-xs text-rose-500 hover:underline flex items-center gap-1 font-semibold">
+                        Ver seguimiento <ChevronRight className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden divide-y divide-zinc-200 dark:divide-zinc-800">
+                    {clientePedidos.map(pedido => (
+                      <div key={pedido.venta_id} className="p-3 bg-white dark:bg-zinc-900/60 flex items-center justify-between gap-3 text-xs">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-zinc-900 dark:text-white">{pedido.folio}</span>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${pedido.estado === "entregado" ? "bg-emerald-500/10 text-emerald-600" : pedido.estado === "pagado" ? "bg-blue-500/10 text-blue-600" : "bg-amber-500/10 text-amber-600"}`}>
+                              {pedido.estado === "entregado" ? "Entregado" : pedido.estado === "pagado" ? "Pagado" : "Por pagar"}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-zinc-500 mt-1">{pedido.canal_venta_nombre} · {pedido.items.reduce((sum, item) => sum + item.cantidad, 0)} unidades</p>
+                        </div>
+                        <div className="text-right">
+                          <strong className="block text-zinc-900 dark:text-white">${pedido.total.toFixed(2)}</strong>
+                          <span className={pedido.saldo > 0 ? "text-amber-600" : "text-zinc-400"}>Saldo: ${pedido.saldo.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Purchase History / Salidas */}
               <div>
                 <div className="flex items-center justify-between mb-3">
@@ -915,7 +980,7 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
                     <span className="w-4 h-4 border-2 border-rose-500 border-t-transparent rounded-full animate-spin" />
                     <span>Buscando movimientos del cliente...</span>
                   </div>
-                ) : clienteMovimientos.length === 0 ? (
+                ) : groupedSales.length === 0 ? (
                   <div className="p-6 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl text-center text-xs text-zinc-400 space-y-2">
                     <p>Este cliente aún no tiene salidas o compras registradas en el sistema.</p>
                     {onNavigateToVenta && (
@@ -933,39 +998,31 @@ export default function Clientes({ onNavigateToVenta, onNavigateToHistory }: Cli
                   </div>
                 ) : (
                   <div className="border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden divide-y divide-zinc-200 dark:divide-zinc-800 text-xs">
-                    {clienteMovimientos.map((m) => {
-                      const totalVal = getTotalCobradoVenta(m);
-
+                    {groupedSales.map((sale) => {
                       return (
-                        <div key={m.id || m.folio} className="p-3 bg-white dark:bg-zinc-900/60 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 flex items-center justify-between gap-3">
+                        <div key={sale.key} className="p-3 bg-white dark:bg-zinc-900/60 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 flex items-center justify-between gap-3">
                           <div>
                             <div className="flex items-center gap-2">
                               <span className="font-mono font-bold text-zinc-900 dark:text-white">
-                                {m.folio || "Salida"}
+                                {sale.folio}
                               </span>
-                              <span className="font-mono text-zinc-500 text-[11px]">
-                                SKU: {m.sku}
-                              </span>
-                              {m.estado === "anulado" && (
+                              {sale.canal && <span className="text-[10px] text-zinc-500">{sale.canal}</span>}
+                              {sale.estado === "anulado" && (
                                 <span className="px-1.5 py-0.2 rounded text-[10px] bg-rose-500/10 text-rose-500 font-bold">
                                   Anulado
                                 </span>
                               )}
                             </div>
                             <p className="text-[11px] text-zinc-400 mt-0.5">
-                              {formatDate(m.fecha)} • Cantidad: {m.cantidad} uds
+                              {formatDate(sale.fecha)} • {sale.items.length} producto{sale.items.length === 1 ? "" : "s"} • {sale.unidades} uds
                             </p>
+                            <p className="text-[10px] text-zinc-500 mt-1 truncate max-w-xs">{sale.items.map(item => `${item.cantidad}× ${item.sku}`).join(" · ")}</p>
                           </div>
 
                           <div className="text-right">
                             <span className="font-mono font-bold text-zinc-900 dark:text-white block">
-                              ${totalVal.toFixed(2)}
+                              ${sale.total.toFixed(2)}
                             </span>
-                            {m.precio_unitario_venta && (
-                              <span className="text-[10px] text-zinc-400 block font-mono">
-                                (${m.precio_unitario_venta.toFixed(2)} c/u)
-                              </span>
-                            )}
                           </div>
                         </div>
                       );
