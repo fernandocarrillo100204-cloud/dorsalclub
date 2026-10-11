@@ -24,6 +24,7 @@ import {
   Receipt,
   ChevronRight,
   Boxes,
+  ClipboardList,
   Trash2
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -77,12 +78,13 @@ const NAV_GROUPS: NavGroup[] = [
     id: "ventas",
     label: "Ventas",
     icon: ShoppingCart,
-    matchActive: (curr) => ["ventas_nueva", "ventas_stock", "ventas_bajo_pedido", "ventas_emprendedor", "ventas_mayoreo"].includes(curr),
+    matchActive: (curr) => ["ventas_nueva", "ventas_stock", "ventas_bajo_pedido", "ventas_emprendedor", "ventas_mayoreo", "ventas_pedidos"].includes(curr),
     items: [
       { id: "ventas_stock", label: "Stock", icon: Package, matchActive: (curr) => curr === "ventas_stock" || curr === "ventas_nueva" },
       { id: "ventas_bajo_pedido", label: "Bajo pedido", icon: ShoppingCart, matchActive: (curr) => curr === "ventas_bajo_pedido" },
       { id: "ventas_emprendedor", label: "Paq. emprendedor", icon: Boxes, matchActive: (curr) => curr === "ventas_emprendedor" },
-      { id: "ventas_mayoreo", label: "Mayoreo", icon: ShoppingBag, matchActive: (curr) => curr === "ventas_mayoreo" }
+      { id: "ventas_mayoreo", label: "Mayoreo", icon: ShoppingBag, matchActive: (curr) => curr === "ventas_mayoreo" },
+      { id: "ventas_pedidos", label: "Seguimiento", icon: ClipboardList, matchActive: (curr) => curr === "ventas_pedidos" }
     ]
   },
   {

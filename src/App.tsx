@@ -52,6 +52,7 @@ function lazyWithRetry<T extends React.ComponentType<any>>(
 const Dashboard = lazyWithRetry(() => import("./components/Dashboard"));
 const Compras = lazyWithRetry(() => import("./components/Compras"));
 const Ventas = lazyWithRetry(() => import("./components/Ventas"));
+const PedidosVenta = lazyWithRetry(() => import("./components/PedidosVenta"));
 const Transferencias = lazyWithRetry(() => import("./components/Transferencias"));
 const Historial = lazyWithRetry(() => import("./components/Historial"));
 const GestionAlmacenes = lazyWithRetry(() => import("./components/GestionAlmacenes"));
@@ -108,6 +109,9 @@ const getTabFromPath = (path: string): NavigationTab => {
   if (normalized === "/ventas/mayoreo") {
     return "ventas_mayoreo";
   }
+  if (normalized === "/ventas/pedidos") {
+    return "ventas_pedidos";
+  }
   if (normalized === "/transferencias/nueva") {
     return "transferencias_nueva";
   }
@@ -153,6 +157,8 @@ const getPathFromTab = (tab: NavigationTab): string => {
       return "/ventas/paquete-emprendedor";
     case "ventas_mayoreo":
       return "/ventas/mayoreo";
+    case "ventas_pedidos":
+      return "/ventas/pedidos";
     case "transferencias_nueva":
       return "/transferencias/nueva";
     case "analisis_ventas":
@@ -420,6 +426,18 @@ export default function App() {
                       onSuccess={() => navigateTo("dashboard")}
                       onCancel={() => navigateTo("dashboard")}
                     />
+                  </motion.div>
+                )}
+
+                {activeTab === "ventas_pedidos" && (
+                  <motion.div
+                    key="ventas_pedidos"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                  >
+                    <PedidosVenta />
                   </motion.div>
                 )}
 

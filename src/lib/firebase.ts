@@ -69,6 +69,7 @@ import {
   DatosFinancierosMensuales,
   FinanzasDiaPunto,
   PeriodoFinancieroIndex,
+  PedidoVenta,
   PapeleraItem,
   PapeleraTipo
 } from "../types";
@@ -1581,6 +1582,7 @@ export const firestoreService = {
             venta_total_recibido: ventaTotalRecibido,
             venta_saldo_pendiente: ventaSaldoPendiente,
             estado_pago: estadoPago,
+            ...(!afectaStock ? { pedido_estado: estadoPago === "pagado" ? "pagado" : "pedido" } : {}),
             ...(isPrimaryItem ? { ingreso_reconocido: ventaTotalRecibido } : {}),
             sku: item.sku,
             almacen_id: item.almacen_id,
@@ -1691,6 +1693,7 @@ export const firestoreService = {
         venta_total_recibido: ventaTotalRecibido,
         venta_saldo_pendiente: ventaSaldoPendiente,
         estado_pago: estadoPago,
+        ...(!afectaStock ? { pedido_estado: estadoPago === "pagado" ? "pagado" : "pedido" } : {}),
         ...(isPrimaryItem ? { ingreso_reconocido: ventaTotalRecibido } : {}),
         sku: item.sku,
         almacen_id: item.almacen_id,
@@ -1727,6 +1730,251 @@ export const firestoreService = {
     clearFinanzasCache();
     clearPeriodosFinancierosCache();
     return { id: ventaId, folio: generatedFolio, movimientosCount: normalizedItems.length };
+  },
+
+  getPedidosVenta: async (): Promise<PedidoVenta[]> => {
+    let movimientos: Array<Movimiento & { id?: string }> = [];
+
+    if (isConfigured && realDb) {
+      const [salesSnap, trackingSnap] = await Promise.all([
+        getDocs(query(collection(realDb, "movimientos"), where("tipo", "==", "salida"), orderBy("fecha", "desc"), limit(500))),
+        getDocs(query(collection(realDb, "movimientos"), where("tipo", "==", "ajuste"), orderBy("fecha", "desc"), limit(250)))
+      ]);
+      movimientos = [...salesSnap.docs, ...trackingSnap.docs].map(item => ({ id: item.id, ...item.data() } as Movimiento));
+    } else {
+      movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    }
+
+    const grupos = new Map<string, Movimiento[]>();
+    const eventos = new Map<string, Movimiento[]>();
+    movimientos.forEach(movimiento => {
+      if (movimiento.venta_relacionada_id) {
+        const actuales = eventos.get(movimiento.venta_relacionada_id) || [];
+        actuales.push(movimiento);
+        eventos.set(movimiento.venta_relacionada_id, actuales);
+        return;
+      }
+      if (!movimiento.venta_id || movimiento.afecta_stock !== false) return;
+      if (movimiento.canal_venta !== "bajo_pedido" && movimiento.canal_venta !== "mayoreo") return;
+      if ((movimiento.estado || "activo") === "anulado" || movimiento.en_papelera === true) return;
+      const actuales = grupos.get(movimiento.venta_id) || [];
+      actuales.push(movimiento);
+      grupos.set(movimiento.venta_id, actuales);
+    });
+
+    const toDate = (value: any): Date => {
+      if (value instanceof Date) return value;
+      if (typeof value?.toDate === "function") return value.toDate();
+      if (typeof value?.seconds === "number") return new Date(value.seconds * 1000);
+      return new Date(value || Date.now());
+    };
+
+    return Array.from(grupos.entries()).map(([ventaId, partidas]) => {
+      const ordered = [...partidas].sort((a, b) => (a.venta_partida || 0) - (b.venta_partida || 0));
+      const principal = ordered[0];
+      const orderEvents = (eventos.get(ventaId) || []).sort((a, b) => toDate(a.fecha).getTime() - toDate(b.fecha).getTime());
+      const payments = orderEvents.filter(item => item.subtipo === "abono_venta");
+      const lastTracking = [...orderEvents].reverse().find(item => item.subtipo === "seguimiento_pedido");
+      const total = Number(principal.venta_total_cobrado) || ordered.reduce((sum, item) => sum + (Number(item.total_cobrado) || Number(item.total_venta) || 0), 0);
+      const initialReceived = Math.max(0, Number(principal.ingreso_reconocido) || Number(principal.venta_total_recibido) || 0);
+      const recibido = Math.min(total, initialReceived + payments.reduce((sum, item) => sum + Math.max(0, Number(item.ingreso_reconocido) || 0), 0));
+      const saldo = Math.max(0, Math.round((total - recibido + Number.EPSILON) * 100) / 100);
+      const estado = lastTracking?.pedido_estado === "entregado" || principal.pedido_estado === "entregado"
+        ? "entregado"
+        : saldo <= 0 ? "pagado" : "pedido";
+      return {
+        venta_id: ventaId,
+        folio: principal.folio,
+        cliente_id: principal.cliente_id,
+        cliente_nombre: principal.cliente_nombre || "Cliente sin nombre",
+        canal_venta: principal.canal_venta as "bajo_pedido" | "mayoreo",
+        canal_venta_nombre: principal.canal_venta_nombre || (principal.canal_venta === "mayoreo" ? "Mayoreo" : "Bajo pedido"),
+        fecha: toDate(principal.fecha),
+        total,
+        recibido,
+        saldo,
+        estado,
+        fecha_estimada: lastTracking?.pedido_fecha_estimada || principal.pedido_fecha_estimada,
+        comentarios: lastTracking?.pedido_comentarios ?? principal.pedido_comentarios ?? principal.comentarios_venta,
+        ubicacion_entrega_nombre: principal.ubicacion_entrega_nombre,
+        repartidor_nombre: principal.repartidor_nombre,
+        items: ordered.map(item => ({
+          sku: item.sku,
+          cantidad: Number(item.cantidad) || 0,
+          precio_unitario: Number(item.precio_unitario_venta) || 0,
+          total: Number(item.total_venta) || 0
+        }))
+      } satisfies PedidoVenta;
+    }).sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
+  },
+
+  registrarPagoPedido: async (ventaId: string, monto: number): Promise<void> => {
+    const cleanAmount = Math.round((Number(monto) + Number.EPSILON) * 100) / 100;
+    if (!Number.isFinite(cleanAmount) || cleanAmount <= 0) throw new Error("El pago debe ser mayor a cero.");
+    const user = authService.getCurrentUser();
+    const now = new Date();
+    const periodoKey = getPeriodoKey(now);
+
+    if (isConfigured && realDb) {
+      const saleQuery = query(collection(realDb, "movimientos"), where("venta_id", "==", ventaId));
+      const paymentsQuery = query(collection(realDb, "movimientos"), where("venta_relacionada_id", "==", ventaId));
+      const [saleSnap, paymentsSnap] = await Promise.all([getDocs(saleQuery), getDocs(paymentsQuery)]);
+      const saleRefs = saleSnap.docs.map(item => item.ref);
+      const paymentRefs = paymentsSnap.docs.filter(item => item.data().subtipo === "abono_venta").map(item => item.ref);
+      if (saleRefs.length === 0) throw new Error("El pedido ya no existe.");
+      const paymentRef = doc(collection(realDb, "movimientos"));
+      const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+
+      await runTransaction(realDb, async transaction => {
+        const currentSnaps = [];
+        for (const ref of saleRefs) currentSnaps.push(await transaction.get(ref));
+        const currentPayments = [];
+        for (const ref of paymentRefs) currentPayments.push(await transaction.get(ref));
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+        const active = currentSnaps.filter(item => item.exists() && (item.data().estado || "activo") !== "anulado");
+        if (active.length === 0) throw new Error("El pedido está cancelado o ya no está disponible.");
+        const principal = active.find(item => item.data().venta_partida === 1) || active[0];
+        const data = principal.data();
+        const total = Math.max(0, Number(data.venta_total_cobrado) || 0);
+        const initialReceived = Math.max(0, Number(data.ingreso_reconocido) || Number(data.venta_total_recibido) || 0);
+        const previousPayments = currentPayments.reduce((sum, item) => sum + (item.exists() ? Math.max(0, Number(item.data().ingreso_reconocido) || 0) : 0), 0);
+        const saldoActual = Math.max(0, Math.round((total - initialReceived - previousPayments + Number.EPSILON) * 100) / 100);
+        if (saldoActual <= 0) throw new Error("Este pedido ya está pagado.");
+        if (cleanAmount > saldoActual) throw new Error(`El pago no puede superar el saldo de $${saldoActual.toFixed(2)}.`);
+        const nuevoSaldo = Math.max(0, Math.round((saldoActual - cleanAmount + Number.EPSILON) * 100) / 100);
+        const timestamp = Timestamp.now();
+
+        transaction.set(paymentRef, {
+          folio: `Abono-${data.folio || ventaId}`,
+          venta_relacionada_id: ventaId,
+          subtipo: "abono_venta",
+          sku: "ABONO",
+          almacen_id: "bajo_pedido",
+          tipo: "salida",
+          cantidad: 1,
+          referencia: `Pago de ${data.folio || ventaId}`,
+          usuario: user?.email || "Sistema",
+          fecha: timestamp,
+          estado: "activo",
+          cliente_id: data.cliente_id || "",
+          cliente_nombre: data.cliente_nombre || "Cliente",
+          canal_venta: data.canal_venta,
+          canal_venta_nombre: data.canal_venta_nombre,
+          afecta_stock: false,
+          venta_total_recibido: cleanAmount,
+          venta_saldo_pendiente: nuevoSaldo,
+          ingreso_reconocido: cleanAmount,
+          total_venta: 0,
+          total_cobrado: cleanAmount,
+          estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo"
+        });
+
+        if (periodRef && periodoKey) {
+          transaction.set(periodRef, computeNewPeriodIndexData(periodSnap?.exists() ? periodSnap.data() : null, periodoKey, 1, 0, 0), { merge: true });
+        }
+      });
+    } else {
+      const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+      const targets = movimientos.filter(item => item.venta_id === ventaId && (item.estado || "activo") !== "anulado");
+      if (targets.length === 0) throw new Error("El pedido ya no existe.");
+      const principal = targets.find(item => item.venta_partida === 1) || targets[0];
+      const total = Math.max(0, Number(principal.venta_total_cobrado) || 0);
+      const initialReceived = Math.max(0, Number(principal.ingreso_reconocido) || Number(principal.venta_total_recibido) || 0);
+      const previousPayments = movimientos.filter(item => item.venta_relacionada_id === ventaId && item.subtipo === "abono_venta").reduce((sum, item) => sum + Math.max(0, Number(item.ingreso_reconocido) || 0), 0);
+      const saldoActual = Math.max(0, Math.round((total - initialReceived - previousPayments + Number.EPSILON) * 100) / 100);
+      if (saldoActual <= 0) throw new Error("Este pedido ya está pagado.");
+      if (cleanAmount > saldoActual) throw new Error(`El pago no puede superar el saldo de $${saldoActual.toFixed(2)}.`);
+      const nuevoSaldo = Math.max(0, Math.round((saldoActual - cleanAmount + Number.EPSILON) * 100) / 100);
+      movimientos.push({
+        id: `abono_${Math.random().toString(36).slice(2, 11)}`,
+        folio: `Abono-${principal.folio}`,
+        venta_relacionada_id: ventaId,
+        subtipo: "abono_venta",
+        sku: "ABONO",
+        almacen_id: "bajo_pedido",
+        tipo: "salida",
+        cantidad: 1,
+        referencia: `Pago de ${principal.folio}`,
+        usuario: user?.email || "Sistema",
+        fecha: now,
+        estado: "activo",
+        cliente_id: principal.cliente_id,
+        cliente_nombre: principal.cliente_nombre,
+        canal_venta: principal.canal_venta,
+        canal_venta_nombre: principal.canal_venta_nombre,
+        afecta_stock: false,
+        venta_total_recibido: cleanAmount,
+        venta_saldo_pendiente: nuevoSaldo,
+        ingreso_reconocido: cleanAmount,
+        total_venta: 0,
+        total_cobrado: cleanAmount,
+        estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo"
+      });
+      setLocalStorageItem("movimientos", movimientos);
+      notifyListeners("movimientos", movimientos);
+    }
+    clearFinanzasCache();
+    clearPeriodosFinancierosCache();
+  },
+
+  actualizarSeguimientoPedido: async (ventaId: string, data: { fecha_estimada?: string; comentarios?: string; marcar_entregado?: boolean }): Promise<void> => {
+    const now = new Date();
+    if (isConfigured && realDb) {
+      const [saleSnap, eventSnap] = await Promise.all([
+        getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", ventaId))),
+        getDocs(query(collection(realDb, "movimientos"), where("venta_relacionada_id", "==", ventaId)))
+      ]);
+      if (saleSnap.empty) throw new Error("El pedido ya no existe.");
+      const principal = saleSnap.docs.find(item => item.data().venta_partida === 1) || saleSnap.docs[0];
+      const total = Math.max(0, Number(principal.data().venta_total_cobrado) || 0);
+      const initialReceived = Math.max(0, Number(principal.data().ingreso_reconocido) || Number(principal.data().venta_total_recibido) || 0);
+      const payments = eventSnap.docs.filter(item => item.data().subtipo === "abono_venta").reduce((sum, item) => sum + Math.max(0, Number(item.data().ingreso_reconocido) || 0), 0);
+      if (data.marcar_entregado && total - initialReceived - payments > 0.009) throw new Error("Liquida el saldo antes de marcar el pedido como entregado.");
+      await addDoc(collection(realDb, "movimientos"), {
+        folio: `Seguimiento-${principal.data().folio || ventaId}`,
+        venta_relacionada_id: ventaId,
+        subtipo: "seguimiento_pedido",
+        sku: "SEGUIMIENTO",
+        almacen_id: "bajo_pedido",
+        tipo: "ajuste",
+        cantidad: 1,
+        referencia: `Seguimiento de ${principal.data().folio || ventaId}`,
+        usuario: authService.getCurrentUser()?.email || "Sistema",
+        fecha: Timestamp.now(),
+        estado: "activo",
+        ...(data.fecha_estimada !== undefined ? { pedido_fecha_estimada: data.fecha_estimada } : {}),
+        ...(data.comentarios !== undefined ? { pedido_comentarios: data.comentarios.trim() } : {}),
+        ...(data.marcar_entregado ? { pedido_estado: "entregado", pedido_entregado_at: Timestamp.now() } : {})
+      });
+      return;
+    }
+    const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const targets = movimientos.filter(item => item.venta_id === ventaId);
+    if (targets.length === 0) throw new Error("El pedido ya no existe.");
+    const principal = targets.find(item => item.venta_partida === 1) || targets[0];
+    const total = Math.max(0, Number(principal.venta_total_cobrado) || 0);
+    const initialReceived = Math.max(0, Number(principal.ingreso_reconocido) || Number(principal.venta_total_recibido) || 0);
+    const payments = movimientos.filter(item => item.venta_relacionada_id === ventaId && item.subtipo === "abono_venta").reduce((sum, item) => sum + Math.max(0, Number(item.ingreso_reconocido) || 0), 0);
+    if (data.marcar_entregado && total - initialReceived - payments > 0.009) throw new Error("Liquida el saldo antes de marcar el pedido como entregado.");
+    movimientos.push({
+      id: `seguimiento_${Math.random().toString(36).slice(2, 11)}`,
+      folio: `Seguimiento-${principal.folio}`,
+      venta_relacionada_id: ventaId,
+      subtipo: "seguimiento_pedido",
+      sku: "SEGUIMIENTO",
+      almacen_id: "bajo_pedido",
+      tipo: "ajuste",
+      cantidad: 1,
+      referencia: `Seguimiento de ${principal.folio}`,
+      usuario: authService.getCurrentUser()?.email || "Sistema",
+      fecha: now,
+      estado: "activo",
+      ...(data.fecha_estimada !== undefined ? { pedido_fecha_estimada: data.fecha_estimada } : {}),
+      ...(data.comentarios !== undefined ? { pedido_comentarios: data.comentarios.trim() } : {}),
+      ...(data.marcar_entregado ? { pedido_estado: "entregado", pedido_entregado_at: now } : {})
+    });
+    setLocalStorageItem("movimientos", movimientos);
+    notifyListeners("movimientos", movimientos);
   },
 
   ensureProductExists: async (sku: string, nombre: string, categoria = "General", stockMinimo = 5, unidad = "uds"): Promise<Producto> => {
@@ -2790,6 +3038,8 @@ export const firestoreService = {
             id: d.id,
             folio: data.folio,
             venta_id: data.venta_id,
+            venta_relacionada_id: data.venta_relacionada_id || undefined,
+            subtipo: data.subtipo || undefined,
             venta_partida: typeof data.venta_partida === "number" ? data.venta_partida : undefined,
             venta_total_partidas: typeof data.venta_total_partidas === "number" ? data.venta_total_partidas : undefined,
             venta_subtotal: typeof data.venta_subtotal === "number" ? data.venta_subtotal : undefined,
@@ -3023,6 +3273,8 @@ export const firestoreService = {
             id: d.id,
             folio: data.folio,
             venta_id: data.venta_id,
+            venta_relacionada_id: data.venta_relacionada_id || undefined,
+            subtipo: data.subtipo || undefined,
             venta_partida: typeof data.venta_partida === "number" ? data.venta_partida : undefined,
             venta_total_partidas: typeof data.venta_total_partidas === "number" ? data.venta_total_partidas : undefined,
             venta_subtotal: typeof data.venta_subtotal === "number" ? data.venta_subtotal : undefined,
@@ -5793,6 +6045,8 @@ export const firestoreService = {
             id: d.id,
             folio: data.folio,
             venta_id: data.venta_id,
+            venta_relacionada_id: data.venta_relacionada_id || undefined,
+            subtipo: data.subtipo || undefined,
             venta_partida: typeof data.venta_partida === "number" ? data.venta_partida : undefined,
             venta_total_partidas: typeof data.venta_total_partidas === "number" ? data.venta_total_partidas : undefined,
             venta_subtotal: typeof data.venta_subtotal === "number" ? data.venta_subtotal : undefined,
@@ -5976,9 +6230,9 @@ export const firestoreService = {
     const ventasSinImporteIds = new Set<string>();
 
     for (const v of activeVentas) {
-      const ventaKey = v.venta_id || v.folio || v.id || `venta-${ventasActivasIds.size + 1}`;
+      const ventaKey = v.venta_id || v.venta_relacionada_id || v.folio || v.id || `venta-${ventasActivasIds.size + 1}`;
       ventasActivasIds.add(ventaKey);
-      const qty = Number(v.cantidad) || 0;
+      const qty = v.subtipo ? 0 : (Number(v.cantidad) || 0);
       unidadesVendidas += qty;
 
       const usaIngresoReconocido = typeof v.venta_total_recibido === "number" && !isNaN(v.venta_total_recibido);
