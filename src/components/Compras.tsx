@@ -213,6 +213,7 @@ export default function Compras({
   const handleEnviarCompraPapelera = async (compra: Compra) => {
     if (!compra.id) return;
     if (!window.confirm(`¿Enviar la compra ${compra.folio} a la Papelera? Se revertirá su stock y podrás restaurarla después.`)) return;
+    setFetchError(null);
     setArchivingCompraId(compra.id);
     try {
       await firestoreService.enviarCompraPapelera(compra.id);
@@ -845,6 +846,28 @@ export default function Compras({
           <span>Registrar compra</span>
         </button></div>
       </div>
+
+      {fetchError && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:max-w-md z-[100] flex items-start gap-3 rounded-2xl border border-rose-200 dark:border-rose-800 bg-white dark:bg-zinc-900 p-4 text-rose-700 dark:text-rose-300 shadow-2xl"
+        >
+          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold">No se pudo completar la operación</p>
+            <p className="text-xs mt-1 leading-relaxed">{fetchError}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFetchError(null)}
+            className="p-1 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            aria-label="Cerrar mensaje de error"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Stats Quick Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
