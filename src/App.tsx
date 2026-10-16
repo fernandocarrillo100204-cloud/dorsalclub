@@ -62,6 +62,7 @@ const AnalisisClientes = lazyWithRetry(() => import("./components/AnalisisClient
 const Clientes = lazyWithRetry(() => import("./components/Clientes"));
 const Finanzas = lazyWithRetry(() => import("./components/Finanzas"));
 const Papelera = lazyWithRetry(() => import("./components/Papelera"));
+const Configuracion = lazyWithRetry(() => import("./components/Configuracion"));
 
 const getGastoIdFromPath = (path: string): string => {
   const match = path.match(/\/finanzas\/gastos\/([^/]+)\/editar\/?$/i);
@@ -84,6 +85,9 @@ const getTabFromPath = (path: string): NavigationTab => {
   }
   if (normalized === "/papelera") {
     return "papelera";
+  }
+  if (normalized === "/configuracion") {
+    return "configuracion";
   }
   if (normalized === "/clientes") {
     return "clientes";
@@ -112,28 +116,28 @@ const getTabFromPath = (path: string): NavigationTab => {
   if (normalized === "/ventas/pedidos") {
     return "ventas_pedidos";
   }
-  if (normalized === "/transferencias/nueva") {
+  if (normalized === "/transferencias/nueva" || normalized === "/inventario/transferencias") {
     return "transferencias_nueva";
   }
   if (normalized === "/movimientos/nuevo" || normalized === "/movimientos") {
     return "compras_nueva"; // Redirect as instructed
   }
-  if (normalized === "/historial") {
+  if (normalized === "/historial" || normalized === "/inventario/movimientos") {
     return "historial";
   }
-  if (normalized === "/ventas" || normalized === "/analisis-ventas" || normalized === "/analisis_ventas") {
+  if (normalized === "/ventas" || normalized === "/ventas/analisis" || normalized === "/analisis-ventas" || normalized === "/analisis_ventas") {
     return "analisis_ventas";
   }
-  if (normalized === "/analisis-clientes" || normalized === "/analisis_clientes") {
+  if (normalized === "/analisis-clientes" || normalized === "/analisis_clientes" || normalized === "/clientes/analisis") {
     return "analisis_clientes";
   }
-  if (normalized === "/almacenes") {
+  if (normalized === "/almacenes" || normalized === "/inventario/almacenes") {
     return "almacenes";
   }
-  if (normalized === "/catalogo" || normalized === "/productos") {
+  if (normalized === "/catalogo" || normalized === "/productos" || normalized === "/inventario/productos") {
     return "catalogo";
   }
-  if (normalized === "/dashboard") {
+  if (normalized === "/dashboard" || normalized === "/inventario") {
     return "dashboard";
   }
   if (normalized === "" || normalized === "/") {
@@ -150,7 +154,7 @@ const getPathFromTab = (tab: NavigationTab): string => {
       return "/compras/nueva";
     case "ventas_nueva":
     case "ventas_stock":
-      return "/ventas/stock";
+      return "/ventas/nueva";
     case "ventas_bajo_pedido":
       return "/ventas/bajo-pedido";
     case "ventas_emprendedor":
@@ -160,18 +164,18 @@ const getPathFromTab = (tab: NavigationTab): string => {
     case "ventas_pedidos":
       return "/ventas/pedidos";
     case "transferencias_nueva":
-      return "/transferencias/nueva";
+      return "/inventario/transferencias";
     case "analisis_ventas":
     case "ventas":
-      return "/ventas";
+      return "/ventas/analisis";
     case "analisis_clientes":
-      return "/analisis-clientes";
+      return "/clientes/analisis";
     case "historial":
-      return "/historial";
+      return "/inventario/movimientos";
     case "almacenes":
-      return "/almacenes";
+      return "/inventario/almacenes";
     case "catalogo":
-      return "/productos";
+      return "/inventario/productos";
     case "clientes":
       return "/clientes";
     case "finanzas":
@@ -182,11 +186,13 @@ const getPathFromTab = (tab: NavigationTab): string => {
       return "/finanzas/gastos/nuevo";
     case "papelera":
       return "/papelera";
+    case "configuracion":
+      return "/configuracion";
     case "movimientos":
       return "/compras/nueva";
     case "dashboard":
     default:
-      return "/dashboard";
+      return "/inventario";
   }
 };
 
@@ -423,8 +429,9 @@ export default function App() {
                       preselectedAlmacenId={preselectedAlmacenId}
                       preselectedClienteId={preselectedClienteId}
                       canal={activeTab === "ventas_bajo_pedido" ? "bajo_pedido" : activeTab === "ventas_emprendedor" ? "paquete_emprendedor" : activeTab === "ventas_mayoreo" ? "mayoreo" : "stock"}
-                      onSuccess={() => navigateTo("dashboard")}
-                      onCancel={() => navigateTo("dashboard")}
+                      onCanalChange={(nextCanal) => navigateTo(nextCanal === "bajo_pedido" ? "ventas_bajo_pedido" : nextCanal === "paquete_emprendedor" ? "ventas_emprendedor" : nextCanal === "mayoreo" ? "ventas_mayoreo" : "ventas_stock", { clienteId: preselectedClienteId || undefined })}
+                      onSuccess={() => navigateTo(activeTab === "ventas_bajo_pedido" || activeTab === "ventas_mayoreo" ? "ventas_pedidos" : "analisis_ventas")}
+                      onCancel={() => navigateTo("analisis_ventas")}
                     />
                   </motion.div>
                 )}
@@ -632,6 +639,12 @@ export default function App() {
                     transition={{ duration: 0.25, ease: "easeInOut" }}
                   >
                     <Papelera />
+                  </motion.div>
+                )}
+
+                {activeTab === "configuracion" && (
+                  <motion.div key="configuracion" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }} transition={{ duration: 0.25, ease: "easeInOut" }}>
+                    <Configuracion onNavigateToProducts={() => navigateTo("catalogo")} />
                   </motion.div>
                 )}
               </AnimatePresence>

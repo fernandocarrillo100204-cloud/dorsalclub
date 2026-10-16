@@ -25,7 +25,9 @@ import {
   ChevronRight,
   Boxes,
   ClipboardList,
-  Trash2
+  Trash2,
+  Settings,
+  Plus
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Usuario, NavigationTab } from "../types";
@@ -45,7 +47,7 @@ interface NavItem {
   matchActive?: (current: NavigationTab) => boolean;
 }
 
-type NavGroupId = "ventas" | "clientes" | "inventario" | "finanzas";
+type NavGroupId = "compras" | "ventas" | "clientes" | "inventario" | "finanzas";
 
 interface NavGroup {
   id: NavGroupId;
@@ -55,16 +57,13 @@ interface NavGroup {
   matchActive: (current: NavigationTab) => boolean;
 }
 
-const DIRECT_NAV_ITEMS: NavItem[] = [
-  { 
-    id: "compras", 
-    label: "Compras", 
-    icon: ShoppingBag,
-    matchActive: (curr) => curr === "compras" || curr === "compras_nueva"
-  },
-];
-
 const UTILITY_NAV_ITEMS: NavItem[] = [
+  {
+    id: "configuracion",
+    label: "Configuración",
+    icon: Settings,
+    matchActive: (curr) => curr === "configuracion"
+  },
   {
     id: "papelera",
     label: "Papelera",
@@ -75,16 +74,24 @@ const UTILITY_NAV_ITEMS: NavItem[] = [
 
 const NAV_GROUPS: NavGroup[] = [
   {
+    id: "compras",
+    label: "Compras",
+    icon: ShoppingBag,
+    matchActive: (curr) => curr === "compras" || curr === "compras_nueva",
+    items: [
+      { id: "compras", label: "Historial", icon: History, matchActive: (curr) => curr === "compras" },
+      { id: "compras_nueva", label: "Registrar compra", icon: Plus, matchActive: (curr) => curr === "compras_nueva" }
+    ]
+  },
+  {
     id: "ventas",
     label: "Ventas",
     icon: ShoppingCart,
-    matchActive: (curr) => ["ventas_nueva", "ventas_stock", "ventas_bajo_pedido", "ventas_emprendedor", "ventas_mayoreo", "ventas_pedidos"].includes(curr),
+    matchActive: (curr) => ["ventas_nueva", "ventas_stock", "ventas_bajo_pedido", "ventas_emprendedor", "ventas_mayoreo", "ventas_pedidos", "analisis_ventas", "ventas"].includes(curr),
     items: [
-      { id: "ventas_stock", label: "Stock", icon: Package, matchActive: (curr) => curr === "ventas_stock" || curr === "ventas_nueva" },
-      { id: "ventas_bajo_pedido", label: "Bajo pedido", icon: ShoppingCart, matchActive: (curr) => curr === "ventas_bajo_pedido" },
-      { id: "ventas_emprendedor", label: "Paq. emprendedor", icon: Boxes, matchActive: (curr) => curr === "ventas_emprendedor" },
-      { id: "ventas_mayoreo", label: "Mayoreo", icon: ShoppingBag, matchActive: (curr) => curr === "ventas_mayoreo" },
-      { id: "ventas_pedidos", label: "Seguimiento", icon: ClipboardList, matchActive: (curr) => curr === "ventas_pedidos" }
+      { id: "ventas_stock", label: "Nueva venta", icon: ShoppingCart, matchActive: (curr) => ["ventas_stock", "ventas_nueva", "ventas_bajo_pedido", "ventas_emprendedor", "ventas_mayoreo"].includes(curr) },
+      { id: "ventas_pedidos", label: "Pedidos", icon: ClipboardList, matchActive: (curr) => curr === "ventas_pedidos" },
+      { id: "analisis_ventas", label: "Análisis", icon: TrendingUp, matchActive: (curr) => curr === "analisis_ventas" || curr === "ventas" }
     ]
   },
   {
@@ -149,7 +156,7 @@ const NAV_GROUPS: NavGroup[] = [
     id: "finanzas",
     label: "Finanzas",
     icon: Receipt,
-    matchActive: (curr) => ["finanzas", "finanzas_gastos", "finanzas_gastos_nuevo", "finanzas_gastos_editar", "analisis_ventas", "ventas"].includes(curr),
+    matchActive: (curr) => ["finanzas", "finanzas_gastos", "finanzas_gastos_nuevo", "finanzas_gastos_editar"].includes(curr),
     items: [
       {
         id: "finanzas",
@@ -162,12 +169,6 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Gastos",
         icon: Receipt,
         matchActive: (curr) => curr === "finanzas_gastos" || curr === "finanzas_gastos_nuevo" || curr === "finanzas_gastos_editar"
-      },
-      {
-        id: "analisis_ventas",
-        label: "Análisis de ventas",
-        icon: TrendingUp,
-        matchActive: (curr) => curr === "analisis_ventas" || curr === "ventas"
       }
     ]
   }
@@ -215,28 +216,6 @@ export default function Sidebar({ user, activeTab, setActiveTab, onLogout }: Sid
 
         {/* Navigation Links (14px text) */}
         <nav className="p-2 space-y-1 overflow-y-auto" aria-label="Navegación principal">
-          {DIRECT_NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            const isActive = item.matchActive ? item.matchActive(activeTab) : activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                id={`nav-item-${item.id}`}
-                onClick={() => handleSelectTab(item.id)}
-                aria-current={isActive ? "page" : undefined}
-                className={`w-full flex items-center space-x-2.5 px-2.5 py-1.5 rounded-lg text-sm transition-all text-left ${
-                  isActive
-                    ? "bg-[#ECFDF5] dark:bg-emerald-950/40 text-[#059669] dark:text-emerald-400 font-semibold border-l-2 border-[#059669] dark:border-emerald-500 pl-2"
-                    : "text-[#64748B] dark:text-[#94A3B8] hover:text-[#172033] dark:hover:text-[#F8FAFC] hover:bg-[#F1F5F9] dark:hover:bg-[#111827] font-normal"
-                }`}
-              >
-                <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-[#059669] dark:text-emerald-400" : "text-[#64748B] dark:text-[#94A3B8]"}`} />
-                <span className="truncate">{item.label}</span>
-              </button>
-            );
-          })}
-
           {NAV_GROUPS.map((group) => {
             const GroupIcon = group.icon;
             const isOpen = openGroup === group.id;

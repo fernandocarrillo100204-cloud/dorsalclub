@@ -59,6 +59,7 @@ interface VentasProps {
   preselectedClienteId?: string;
   onSuccess?: () => void;
   onCancel?: () => void;
+  onCanalChange?: (canal: CanalVentaId) => void;
   canal: CanalVentaId;
 }
 
@@ -70,6 +71,7 @@ export default function Ventas({
   preselectedClienteId = "",
   onSuccess,
   onCancel,
+  onCanalChange,
   canal
 }: VentasProps) {
   const [items, setItems] = useState<VentaItemDraft[]>(() => {
@@ -478,9 +480,42 @@ export default function Ventas({
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 space-y-6" id="ventas-page">
       {/* Header */}
       <div className="pb-4 border-b border-zinc-200 dark:border-zinc-800 flex items-start justify-between gap-3">
-        <div><h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2"><ShoppingCart className="w-6 h-6 text-rose-500" />{channelConfig?.nombre || "Registrar venta"}</h1><p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{affectsStock ? "Venta con mercancía disponible; descuenta existencias al confirmar." : "Venta bajo pedido; registra el anticipo sin descontar existencias."}</p></div>
+        <div><h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2"><ShoppingCart className="w-6 h-6 text-rose-500" />Nueva venta</h1><p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Selecciona el canal y registra todos los productos de la operación.</p></div>
         <button type="button" onClick={() => setIsSettingsOpen(true)} className="shrink-0 px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"><Settings className="w-4 h-4" />Configurar</button>
       </div>
+
+      <section aria-labelledby="canal-venta-label" className="space-y-2">
+        <div>
+          <h2 id="canal-venta-label" className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Canal de venta</h2>
+          <p className="text-[11px] text-zinc-400 mt-0.5">El canal determina mínimo, precio, anticipo y afectación de inventario.</p>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+          {([
+            { id: "stock", label: "Stock", description: "Disponible ahora", icon: Package },
+            { id: "bajo_pedido", label: "Bajo pedido", description: "Anticipo y seguimiento", icon: ShoppingCart },
+            { id: "paquete_emprendedor", label: "Emprendedor", description: "Paquete con stock", icon: Layers },
+            { id: "mayoreo", label: "Mayoreo", description: "Precio especial", icon: Users }
+          ] as const).map(option => {
+            const Icon = option.icon;
+            const selected = canal === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => onCanalChange?.(option.id)}
+                aria-pressed={selected}
+                className={`min-h-20 rounded-xl border p-3 text-left transition-all focus:outline-none focus:ring-2 focus:ring-rose-500 ${selected ? "border-rose-500 bg-rose-50 dark:bg-rose-950/30 ring-1 ring-rose-500" : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-zinc-400 dark:hover:border-zinc-600"}`}
+              >
+                <div className="flex items-center gap-2">
+                  <Icon className={`w-4 h-4 ${selected ? "text-rose-500" : "text-zinc-400"}`} />
+                  <span className="text-xs font-bold text-zinc-900 dark:text-white">{option.label}</span>
+                </div>
+                <span className="block text-[10px] text-zinc-500 mt-1">{option.description}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       {/* Feedback Messages */}
       {formSuccess && (

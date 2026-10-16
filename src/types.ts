@@ -259,6 +259,7 @@ export type NavigationTab =
   | "almacenes" 
   | "catalogo"
   | "papelera"
+  | "configuracion"
   | "ventas" // legacy/alias for sales analysis
   | "movimientos"; // alias for redirect
 
