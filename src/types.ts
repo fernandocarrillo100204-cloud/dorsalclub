@@ -247,6 +247,7 @@ export type NavigationTab =
   | "ventas_emprendedor"
   | "ventas_mayoreo"
   | "ventas_pedidos"
+  | "ventas_historial"
   | "clientes"
   | "transferencias_nueva"
   | "historial" 

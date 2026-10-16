@@ -53,6 +53,7 @@ const Dashboard = lazyWithRetry(() => import("./components/Dashboard"));
 const Compras = lazyWithRetry(() => import("./components/Compras"));
 const Ventas = lazyWithRetry(() => import("./components/Ventas"));
 const PedidosVenta = lazyWithRetry(() => import("./components/PedidosVenta"));
+const HistorialVentas = lazyWithRetry(() => import("./components/HistorialVentas"));
 const Transferencias = lazyWithRetry(() => import("./components/Transferencias"));
 const Historial = lazyWithRetry(() => import("./components/Historial"));
 const GestionAlmacenes = lazyWithRetry(() => import("./components/GestionAlmacenes"));
@@ -116,6 +117,9 @@ const getTabFromPath = (path: string): NavigationTab => {
   if (normalized === "/ventas/pedidos") {
     return "ventas_pedidos";
   }
+  if (normalized === "/ventas/historial") {
+    return "ventas_historial";
+  }
   if (normalized === "/transferencias/nueva" || normalized === "/inventario/transferencias") {
     return "transferencias_nueva";
   }
@@ -163,6 +167,8 @@ const getPathFromTab = (tab: NavigationTab): string => {
       return "/ventas/mayoreo";
     case "ventas_pedidos":
       return "/ventas/pedidos";
+    case "ventas_historial":
+      return "/ventas/historial";
     case "transferencias_nueva":
       return "/inventario/transferencias";
     case "analisis_ventas":
@@ -430,8 +436,8 @@ export default function App() {
                       preselectedClienteId={preselectedClienteId}
                       canal={activeTab === "ventas_bajo_pedido" ? "bajo_pedido" : activeTab === "ventas_emprendedor" ? "paquete_emprendedor" : activeTab === "ventas_mayoreo" ? "mayoreo" : "stock"}
                       onCanalChange={(nextCanal) => navigateTo(nextCanal === "bajo_pedido" ? "ventas_bajo_pedido" : nextCanal === "paquete_emprendedor" ? "ventas_emprendedor" : nextCanal === "mayoreo" ? "ventas_mayoreo" : "ventas_stock", { clienteId: preselectedClienteId || undefined })}
-                      onSuccess={() => navigateTo(activeTab === "ventas_bajo_pedido" || activeTab === "ventas_mayoreo" ? "ventas_pedidos" : "analisis_ventas")}
-                      onCancel={() => navigateTo("analisis_ventas")}
+                      onSuccess={() => navigateTo(activeTab === "ventas_bajo_pedido" || activeTab === "ventas_mayoreo" ? "ventas_pedidos" : "ventas_historial")}
+                      onCancel={() => navigateTo("ventas_historial")}
                     />
                   </motion.div>
                 )}
@@ -448,6 +454,23 @@ export default function App() {
                   </motion.div>
                 )}
 
+                {activeTab === "ventas_historial" && (
+                  <motion.div
+                    key="ventas_historial"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                  >
+                    <HistorialVentas
+                      almacenes={almacenes}
+                      productos={productos}
+                      preselectedClienteId={preselectedClienteId}
+                      onNavigateToCliente={(clienteId) => navigateTo("clientes", { clienteId })}
+                    />
+                  </motion.div>
+                )}
+
                 {/* Clientes: Catálogo y Fichas Comerciales */}
                 {activeTab === "clientes" && (
                   <motion.div
@@ -460,7 +483,7 @@ export default function App() {
                     <Clientes
                       preselectedClienteId={preselectedClienteId}
                       onNavigateToVenta={(clienteId) => navigateTo("ventas_nueva", { clienteId })}
-                      onNavigateToHistory={(clienteId) => navigateTo("historial", { clienteId })}
+                      onNavigateToHistory={(clienteId) => navigateTo("ventas_historial", { clienteId })}
                       onNavigateToPedidos={() => navigateTo("ventas_pedidos")}
                     />
                   </motion.div>
