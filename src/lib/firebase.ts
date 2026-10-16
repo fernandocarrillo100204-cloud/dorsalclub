@@ -3858,7 +3858,11 @@ export const firestoreService = {
         stockEntries.forEach((entry, index) => {
           const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
           if (currentQty < entry.cantidad) {
-            throw new Error(`No se puede enviar la compra a Papelera: el stock actual de ${entry.sku} es menor que las ${entry.cantidad} unidades que se deben revertir.`);
+            throw new Error(
+              `No se puede enviar esta compra a la Papelera porque parte de ${entry.sku} ya fue vendida, transferida o ajustada. ` +
+              `Hay ${currentQty} unidades disponibles y se necesitan ${entry.cantidad} para revertir la compra. ` +
+              `Primero cancela o revierte los movimientos posteriores relacionados.`
+            );
           }
         });
 
@@ -3875,16 +3879,23 @@ export const firestoreService = {
         });
         movementSnaps.forEach(snapshot => {
           if (!snapshot.exists()) return;
-          const previousState = snapshot.data().estado === "anulado" ? "anulado" : "activo";
-          transaction.update(snapshot.ref, {
-            estado: "anulado",
-            anulado_at: now,
-            anulado_por: usuarioEmail,
-            motivo_anulacion: "Compra enviada a Papelera",
-            en_papelera: true,
-            desactivado_at: now,
-            estado_antes_papelera: previousState
-          });
+          const wasCancelled = snapshot.data().estado === "anulado";
+          transaction.update(snapshot.ref, wasCancelled
+            ? {
+                en_papelera: true,
+                desactivado_at: now,
+                estado_antes_papelera: "anulado"
+              }
+            : {
+                estado: "anulado",
+                anulado_at: now,
+                anulado_por: usuarioEmail,
+                motivo_anulacion: "Compra enviada a Papelera",
+                en_papelera: true,
+                desactivado_at: now,
+                estado_antes_papelera: "activo"
+              }
+          );
         });
         transaction.set(compraRef, {
           estado: "anulada",
