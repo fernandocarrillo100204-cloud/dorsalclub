@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import { ArchiveRestore, RefreshCw, Search, Trash2, AlertCircle } from "lucide-react";
+import { ArchiveRestore, RefreshCw, Search, Trash2, AlertCircle, Loader2, X, CheckCircle2 } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
 import { PapeleraItem, PapeleraTipo } from "../types";
 
@@ -33,6 +33,10 @@ export default function Papelera() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<PapeleraTipo | "todos">("todos");
   const [restoringKey, setRestoringKey] = useState<string | null>(null);
+  const [showEmptyConfirm, setShowEmptyConfirm] = useState(false);
+  const [confirmationText, setConfirmationText] = useState("");
+  const [emptying, setEmptying] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
 
   const loadItems = async () => {
     setLoading(true);
@@ -74,6 +78,33 @@ export default function Papelera() {
     }
   };
 
+  const emptyTrash = async () => {
+    if (confirmationText.trim().toUpperCase() !== "VACIAR" || emptying) return;
+    setEmptying(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const deletedCount = await firestoreService.vaciarPapelera();
+      setItems([]);
+      setSearch("");
+      setTypeFilter("todos");
+      setShowEmptyConfirm(false);
+      setConfirmationText("");
+      setSuccess(
+        deletedCount === 1
+          ? "Se eliminó permanentemente 1 documento de la Papelera."
+          : `Se eliminaron permanentemente ${deletedCount} documentos de la Papelera.`
+      );
+    } catch (err: any) {
+      console.error("Error al vaciar la Papelera:", err);
+      const message = err?.message || "No se pudo vaciar la Papelera.";
+      await loadItems();
+      setError(message);
+    } finally {
+      setEmptying(false);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-3.5 sm:px-5 lg:px-6 py-5 space-y-6" id="papelera-page">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
@@ -83,14 +114,27 @@ export default function Papelera() {
             <h1 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white">Papelera</h1>
           </div>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            Registros desactivados que pueden restaurarse. No se eliminan documentos de forma permanente.
+            Registros desactivados que puedes restaurar o eliminar definitivamente.
           </p>
         </div>
-        <button type="button" onClick={loadItems} disabled={loading} className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 text-sm font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50">
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          Actualizar
-        </button>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <button type="button" onClick={loadItems} disabled={loading || emptying} className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 text-sm font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50">
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            Actualizar
+          </button>
+          <button type="button" onClick={() => { setShowEmptyConfirm(true); setConfirmationText(""); setError(null); }} disabled={loading || emptying || items.length === 0 || restoringKey !== null} className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-rose-600 text-white text-sm font-semibold hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed">
+            <Trash2 className="h-4 w-4" />
+            Vaciar papelera
+          </button>
+        </div>
       </div>
+
+      {success && (
+        <div className="flex items-start gap-2 p-3 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300" role="status">
+          <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+          <span className="text-sm">{success}</span>
+        </div>
+      )}
 
       {error && (
         <div className="flex items-start gap-2 p-3 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300" role="alert">
@@ -139,6 +183,44 @@ export default function Papelera() {
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {showEmptyConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4" role="dialog" aria-modal="true" aria-labelledby="empty-trash-title">
+          <div className="w-full max-w-md rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xl p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-300">
+                  <Trash2 className="h-5 w-5" />
+                </span>
+                <div>
+                  <h2 id="empty-trash-title" className="text-lg font-bold text-zinc-900 dark:text-white">Vaciar papelera</h2>
+                  <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Se eliminarán definitivamente todos los registros de la Papelera.</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => { if (!emptying) { setShowEmptyConfirm(false); setConfirmationText(""); } }} disabled={emptying} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200" aria-label="Cerrar confirmación">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300">
+              <strong>{items.length} {items.length === 1 ? "registro visible" : "registros visibles"}</strong>. Esta acción no puede deshacerse. No se modificará nuevamente el inventario porque estos registros ya fueron desactivados previamente.
+            </div>
+
+            <label className="mt-4 block text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+              Escribe <span className="font-mono text-rose-600 dark:text-rose-400">VACIAR</span> para confirmar
+              <input autoFocus value={confirmationText} onChange={event => setConfirmationText(event.target.value)} disabled={emptying} className="mt-2 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2.5 text-sm font-mono uppercase outline-none focus:ring-2 focus:ring-rose-500 disabled:opacity-60" placeholder="VACIAR" />
+            </label>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => { setShowEmptyConfirm(false); setConfirmationText(""); }} disabled={emptying} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50">Cancelar</button>
+              <button type="button" onClick={emptyTrash} disabled={confirmationText.trim().toUpperCase() !== "VACIAR" || emptying} className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                {emptying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                {emptying ? "Eliminando..." : "Eliminar definitivamente"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

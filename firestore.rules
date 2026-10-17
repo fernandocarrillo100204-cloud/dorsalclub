@@ -31,7 +31,7 @@ service cloud.firestore {
         && isValidId(almacenId)
         && incoming().nombre is string && incoming().nombre.size() > 0 && incoming().nombre.size() <= 100
         && incoming().ubicacion is string && incoming().ubicacion.size() <= 200;
-      allow delete: if false;
+      allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
     // Productos Collection
@@ -41,7 +41,7 @@ service cloud.firestore {
         && isValidId(sku)
         && incoming().nombre is string && incoming().nombre.size() > 0 && incoming().nombre.size() <= 120
         && incoming().stock_minimo is number && incoming().stock_minimo >= 0;
-      allow delete: if false;
+      allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
     // Stock Collection
@@ -91,14 +91,14 @@ service cloud.firestore {
           ])
         )
       );
-      allow delete: if false;
+      allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
     // Compras Collection
     match /compras/{compraId} {
       allow read: if isSignedIn();
       allow create, update: if isSignedIn() && isValidId(compraId);
-      allow delete: if false;
+      allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
     // Clientes Collection
@@ -109,7 +109,7 @@ service cloud.firestore {
         && incoming().nombre_completo is string && incoming().nombre_completo.size() > 0
         && incoming().tipo_cliente is string
         && incoming().tipo_cliente.size() > 0 && incoming().tipo_cliente.size() <= 80;
-      allow delete: if false;
+      allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
     // Gastos Collection
@@ -127,7 +127,7 @@ service cloud.firestore {
           incoming().metodo_pago is string 
           && incoming().metodo_pago.size() > 0 && incoming().metodo_pago.size() <= 100
         ));
-      allow delete: if false;
+      allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
     // Migraciones Collection (one-time migration trackers)
@@ -159,42 +159,42 @@ service cloud.firestore {
     // Catalogs & System Configuration
     match /catalogo_categorias/{catId} {
       allow read, create, update: if isSignedIn();
-      allow delete: if false;
+      allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
     match /catalogo_marcas/{marcaId} {
       allow read, create, update: if isSignedIn();
-      allow delete: if false;
+      allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
     match /catalogo_colores/{colorId} {
       allow read, create, update: if isSignedIn();
-      allow delete: if false;
+      allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
     match /catalogo_tallas_ropa/{tallaId} {
       allow read, create, update: if isSignedIn();
-      allow delete: if false;
+      allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
     match /catalogo_tallas_calzado/{tallaId} {
       allow read, create, update: if isSignedIn();
-      allow delete: if false;
+      allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
     match /catalogo_unidades/{unitId} {
       allow read, create, update: if isSignedIn();
-      allow delete: if false;
+      allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
     match /catalogo_ubicaciones_entrega/{ubicacionId} {
       allow read, create, update: if isSignedIn();
-      allow delete: if false;
+      allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
     match /catalogo_repartidores/{repartidorId} {
       allow read, create, update: if isSignedIn();
-      allow delete: if false;
+      allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
     match /configuracion/{configId} {
