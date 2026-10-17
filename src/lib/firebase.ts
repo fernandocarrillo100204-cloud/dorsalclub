@@ -82,7 +82,7 @@ import {
   getPeriodosFinancierosDisponibles,
   clearPeriodosFinancierosCache
 } from "./periodosFinancieros";
-import { allocateRecognizedSaleIncome, calculateSaleTotals } from "./ventasCore";
+import { allocateRecognizedSaleIncome, calculateSaleTotals, requiresSaleRefund } from "./ventasCore";
 
 // Detect if Firebase config is present in environment variables
 const metaEnv = (import.meta as any).env || {};
@@ -1942,7 +1942,7 @@ export const firestoreService = {
     });
 
     const masterOrders: PedidoVenta[] = ventasMaestras
-      .filter(item => item.estado !== "anulado" && item.en_papelera !== true && (item.canal_venta === "bajo_pedido" || item.canal_venta === "mayoreo"))
+      .filter(item => item.estado !== "anulado" && item.estado !== "devuelto" && item.en_papelera !== true && (item.canal_venta === "bajo_pedido" || item.canal_venta === "mayoreo"))
       .map(item => ({
         venta_id: item.id,
         folio: item.folio,
@@ -1986,7 +1986,7 @@ export const firestoreService = {
           const periodSnap = periodRef ? await transaction.get(periodRef) : null;
           if (!currentSale.exists()) throw new Error("El pedido ya no existe.");
           const data = currentSale.data();
-          if (data.estado === "anulado" || data.en_papelera === true) throw new Error("El pedido está cancelado o ya no está disponible.");
+          if (data.estado === "anulado" || data.estado === "devuelto" || data.en_papelera === true) throw new Error("El pedido está cancelado, devuelto o ya no está disponible.");
           const total = Math.max(0, Number(data.total) || 0);
           const currentReceived = Math.max(0, Number(data.recibido) || 0);
           const currentBalance = Math.max(0, Math.round((total - currentReceived + Number.EPSILON) * 100) / 100);
@@ -2108,7 +2108,7 @@ export const firestoreService = {
       const masterIndex = masterSales.findIndex(item => item.id === ventaId);
       if (masterIndex >= 0) {
         const sale = masterSales[masterIndex];
-        if (sale.estado === "anulado" || sale.en_papelera) throw new Error("El pedido está cancelado o ya no está disponible.");
+        if (sale.estado === "anulado" || sale.estado === "devuelto" || sale.en_papelera) throw new Error("El pedido está cancelado, devuelto o ya no está disponible.");
         if (cleanAmount > sale.saldo) throw new Error(`El pago no puede superar el saldo de $${sale.saldo.toFixed(2)}.`);
         const paymentId = `abono_${Math.random().toString(36).slice(2, 11)}`;
         const nuevoRecibido = Math.round((sale.recibido + cleanAmount + Number.EPSILON) * 100) / 100;
@@ -2177,8 +2177,8 @@ export const firestoreService = {
           const current = await transaction.get(masterRef);
           if (!current.exists()) throw new Error("El pedido ya no existe.");
           const currentData = current.data();
-          if (currentData.estado === "anulado" || currentData.en_papelera === true) {
-            throw new Error("El pedido está cancelado o ya no está disponible.");
+          if (currentData.estado === "anulado" || currentData.estado === "devuelto" || currentData.en_papelera === true) {
+            throw new Error("El pedido está cancelado, devuelto o ya no está disponible.");
           }
           const saldo = Math.max(0, Number(currentData.saldo) || 0);
           if (data.marcar_entregado && saldo > 0.009) {
@@ -2228,7 +2228,7 @@ export const firestoreService = {
     const masterIndex = masterSales.findIndex(item => item.id === ventaId);
     if (masterIndex >= 0) {
       const sale = masterSales[masterIndex];
-      if (sale.estado === "anulado" || sale.en_papelera) throw new Error("El pedido está cancelado o ya no está disponible.");
+      if (sale.estado === "anulado" || sale.estado === "devuelto" || sale.en_papelera) throw new Error("El pedido está cancelado, devuelto o ya no está disponible.");
       if (data.marcar_entregado && sale.saldo > 0.009) throw new Error("Liquida el saldo antes de marcar el pedido como entregado.");
       masterSales[masterIndex] = {
         ...sale,
@@ -2828,6 +2828,23 @@ export const firestoreService = {
         }
 
         const saleItemMovements = activeMovements.filter(({ data }) => data.venta_id === ventaId && !data.subtipo);
+        const principalMovement = saleItemMovements.find(({ data }) => data.venta_partida === 1)?.data || saleItemMovements[0]?.data;
+        const receivedAmount = masterSnap.exists()
+          ? Math.max(0, Number(masterSnap.data().recibido) || 0)
+          : Math.max(0, Number(principalMovement?.ingreso_reconocido) || Number(principalMovement?.venta_total_recibido) || 0)
+            + activeMovements
+              .filter(({ data }) => data.venta_relacionada_id === ventaId && data.subtipo === "abono_venta")
+              .reduce((sum, { data }) => sum + Math.max(0, Number(data.ingreso_reconocido) || 0), 0);
+        const orderStatus = masterSnap.exists()
+          ? masterSnap.data().estado_pedido
+          : activeMovements.some(({ data }) => data.venta_relacionada_id === ventaId && data.subtipo === "seguimiento_pedido" && data.pedido_estado === "entregado")
+            || principalMovement?.pedido_estado === "entregado"
+            ? "entregado"
+            : principalMovement?.pedido_estado;
+
+        if (requiresSaleRefund(receivedAmount, orderStatus)) {
+          throw new Error("Esta venta ya recibió dinero o fue entregada. Registra una devolución para reintegrar el inventario y dejar el reembolso en Finanzas.");
+        }
         const inventoryMovements = saleItemMovements.filter(({ data }) => data.afecta_stock !== false);
         const stockEntries = inventoryMovements.map(({ data }) => {
           const sku = String(data.sku || "").trim().toUpperCase();
@@ -2926,6 +2943,23 @@ export const firestoreService = {
 
     if (groupedIndexes.length === 0) throw new Error("La venta no existe en el sistema.");
     if (activeItems.length === 0) throw new Error("Esta venta ya ha sido anulada previamente.");
+
+    const saleItems = activeItems.filter(({ movement }) => movement.venta_id === ventaId && !movement.subtipo);
+    const principalMovement = saleItems.find(({ movement }) => movement.venta_partida === 1)?.movement || saleItems[0]?.movement;
+    const receivedAmount = existingMasterSale
+      ? Math.max(0, Number(existingMasterSale.recibido) || 0)
+      : Math.max(0, Number(principalMovement?.ingreso_reconocido) || Number(principalMovement?.venta_total_recibido) || 0)
+        + activeItems
+          .filter(({ movement }) => movement.venta_relacionada_id === ventaId && movement.subtipo === "abono_venta")
+          .reduce((sum, { movement }) => sum + Math.max(0, Number(movement.ingreso_reconocido) || 0), 0);
+    const orderStatus = existingMasterSale?.estado_pedido === "entregado"
+      || activeItems.some(({ movement }) => movement.venta_relacionada_id === ventaId && movement.subtipo === "seguimiento_pedido" && movement.pedido_estado === "entregado")
+      || principalMovement?.pedido_estado === "entregado"
+      ? "entregado"
+      : existingMasterSale?.estado_pedido || principalMovement?.pedido_estado;
+    if (requiresSaleRefund(receivedAmount, orderStatus)) {
+      throw new Error("Esta venta ya recibió dinero o fue entregada. Registra una devolución para reintegrar el inventario y dejar el reembolso en Finanzas.");
+    }
 
     const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
     const summaryMap = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});

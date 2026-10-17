@@ -278,13 +278,23 @@ export default function AnalisisClientes({
     }
   }, [periodo]);
 
-  // Filter movements by validity: tipo == "salida", estado != "anulado", cliente_id == selectedCliente.id, and period
+  const returnedSaleIds = useMemo(() => new Set(
+    movimientos
+      .filter(m => m.subtipo === "reembolso_venta" && m.estado !== "anulado" && m.venta_relacionada_id)
+      .map(m => m.venta_relacionada_id as string)
+  ), [movimientos]);
+
+  // Solo las partidas originales de ventas activas alimentan el análisis. Los
+  // abonos son cobros, no nuevas compras, y una devolución invalida la venta.
   const filteredMovimientos = useMemo(() => {
     if (!selectedCliente?.id) return [];
 
     return movimientos.filter(m => {
       if (m.tipo !== "salida") return false;
       if (m.estado === "anulado") return false;
+      if (m.en_papelera === true) return false;
+      if (m.subtipo) return false;
+      if (m.venta_id && returnedSaleIds.has(m.venta_id)) return false;
       if (m.cliente_id !== selectedCliente.id) return false;
 
       if (periodDateThreshold) {
@@ -294,7 +304,7 @@ export default function AnalisisClientes({
 
       return true;
     });
-  }, [movimientos, selectedCliente, periodDateThreshold, normalizeDate]);
+  }, [movimientos, selectedCliente, periodDateThreshold, normalizeDate, returnedSaleIds]);
 
   // Group movements by folio/sale for purchase tracking
   const ventasAgrupadas = useMemo((): VentaAgrupada[] => {

@@ -4,7 +4,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, CheckCircle2, CircleDollarSign, LoaderCircle, PackageCheck, RefreshCw, Save, Trash2 } from "lucide-react";
+import { CalendarDays, CheckCircle2, CircleDollarSign, LoaderCircle, PackageCheck, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
 import { OpcionListaConfigurable, PedidoVenta } from "../types";
 
@@ -32,8 +32,13 @@ const PedidoCard: React.FC<{ pedido: PedidoVenta; metodosPago: OpcionListaConfig
   };
 
   const cancelOrder = () => {
+    if (pedido.recibido > 0.009) {
+      if (!window.confirm(`¿Cancelar y reembolsar el pedido ${pedido.folio}? Se registrará un reembolso por ${money.format(pedido.recibido)}.`)) return;
+      run(() => firestoreService.devolverVentaCompleta(pedido.venta_id, "Pedido cancelado y reembolsado por el usuario"));
+      return;
+    }
     if (!window.confirm(`¿Cancelar el pedido ${pedido.folio}? Esta acción lo retirará del seguimiento.`)) return;
-    run(() => firestoreService.anularVentaAgrupada(pedido.venta_id, "Pedido cancelado por el usuario"));
+    run(() => firestoreService.anularVentaAgrupada(pedido.venta_id, "Pedido sin pagos cancelado por el usuario"));
   };
 
   return (
@@ -44,8 +49,8 @@ const PedidoCard: React.FC<{ pedido: PedidoVenta; metodosPago: OpcionListaConfig
           <h3 className="font-bold text-zinc-900 dark:text-white">{pedido.cliente_nombre}</h3>
           <p className="text-xs text-zinc-500">{pedido.folio} · {pedido.fecha.toLocaleDateString("es-MX")}</p>
         </div>
-        <button type="button" onClick={cancelOrder} disabled={busy} className="p-2 rounded-lg text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50" aria-label={`Cancelar ${pedido.folio}`} title="Cancelar pedido">
-          <Trash2 className="w-4 h-4" />
+        <button type="button" onClick={cancelOrder} disabled={busy} className="p-2 rounded-lg text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50" aria-label={`${pedido.recibido > 0.009 ? "Cancelar y reembolsar" : "Cancelar"} ${pedido.folio}`} title={pedido.recibido > 0.009 ? "Cancelar y reembolsar pedido" : "Cancelar pedido"}>
+          {pedido.recibido > 0.009 ? <RotateCcw className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
         </button>
       </div>
 

@@ -15,6 +15,14 @@ export interface SaleCalculationInput {
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
+/**
+ * Una venta solo puede anularse sin reembolso cuando nunca recibió dinero y
+ * todavía no fue entregada. Los demás casos deben pasar por la devolución para
+ * conservar el rastro del reembolso en Finanzas.
+ */
+export const requiresSaleRefund = (receivedAmount: number, orderStatus?: string): boolean =>
+  Math.max(0, Number(receivedAmount) || 0) > 0.009 || orderStatus === "entregado";
+
 export interface SaleIncomeCompositionInput {
   recognizedAmount: number;
   merchandiseSubtotal: number;

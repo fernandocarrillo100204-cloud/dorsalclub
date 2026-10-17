@@ -175,9 +175,15 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
   }, [selectedCliente]);
 
   // Client metrics calculated on the fly
+  const returnedSaleIds = useMemo(() => new Set(
+    clienteMovimientos
+      .filter(m => m.subtipo === "reembolso_venta" && m.estado !== "anulado" && m.venta_relacionada_id)
+      .map(m => m.venta_relacionada_id as string)
+  ), [clienteMovimientos]);
+
   const groupedSales = useMemo(() => {
     const groups = new Map<string, Movimiento[]>();
-    clienteMovimientos.filter(m => m.estado !== "anulado" && !m.subtipo).forEach(m => {
+    clienteMovimientos.filter(m => !m.subtipo).forEach(m => {
       const key = m.venta_id || m.folio || m.id || `${m.sku}-${groups.size}`;
       groups.set(key, [...(groups.get(key) || []), m]);
     });
@@ -187,6 +193,12 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
       const total = typeof primary.venta_total_cobrado === "number"
         ? primary.venta_total_cobrado
         : ordered.reduce((sum, item) => sum + getTotalCobradoVenta(item), 0);
+      const saleId = primary.venta_id || "";
+      const estado = returnedSaleIds.has(saleId)
+        ? "devuelto" as const
+        : ordered.every(item => item.estado === "anulado")
+          ? "anulado" as const
+          : "activo" as const;
       return {
         key: primary.venta_id || primary.folio || primary.id || `${primary.sku}-${primary.fecha}`,
         folio: primary.folio || "Venta",
@@ -195,27 +207,32 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
         total,
         unidades: ordered.reduce((sum, item) => sum + (Number(item.cantidad) || 0), 0),
         items: ordered,
-        estado: primary.estado
+        estado
       };
     }).sort((a, b) => {
       const toTime = (value: any) => value instanceof Date ? value.getTime() : value?.toDate ? value.toDate().getTime() : new Date(value?.seconds ? value.seconds * 1000 : value).getTime();
       return toTime(b.fecha) - toTime(a.fecha);
     });
-  }, [clienteMovimientos]);
+  }, [clienteMovimientos, returnedSaleIds]);
+
+  const activeGroupedSales = useMemo(
+    () => groupedSales.filter(sale => sale.estado === "activo"),
+    [groupedSales]
+  );
 
   const clientMetrics = useMemo(() => {
-    const totalComprado = groupedSales.reduce((sum, sale) => sum + sale.total, 0);
+    const totalComprado = activeGroupedSales.reduce((sum, sale) => sum + sale.total, 0);
     const pedidosPendientes = clientePedidos.filter(pedido => pedido.estado !== "entregado");
     return {
       totalComprado,
-      ventasCount: groupedSales.length,
-      unidadesCompradas: groupedSales.reduce((sum, sale) => sum + sale.unidades, 0),
-      ticketPromedio: groupedSales.length > 0 ? totalComprado / groupedSales.length : 0,
-      ultimaCompra: groupedSales[0]?.fecha || null,
+      ventasCount: activeGroupedSales.length,
+      unidadesCompradas: activeGroupedSales.reduce((sum, sale) => sum + sale.unidades, 0),
+      ticketPromedio: activeGroupedSales.length > 0 ? totalComprado / activeGroupedSales.length : 0,
+      ultimaCompra: activeGroupedSales[0]?.fecha || null,
       pedidosPendientes: pedidosPendientes.length,
       saldoPendiente: pedidosPendientes.reduce((sum, pedido) => sum + pedido.saldo, 0)
     };
-  }, [groupedSales, clientePedidos]);
+  }, [activeGroupedSales, clientePedidos]);
 
   // Filtered clients list
   const filteredClientes = useMemo(() => {
@@ -984,6 +1001,11 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
                               {sale.estado === "anulado" && (
                                 <span className="px-1.5 py-0.2 rounded text-[10px] bg-rose-500/10 text-rose-500 font-bold">
                                   Anulado
+                                </span>
+                              )}
+                              {sale.estado === "devuelto" && (
+                                <span className="px-1.5 py-0.2 rounded text-[10px] bg-violet-500/10 text-violet-500 font-bold">
+                                  Devuelto
                                 </span>
                               )}
                             </div>

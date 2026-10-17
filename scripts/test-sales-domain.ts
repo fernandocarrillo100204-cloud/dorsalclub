@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { allocateRecognizedSaleIncome, calculateSaleTotals } from "../src/lib/ventasCore";
+import { allocateRecognizedSaleIncome, calculateSaleTotals, requiresSaleRefund } from "../src/lib/ventasCore";
 
 const directSale = calculateSaleTotals({
   items: [
@@ -61,5 +61,9 @@ assert.deepEqual(allocateRecognizedSaleIncome({
   shipping: 0,
   other: -25
 });
+
+assert.equal(requiresSaleRefund(0, "pedido"), false);
+assert.equal(requiresSaleRefund(500, "pedido"), true);
+assert.equal(requiresSaleRefund(0, "entregado"), true);
 
 console.log("Pruebas de dominio de ventas: aprobadas");
