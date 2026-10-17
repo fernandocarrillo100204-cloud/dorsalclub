@@ -564,7 +564,7 @@ export default function AnalisisVentas({ almacenes, productos, onNavigateToHisto
           )}
           <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-[#F8FAFC] dark:bg-[#182235] border border-[#E2E8F0] dark:border-[#263449] text-[11px] text-[#64748B] dark:text-[#94A3B8]">
             <span className="h-1.5 w-1.5 rounded-full bg-[#059669] dark:bg-emerald-400 animate-pulse" />
-            <span>Tiempo real activo</span>
+            <span>Datos del periodo seleccionado</span>
           </div>
         </div>
       </div>

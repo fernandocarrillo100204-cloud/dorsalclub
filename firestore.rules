@@ -77,6 +77,12 @@ service cloud.firestore {
         )
         ||
         (
+          (!('estado' in existing()) || existing().estado == 'activo')
+          && incoming().estado == 'activo'
+          && incoming().diff(existing()).affectedKeys().hasOnly(['en_papelera', 'desactivado_at', 'estado_antes_papelera', 'periodo_descontado_papelera'])
+        )
+        ||
+        (
           existing().estado == 'anulado'
           && incoming().estado == 'anulado'
           && incoming().diff(existing()).affectedKeys().hasOnly(['en_papelera', 'desactivado_at', 'estado_antes_papelera', 'periodo_descontado_papelera'])
@@ -91,6 +97,19 @@ service cloud.firestore {
           ])
         )
       );
+      allow delete: if isSignedIn() && existing().en_papelera == true;
+    }
+
+    // Documento maestro de cada venta. Las partidas de inventario siguen en movimientos.
+    match /ventas/{ventaId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(ventaId)
+        && incoming().folio is string && incoming().folio.size() > 0
+        && incoming().items is list
+        && incoming().total is number && incoming().total >= 0
+        && incoming().recibido is number && incoming().recibido >= 0
+        && incoming().saldo is number && incoming().saldo >= 0;
       allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 

@@ -15,13 +15,14 @@ import {
   Loader2,
   Package,
   RefreshCw,
+  RotateCcw,
   Search,
   Trash2,
   User,
   WalletCards
 } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
-import { Almacen, Cliente, Movimiento, Producto, getSubtotalVenta } from "../types";
+import { Almacen, Cliente, Movimiento, Producto, Venta, getSubtotalVenta } from "../types";
 
 interface HistorialVentasProps {
   almacenes: Almacen[];
@@ -39,12 +40,13 @@ interface VentaAgrupada {
   clienteId?: string;
   clienteNombre: string;
   canal: string;
-  estado: "activo" | "anulado";
+  estado: "activo" | "anulado" | "devuelto";
   estadoPago: "pagado" | "anticipo" | "pendiente";
   unidades: number;
   total: number;
   recibido: number;
   saldo: number;
+  master: boolean;
 }
 
 const money = new Intl.NumberFormat("es-MX", {
@@ -64,6 +66,7 @@ const isSaleItem = (movimiento: Movimiento): boolean =>
   movimiento.tipo === "salida" &&
   movimiento.subtipo !== "abono_venta" &&
   movimiento.subtipo !== "seguimiento_pedido" &&
+  movimiento.subtipo !== "reembolso_venta" &&
   movimiento.sku?.trim().toUpperCase() !== "ABONO";
 
 export default function HistorialVentas({
@@ -73,11 +76,14 @@ export default function HistorialVentas({
   onNavigateToCliente
 }: HistorialVentasProps) {
   const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
+  const [ventasMaestras, setVentasMaestras] = useState<Venta[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [lastDoc, setLastDoc] = useState<any>(null);
   const [hasMore, setHasMore] = useState(false);
+  const [masterLastDoc, setMasterLastDoc] = useState<any>(null);
+  const [masterHasMore, setMasterHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -86,7 +92,9 @@ export default function HistorialVentas({
   const [estadoFilter, setEstadoFilter] = useState("all");
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [ventaToCancel, setVentaToCancel] = useState<VentaAgrupada | null>(null);
+  const [ventaToReturn, setVentaToReturn] = useState<VentaAgrupada | null>(null);
   const [cancelReason, setCancelReason] = useState("");
+  const [returnReason, setReturnReason] = useState("");
   const [processingId, setProcessingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -111,13 +119,16 @@ export default function HistorialVentas({
     setLoading(true);
     setError(null);
     try {
-      const result = await firestoreService.getMovimientosPaginated({
-        pageSize: 100,
-        tipoFilter: "salida"
-      });
-      setMovimientos(result.items.filter(isSaleItem));
+      const [result, masterResult] = await Promise.all([
+        firestoreService.getMovimientosPaginated({ pageSize: 100, tipoFilter: "salida" }),
+        firestoreService.getVentasMaestrasPaginated({ pageSize: 50 })
+      ]);
+      setMovimientos(result.items);
+      setVentasMaestras(masterResult.items);
       setLastDoc(result.lastDoc);
       setHasMore(result.hasMore);
+      setMasterLastDoc(masterResult.lastDoc);
+      setMasterHasMore(masterResult.hasMore);
     } catch (loadError) {
       console.error("Error al cargar el historial de ventas:", loadError);
       setMovimientos([]);
@@ -132,22 +143,32 @@ export default function HistorialVentas({
   }, [loadFirstPage]);
 
   const loadMore = async () => {
-    if (!hasMore || !lastDoc || loadingMore) return;
+    if ((!hasMore && !masterHasMore) || loadingMore) return;
     setLoadingMore(true);
     setError(null);
     try {
-      const result = await firestoreService.getMovimientosPaginated({
-        pageSize: 100,
-        lastDoc,
-        tipoFilter: "salida"
-      });
-      setMovimientos((current) => {
-        const byId = new Map(current.map((item) => [item.id, item]));
-        result.items.filter(isSaleItem).forEach((item) => byId.set(item.id, item));
-        return Array.from(byId.values());
-      });
-      setLastDoc(result.lastDoc);
-      setHasMore(result.hasMore);
+      const [legacyResult, masterResult] = await Promise.all([
+        hasMore && lastDoc ? firestoreService.getMovimientosPaginated({ pageSize: 100, lastDoc, tipoFilter: "salida" }) : Promise.resolve(null),
+        masterHasMore && masterLastDoc ? firestoreService.getVentasMaestrasPaginated({ pageSize: 50, lastDoc: masterLastDoc }) : Promise.resolve(null)
+      ]);
+      if (legacyResult) {
+        setMovimientos((current) => {
+          const byId = new Map(current.map((item) => [item.id, item]));
+          legacyResult.items.forEach((item) => byId.set(item.id, item));
+          return Array.from(byId.values());
+        });
+        setLastDoc(legacyResult.lastDoc);
+        setHasMore(legacyResult.hasMore);
+      }
+      if (masterResult) {
+        setVentasMaestras(current => {
+          const byId = new Map(current.map(item => [item.id, item]));
+          masterResult.items.forEach(item => byId.set(item.id, item));
+          return Array.from(byId.values());
+        });
+        setMasterLastDoc(masterResult.lastDoc);
+        setMasterHasMore(masterResult.hasMore);
+      }
     } catch (loadError) {
       console.error("Error al cargar más ventas:", loadError);
       setError("No se pudieron cargar ventas anteriores.");
@@ -157,15 +178,16 @@ export default function HistorialVentas({
   };
 
   const ventas = useMemo<VentaAgrupada[]>(() => {
+    const masterIds = new Set(ventasMaestras.map(item => item.id));
     const groups = new Map<string, Movimiento[]>();
-    movimientos.filter(isSaleItem).forEach((movimiento) => {
+    movimientos.filter(item => isSaleItem(item) && (!item.venta_id || !masterIds.has(item.venta_id))).forEach((movimiento) => {
       const key = movimiento.venta_id || movimiento.folio || movimiento.id || `${asDate(movimiento.fecha).getTime()}-${movimiento.sku}`;
       const current = groups.get(key) || [];
       current.push(movimiento);
       groups.set(key, current);
     });
 
-    return Array.from(groups.entries()).map(([key, rawItems]) => {
+    const legacy = Array.from(groups.entries()).map(([key, rawItems]) => {
       const items = [...rawItems].sort((a, b) => (a.venta_partida || 1) - (b.venta_partida || 1));
       const principal = items[0];
       const subtotal = typeof principal.venta_subtotal === "number"
@@ -181,10 +203,12 @@ export default function HistorialVentas({
         : typeof principal.ingreso_reconocido === "number"
           ? principal.ingreso_reconocido
           : total;
-      const saldo = typeof principal.venta_saldo_pendiente === "number"
-        ? principal.venta_saldo_pendiente
-        : Math.max(total - recibido, 0);
-      const estadoPago = principal.estado_pago || (saldo > 0 ? (recibido > 0 ? "anticipo" : "pendiente") : "pagado");
+      const pagosPosteriores = movimientos
+        .filter(item => item.venta_relacionada_id === key && item.subtipo === "abono_venta" && item.estado !== "anulado")
+        .reduce((sum, item) => sum + Math.max(0, Number(item.ingreso_reconocido) || 0), 0);
+      const recibidoActual = Math.min(total, recibido + pagosPosteriores);
+      const saldo = Math.max(total - recibidoActual, 0);
+      const estadoPago = saldo > 0 ? (recibidoActual > 0 ? "anticipo" : "pendiente") : "pagado";
 
       return {
         key,
@@ -199,11 +223,59 @@ export default function HistorialVentas({
         estadoPago,
         unidades: items.reduce((sum, item) => sum + (Number(item.cantidad) || 0), 0),
         total,
-        recibido,
-        saldo
+        recibido: recibidoActual,
+        saldo,
+        master: false
       };
-    }).sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
-  }, [movimientos]);
+    });
+
+    const masters: VentaAgrupada[] = ventasMaestras.map(venta => {
+      const fecha = venta.fecha instanceof Date ? venta.fecha : new Date(venta.fecha.seconds * 1000);
+      const items: Movimiento[] = venta.items.map((item, index) => ({
+        id: `${venta.id}_${index + 1}`,
+        folio: venta.folio,
+        venta_id: venta.id,
+        venta_partida: index + 1,
+        venta_total_partidas: venta.items.length,
+        sku: item.sku,
+        almacen_id: item.almacen_id,
+        tipo: "salida",
+        cantidad: item.cantidad,
+        referencia: venta.folio,
+        usuario: venta.creado_por,
+        fecha,
+        estado: venta.estado === "anulado" ? "anulado" : venta.estado === "devuelto" ? "devuelto" : "activo",
+        cliente_id: venta.cliente_id,
+        cliente_nombre: venta.cliente_nombre,
+        canal_venta: venta.canal_venta,
+        canal_venta_nombre: venta.canal_venta_nombre,
+        afecta_stock: venta.afecta_stock,
+        precio_unitario_venta: item.precio_unitario,
+        costo_unitario_venta: item.costo_unitario,
+        total_venta: item.total,
+        comentarios_venta: venta.comentarios
+      }));
+      return {
+        key: venta.id,
+        principal: items[0],
+        items,
+        fecha,
+        folio: venta.folio,
+        clienteId: venta.cliente_id,
+        clienteNombre: venta.cliente_nombre,
+        canal: venta.canal_venta_nombre,
+        estado: venta.estado === "anulado" ? "anulado" : "activo",
+        estadoPago: venta.estado_pago,
+        unidades: venta.total_unidades,
+        total: venta.total,
+        recibido: venta.recibido,
+        saldo: venta.saldo,
+        master: true
+      };
+    });
+
+    return [...masters, ...legacy].sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
+  }, [movimientos, ventasMaestras]);
 
   const canales = useMemo<string[]>(
     () => Array.from(new Set<string>(ventas.map((venta) => venta.canal))).sort((a, b) => a.localeCompare(b, "es")),
@@ -238,12 +310,12 @@ export default function HistorialVentas({
     setProcessingId(ventaToCancel.key);
     setError(null);
     try {
-      await firestoreService.anularMovimiento(ventaToCancel.principal.id, cancelReason.trim());
-      setMovimientos((current) => current.map((item) =>
-        (ventaToCancel.principal.venta_id && item.venta_id === ventaToCancel.principal.venta_id) || item.id === ventaToCancel.principal.id
-          ? { ...item, estado: "anulado", motivo_anulacion: cancelReason.trim(), anulado_at: new Date() }
-          : item
-      ));
+      await firestoreService.anularVentaAgrupada(ventaToCancel.key, cancelReason.trim());
+      if (ventaToCancel.master) {
+        setVentasMaestras(current => current.map(item => item.id === ventaToCancel.key ? { ...item, estado: "anulado", motivo_anulacion: cancelReason.trim(), anulado_at: new Date() } : item));
+      } else {
+        setMovimientos((current) => current.map((item) => item.venta_id === ventaToCancel.key || item.id === ventaToCancel.principal.id ? { ...item, estado: "anulado", motivo_anulacion: cancelReason.trim(), anulado_at: new Date() } : item));
+      }
       setSuccess(`La venta ${ventaToCancel.folio} fue anulada y su inventario se revirtió.`);
       setVentaToCancel(null);
       setCancelReason("");
@@ -260,13 +332,29 @@ export default function HistorialVentas({
     setProcessingId(venta.key);
     setError(null);
     try {
-      await firestoreService.enviarMovimientoPapelera(venta.principal.id);
-      setMovimientos((current) => current.filter((item) =>
-        venta.principal.venta_id ? item.venta_id !== venta.principal.venta_id : item.id !== venta.principal.id
-      ));
+      await firestoreService.enviarVentaPapelera(venta.key);
+      setVentasMaestras(current => current.filter(item => item.id !== venta.key));
+      setMovimientos((current) => current.filter((item) => item.venta_id !== venta.key));
       setSuccess(`La venta ${venta.folio} se envió a la Papelera.`);
     } catch (archiveError: any) {
       setError(archiveError?.message || "No se pudo enviar la venta a la Papelera.");
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const returnSale = async () => {
+    if (!ventaToReturn || !returnReason.trim()) return;
+    setProcessingId(ventaToReturn.key);
+    setError(null);
+    try {
+      await firestoreService.devolverVentaCompleta(ventaToReturn.key, returnReason.trim());
+      setVentasMaestras(current => current.map(item => item.id === ventaToReturn.key ? { ...item, estado: "devuelto", saldo: 0, monto_reembolsado: item.recibido, motivo_devolucion: returnReason.trim(), devuelto_at: new Date() } : item));
+      setSuccess(`La venta ${ventaToReturn.folio} fue devuelta, el stock se reintegró y el reembolso quedó registrado.`);
+      setVentaToReturn(null);
+      setReturnReason("");
+    } catch (returnError: any) {
+      setError(returnError?.message || "No se pudo registrar la devolución.");
     } finally {
       setProcessingId(null);
     }
@@ -336,8 +424,8 @@ export default function HistorialVentas({
                         <td className="px-4 py-4"><button type="button" onClick={() => setExpandedKey(expanded ? null : venta.key)} className="text-left group"><span className="font-semibold group-hover:text-emerald-600">{venta.items.length} {venta.items.length === 1 ? "producto" : "productos"} · {venta.unidades} uds.</span><span className="block text-xs text-zinc-500 mt-1 max-w-[260px] truncate">{venta.items.map((item) => productName(item.sku)).join(", ")}</span></button></td>
                         <td className="px-4 py-4 text-right whitespace-nowrap"><div className="font-bold text-zinc-900 dark:text-white">{money.format(venta.total)}</div>{venta.saldo > 0 && <div className="text-xs text-amber-600 dark:text-amber-400 mt-1">Saldo {money.format(venta.saldo)}</div>}</td>
                         <td className="px-4 py-4"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${venta.estadoPago === "pagado" ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300" : venta.estadoPago === "anticipo" ? "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300"}`}>{venta.estadoPago === "pagado" ? "Pagado" : venta.estadoPago === "anticipo" ? "Anticipo" : "Pendiente"}</span></td>
-                        <td className="px-4 py-4">{venta.estado === "anulado" ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-rose-600 dark:text-rose-400"><Ban className="h-3.5 w-3.5" />Anulada</span> : <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" />Activa</span>}</td>
-                        <td className="px-4 py-4"><div className="flex items-center justify-end gap-1"><button type="button" onClick={() => setExpandedKey(expanded ? null : venta.key)} className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800" title="Ver detalle" aria-label={`Ver detalle de ${venta.folio}`}>{expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button>{venta.estado !== "anulado" && <button type="button" onClick={() => setVentaToCancel(venta)} disabled={processing} className="p-2 rounded-lg text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 disabled:opacity-50" title="Anular venta" aria-label={`Anular ${venta.folio}`}><Ban className="h-4 w-4" /></button>}<button type="button" onClick={() => archiveSale(venta)} disabled={processing} className="p-2 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 disabled:opacity-50" title="Enviar a Papelera" aria-label={`Enviar ${venta.folio} a la Papelera`}>{processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}</button></div></td>
+                        <td className="px-4 py-4">{venta.estado === "anulado" ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-rose-600 dark:text-rose-400"><Ban className="h-3.5 w-3.5" />Anulada</span> : venta.estado === "devuelto" ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-violet-600 dark:text-violet-400"><RotateCcw className="h-3.5 w-3.5" />Devuelta</span> : <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" />Activa</span>}</td>
+                        <td className="px-4 py-4"><div className="flex items-center justify-end gap-1"><button type="button" onClick={() => setExpandedKey(expanded ? null : venta.key)} className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800" title="Ver detalle" aria-label={`Ver detalle de ${venta.folio}`}>{expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button>{venta.estado === "activo" && venta.master && <button type="button" onClick={() => setVentaToReturn(venta)} disabled={processing} className="p-2 rounded-lg text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/30 disabled:opacity-50" title="Registrar devolución completa" aria-label={`Devolver ${venta.folio}`}><RotateCcw className="h-4 w-4" /></button>}{venta.estado === "activo" && <button type="button" onClick={() => setVentaToCancel(venta)} disabled={processing} className="p-2 rounded-lg text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 disabled:opacity-50" title="Anular venta" aria-label={`Anular ${venta.folio}`}><Ban className="h-4 w-4" /></button>}<button type="button" onClick={() => archiveSale(venta)} disabled={processing} className="p-2 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 disabled:opacity-50" title="Enviar a Papelera" aria-label={`Enviar ${venta.folio} a la Papelera`}>{processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}</button></div></td>
                       </tr>
                       {expanded && <tr className="bg-zinc-50/80 dark:bg-zinc-950/30"><td colSpan={8} className="px-5 py-4"><div className="grid gap-2"><div className="grid grid-cols-[minmax(0,1fr)_100px_120px_140px] gap-3 text-[11px] uppercase tracking-wide text-zinc-500 px-2"><span>Producto</span><span className="text-center">Cantidad</span><span>Almacén</span><span className="text-right">Importe</span></div>{venta.items.map((item) => <div key={item.id || `${venta.key}-${item.sku}`} className="grid grid-cols-[minmax(0,1fr)_100px_120px_140px] gap-3 items-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2.5"><span><strong className="block truncate">{productName(item.sku)}</strong><small className="font-mono text-zinc-500">{item.sku}</small></span><span className="text-center font-semibold">{item.cantidad}</span><span className="text-xs text-zinc-500 truncate">{warehouseName(item.almacen_id)}</span><span className="text-right font-semibold">{money.format(getSubtotalVenta(item))}</span></div>)}</div>{venta.principal.comentarios_venta && <p className="mt-3 text-xs text-zinc-500"><strong>Comentarios:</strong> {venta.principal.comentarios_venta}</p>}</td></tr>}
                     </React.Fragment>
@@ -349,9 +437,10 @@ export default function HistorialVentas({
         )}
       </div>
 
-      {hasMore && !loading && <div className="text-center"><button type="button" onClick={loadMore} disabled={loadingMore} className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-5 py-2.5 text-sm font-semibold hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-60">{loadingMore && <Loader2 className="h-4 w-4 animate-spin" />}Cargar ventas anteriores</button></div>}
+      {(hasMore || masterHasMore) && !loading && <div className="text-center"><button type="button" onClick={loadMore} disabled={loadingMore} className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-5 py-2.5 text-sm font-semibold hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-60">{loadingMore && <Loader2 className="h-4 w-4 animate-spin" />}Cargar ventas anteriores</button></div>}
 
       {ventaToCancel && <div className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="cancel-sale-title"><div className="w-full max-w-md rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-2xl p-5"><h2 id="cancel-sale-title" className="text-lg font-bold text-zinc-900 dark:text-white">Anular {ventaToCancel.folio}</h2><p className="text-sm text-zinc-500 mt-1">Se revertirá el inventario de todas las partidas. La venta seguirá visible para auditoría.</p><label className="block mt-4 text-sm font-semibold">Motivo de anulación<textarea autoFocus value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} rows={3} placeholder="Escribe el motivo..." className="mt-2 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-500" /></label><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => { setVentaToCancel(null); setCancelReason(""); }} className="rounded-xl px-4 py-2 text-sm font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800">Cancelar</button><button type="button" onClick={cancelSale} disabled={!cancelReason.trim() || processingId === ventaToCancel.key} className="inline-flex items-center gap-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 text-sm font-bold disabled:opacity-50">{processingId === ventaToCancel.key && <Loader2 className="h-4 w-4 animate-spin" />}Confirmar anulación</button></div></div></div>}
+      {ventaToReturn && <div className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="return-sale-title"><div className="w-full max-w-md rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-2xl p-5"><h2 id="return-sale-title" className="text-lg font-bold text-zinc-900 dark:text-white">Devolver {ventaToReturn.folio}</h2><p className="text-sm text-zinc-500 mt-1">Se reintegrarán todas las unidades al stock y se registrará un reembolso por {money.format(ventaToReturn.recibido)}. Esta acción queda en la auditoría.</p><label className="block mt-4 text-sm font-semibold">Motivo de devolución<textarea autoFocus value={returnReason} onChange={(event) => setReturnReason(event.target.value)} rows={3} placeholder="Ej. talla incorrecta, defecto, cambio solicitado..." className="mt-2 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-500" /></label><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => { setVentaToReturn(null); setReturnReason(""); }} className="rounded-xl px-4 py-2 text-sm font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800">Cancelar</button><button type="button" onClick={returnSale} disabled={!returnReason.trim() || processingId === ventaToReturn.key} className="inline-flex items-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 text-sm font-bold disabled:opacity-50">{processingId === ventaToReturn.key && <Loader2 className="h-4 w-4 animate-spin" />}Confirmar devolución</button></div></div></div>}
     </div>
   );
 }

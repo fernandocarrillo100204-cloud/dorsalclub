@@ -70,6 +70,7 @@ export interface Movimiento {
   compra_id?: string; // Trazabilidad con lote de compra
   lote_id?: string; // Identificador de lote
   costo_unitario?: number; // Costo unitario al registrar compra
+  costo_unitario_venta?: number; // Snapshot del costo utilizado al vender
   cliente_id?: string; // ID opcional del cliente en salidas/ventas
   cliente_nombre?: string; // Snapshot del nombre del cliente o "Venta sin cliente / Mostrador"
   cliente_tipo?: TipoCliente | string; // Snapshot del tipo de cliente
@@ -103,6 +104,8 @@ export interface Movimiento {
   venta_total_recibido?: number;
   venta_saldo_pendiente?: number;
   ingreso_reconocido?: number;
+  unidades_devueltas?: number;
+  metodo_pago?: string;
   estado_pago?: "pagado" | "anticipo" | "pendiente";
   pedido_estado?: "pedido" | "pagado" | "entregado";
   pedido_fecha_estimada?: string;
@@ -111,7 +114,7 @@ export interface Movimiento {
     seconds: number;
     nanoseconds: number;
   } | Date;
-  subtipo?: "abono_venta" | "seguimiento_pedido";
+  subtipo?: "abono_venta" | "seguimiento_pedido" | "reembolso_venta";
   venta_relacionada_id?: string;
   estado?: "activo" | "anulado"; // Estado del movimiento (por defecto activo)
   anulado_at?: {
@@ -131,6 +134,82 @@ export interface VentaPartidaInput {
   almacen_id: string;
   cantidad: number;
   precio_unitario_venta: number;
+  costo_unitario_venta: number;
+}
+
+export interface VentaItem {
+  sku: string;
+  almacen_id: string;
+  cantidad: number;
+  precio_unitario: number;
+  costo_unitario: number;
+  total: number;
+  costo_total: number;
+}
+
+export interface PagoVenta {
+  id: string;
+  monto: number;
+  metodo_pago: string;
+  fecha: { seconds: number; nanoseconds: number } | Date;
+  usuario: string;
+  estado: "activo" | "anulado";
+  motivo_anulacion?: string;
+}
+
+export interface Venta {
+  id: string;
+  folio: string;
+  fecha: { seconds: number; nanoseconds: number } | Date;
+  fecha_str: string;
+  items: VentaItem[];
+  total_unidades: number;
+  subtotal: number;
+  envio_cobrado_cliente: number;
+  otros_cargos_cliente: number;
+  concepto_otros_cargos?: string;
+  total: number;
+  costo_mercancia: number;
+  costo_envio_venta: number;
+  otros_costos_venta: number;
+  concepto_otros_costos?: string;
+  costos_totales: number;
+  cliente_id?: string;
+  cliente_nombre: string;
+  cliente_tipo?: TipoCliente | string;
+  canal_venta: CanalVentaId;
+  canal_venta_nombre: string;
+  porcentaje_precio: number;
+  afecta_stock: boolean;
+  anticipo_porcentaje: number;
+  recibido: number;
+  saldo: number;
+  estado_pago: "pagado" | "anticipo" | "pendiente";
+  estado_pedido?: "pedido" | "pagado" | "entregado";
+  fecha_estimada?: string;
+  comentarios_pedido?: string;
+  entregado_at?: { seconds: number; nanoseconds: number } | Date;
+  pagos: PagoVenta[];
+  metodo_pago_inicial: string;
+  comentarios?: string;
+  ubicacion_entrega_id?: string;
+  ubicacion_entrega_nombre?: string;
+  repartidor_id?: string;
+  repartidor_nombre?: string;
+  creado_por: string;
+  creado_at: { seconds: number; nanoseconds: number } | Date;
+  actualizado_at: { seconds: number; nanoseconds: number } | Date;
+  estado: "activo" | "anulado" | "devuelto_parcial" | "devuelto";
+  motivo_anulacion?: string;
+  anulado_at?: { seconds: number; nanoseconds: number } | Date;
+  anulado_por?: string;
+  en_papelera?: boolean;
+  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
+  estado_antes_papelera?: "activo" | "anulado" | "devuelto" | "devuelto_parcial";
+  monto_reembolsado?: number;
+  motivo_devolucion?: string;
+  devuelto_at?: { seconds: number; nanoseconds: number } | Date;
+  devuelto_por?: string;
 }
 
 export interface VentaRegistroInput {
@@ -156,6 +235,7 @@ export interface VentaRegistroInput {
   afecta_stock: boolean;
   anticipo_porcentaje: number;
   minimo_piezas: number;
+  metodo_pago_inicial: string;
 }
 
 export type CanalVentaId = "stock" | "bajo_pedido" | "paquete_emprendedor" | "mayoreo";
@@ -191,6 +271,7 @@ export interface PedidoVenta {
   ubicacion_entrega_nombre?: string;
   repartidor_nombre?: string;
   items: Array<{ sku: string; cantidad: number; precio_unitario: number; total: number }>;
+  pagos?: PagoVenta[];
 }
 
 export type TipoCliente = string;
@@ -411,6 +492,7 @@ export interface ConfiguracionListasDesplegables {
   origenes_cliente: OpcionListaConfigurable[];
   categorias_gasto: OpcionListaConfigurable[];
   metodos_pago_gasto: OpcionListaConfigurable[];
+  metodos_pago_venta: OpcionListaConfigurable[];
 }
 
 export interface ResumenVentaDiaria {

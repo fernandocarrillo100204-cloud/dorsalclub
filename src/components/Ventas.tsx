@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
-import { Almacen, Producto, StockItem, Cliente, TipoCliente, VentaPartidaInput, UbicacionEntregaCatalogo, RepartidorCatalogo, CanalVentaId, ConfiguracionVentas, normalizeOptionalMoney } from "../types";
+import { Almacen, Producto, StockItem, Cliente, TipoCliente, VentaPartidaInput, UbicacionEntregaCatalogo, RepartidorCatalogo, CanalVentaId, ConfiguracionVentas, OpcionListaConfigurable, normalizeOptionalMoney } from "../types";
 import ClienteModal from "./ClienteModal";
 import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 import {
@@ -39,16 +39,18 @@ interface VentaItemDraft {
   almacenId: string;
   cantidad: number | string;
   precioUnitario: number | string;
+  costoUnitario: number | string;
 }
 
 let nextVentaItemId = 0;
 
-const createVentaItem = (sku = "", almacenId = "", precioUnitario: number | string = ""): VentaItemDraft => ({
+const createVentaItem = (sku = "", almacenId = "", precioUnitario: number | string = "", costoUnitario: number | string = ""): VentaItemDraft => ({
   id: `venta-item-${++nextVentaItemId}`,
   sku,
   almacenId,
   cantidad: 1,
-  precioUnitario
+  precioUnitario,
+  costoUnitario
 });
 
 interface VentasProps {
@@ -79,7 +81,8 @@ export default function Ventas({
     return [createVentaItem(
       preselectedSku,
       preselectedAlmacenId || almacenes[0]?.id || "",
-      initialProduct?.precio_venta ?? ""
+      initialProduct?.precio_venta ?? "",
+      initialProduct?.precio_costo ?? ""
     )];
   });
   // Opciones y ajustes de venta (envío y costos adicionales)
@@ -100,6 +103,8 @@ export default function Ventas({
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [salesConfig, setSalesConfig] = useState<ConfiguracionVentas | null>(null);
   const [customMarkup, setCustomMarkup] = useState<string>("");
+  const [metodosPago, setMetodosPago] = useState<OpcionListaConfigurable[]>([]);
+  const [metodoPagoInicial, setMetodoPagoInicial] = useState("");
 
   // Client Selection State
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -125,7 +130,8 @@ export default function Ventas({
           ...item,
           sku: nextSku,
           almacenId: preselectedAlmacenId || item.almacenId,
-          precioUnitario: preselectedSku ? calculateChannelPrice(selectedProduct) : item.precioUnitario
+          precioUnitario: preselectedSku ? calculateChannelPrice(selectedProduct) : item.precioUnitario,
+          costoUnitario: preselectedSku ? (selectedProduct?.precio_costo ?? "") : item.costoUnitario
         };
       }));
     }
@@ -163,14 +169,16 @@ export default function Ventas({
     setDeliveryCatalogLoading(true);
     setDeliveryCatalogError(null);
     try {
-      const [locations, deliveryPeople, channelConfig] = await Promise.all([
+      const [locations, deliveryPeople, channelConfig, listsConfig] = await Promise.all([
         firestoreService.getUbicacionesEntrega(),
         firestoreService.getRepartidores(),
-        firestoreService.getConfiguracionVentas()
+        firestoreService.getConfiguracionVentas(),
+        firestoreService.getConfiguracionListasDesplegables()
       ]);
       setUbicacionesEntrega(locations.filter(item => item.activa));
       setRepartidores(deliveryPeople.filter(item => item.activa));
       setSalesConfig(channelConfig);
+      setMetodosPago(listsConfig.metodos_pago_venta.filter(item => item.activa));
     } catch (error: any) {
       setDeliveryCatalogError(error?.message || "No se pudieron cargar las opciones de entrega.");
     } finally {
@@ -198,7 +206,7 @@ export default function Ventas({
     if (!channelConfig || !hasValidMarkup) return;
     setItems(current => current.map(item => {
       const product = productos.find(candidate => candidate.sku === item.sku);
-      return item.sku ? { ...item, precioUnitario: calculateChannelPrice(product) } : item;
+      return item.sku ? { ...item, precioUnitario: calculateChannelPrice(product), costoUnitario: product?.precio_costo ?? item.costoUnitario } : item;
     }));
   }, [canal, channelConfig, customMarkup, productos]);
 
@@ -235,7 +243,8 @@ export default function Ventas({
     const selectedProduct = productos.find((product) => product.sku === nextSku);
     updateItem(id, {
       sku: nextSku,
-      precioUnitario: calculateChannelPrice(selectedProduct)
+      precioUnitario: calculateChannelPrice(selectedProduct),
+      costoUnitario: selectedProduct?.precio_costo ?? ""
     });
   };
 
@@ -317,6 +326,7 @@ export default function Ventas({
       const cleanSku = item.sku.trim().toUpperCase();
       const quantity = Number(item.cantidad);
       const unitPrice = Number(item.precioUnitario);
+      const unitCost = Number(item.costoUnitario);
 
       if (!cleanSku) {
         setFormError(`Selecciona el producto de la partida ${index + 1}.`);
@@ -330,13 +340,11 @@ export default function Ventas({
         setFormError(`La cantidad de la partida ${index + 1} debe ser un número entero mayor a cero.`);
         return;
       }
-      if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+      if (item.precioUnitario === "" || !Number.isFinite(unitPrice) || unitPrice < 0) {
         setFormError(`El precio de la partida ${index + 1} debe ser un número válido mayor o igual a cero.`);
         return;
       }
-      const product = productos.find(candidate => candidate.sku === cleanSku);
-      const productCost = Number(product?.precio_costo);
-      if (!Number.isFinite(productCost) || productCost < 0) {
+      if (item.costoUnitario === "" || !Number.isFinite(unitCost) || unitCost < 0) {
         setFormError(`El producto ${cleanSku} no tiene un costo válido registrado.`);
         return;
       }
@@ -361,7 +369,8 @@ export default function Ventas({
         sku: cleanSku,
         almacen_id: itemWarehouse,
         cantidad: quantity,
-        precio_unitario_venta: unitPrice
+        precio_unitario_venta: unitPrice,
+        costo_unitario_venta: unitCost
       });
     }
 
@@ -421,6 +430,11 @@ export default function Ventas({
       const comentariosVentaFinal = cleanComentarios ? cleanComentarios.slice(0, 500) : undefined;
       const selectedDeliveryLocation = ubicacionesEntrega.find(item => item.id === ubicacionEntregaId);
       const selectedDeliveryPerson = repartidores.find(item => item.id === repartidorId);
+      if (totalRecibido > 0 && !metodoPagoInicial) {
+        setFormError("Selecciona el método de pago del importe recibido.");
+        setLoading(false);
+        return;
+      }
 
       const res = await firestoreService.registerVentaTransaction({
         items: normalizedItems,
@@ -444,7 +458,8 @@ export default function Ventas({
         porcentaje_precio: appliedMarkup,
         afecta_stock: affectsStock,
         anticipo_porcentaje: requiredDepositPercent,
-        minimo_piezas: channelConfig.minimo_piezas
+        minimo_piezas: channelConfig.minimo_piezas,
+        metodo_pago_inicial: metodoPagoInicial
       });
 
       setFormSuccess(
@@ -463,6 +478,7 @@ export default function Ventas({
       setCustomMarkup("");
       setUbicacionEntregaId("");
       setRepartidorId("");
+      setMetodoPagoInicial("");
       setIsAjustesOpen(false);
 
       if (onSuccess) {
@@ -624,7 +640,7 @@ export default function Ventas({
                       </select>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                       {affectsStock && <div className="lg:col-span-2">
                         <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
                           Almacén de despacho
@@ -654,6 +670,26 @@ export default function Ventas({
                           })}
                           className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs font-bold text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
                         />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                          Costo unitario
+                        </label>
+                        <div className="relative">
+                          <DollarSign className="w-4 h-4 text-zinc-400 absolute left-3 top-2.5" />
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={item.costoUnitario}
+                            readOnly={affectsStock}
+                            onChange={(event) => updateItem(item.id, { costoUnitario: event.target.value })}
+                            placeholder="0.00"
+                            className={`w-full border border-zinc-200 dark:border-zinc-700 rounded-xl pl-9 pr-3 py-2.5 text-xs font-bold text-zinc-900 dark:text-white font-mono ${affectsStock ? "bg-zinc-100 dark:bg-zinc-900" : "bg-white dark:bg-zinc-800"}`}
+                          />
+                        </div>
+                        {!affectsStock && <p className="text-[10px] text-zinc-400 mt-1">Editable por pedido.</p>}
                       </div>
 
                       <div>
@@ -866,6 +902,21 @@ export default function Ventas({
 
             {/* Datos opcionales de entrega */}
             <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="sm:col-span-2">
+                <label htmlFor="metodo-pago-venta" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                  Método de pago del importe recibido {totalRecibido > 0 ? "*" : "(Opcional)"}
+                </label>
+                <select
+                  id="metodo-pago-venta"
+                  value={metodoPagoInicial}
+                  onChange={(event) => setMetodoPagoInicial(event.target.value)}
+                  required={totalRecibido > 0}
+                  className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
+                >
+                  <option value="">Seleccionar método de pago</option>
+                  {metodosPago.map(item => <option key={item.id} value={item.nombre}>{item.nombre}</option>)}
+                </select>
+              </div>
               <div>
                 <label htmlFor="ubicacion-entrega-select" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
                   Ubicación de entrega (Opcional)

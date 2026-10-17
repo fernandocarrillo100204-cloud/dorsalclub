@@ -6,16 +6,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarDays, CheckCircle2, CircleDollarSign, LoaderCircle, PackageCheck, RefreshCw, Save, Trash2 } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
-import { PedidoVenta } from "../types";
+import { OpcionListaConfigurable, PedidoVenta } from "../types";
 
 const money = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
 
-const PedidoCard: React.FC<{ pedido: PedidoVenta; onChanged: () => Promise<void> }> = ({ pedido, onChanged }) => {
+const PedidoCard: React.FC<{ pedido: PedidoVenta; metodosPago: OpcionListaConfigurable[]; onChanged: () => Promise<void> }> = ({ pedido, metodosPago, onChanged }) => {
   const [amount, setAmount] = useState(pedido.saldo > 0 ? pedido.saldo.toFixed(2) : "");
   const [estimatedDate, setEstimatedDate] = useState(pedido.fecha_estimada || "");
   const [comments, setComments] = useState(pedido.comentarios || "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("");
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -64,12 +65,16 @@ const PedidoCard: React.FC<{ pedido: PedidoVenta; onChanged: () => Promise<void>
       </div>
 
       {pedido.estado === "pedido" && (
-        <div className="flex gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2">
           <label className="flex-1">
             <span className="sr-only">Importe del pago</span>
             <input type="number" min="0.01" max={pedido.saldo} step="0.01" value={amount} onChange={event => setAmount(event.target.value)} disabled={busy} className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-sm" />
           </label>
-          <button type="button" onClick={() => run(() => firestoreService.registrarPagoPedido(pedido.venta_id, Number(amount)))} disabled={busy || Number(amount) <= 0} className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 disabled:opacity-50">
+          <select value={paymentMethod} onChange={event => setPaymentMethod(event.target.value)} disabled={busy} className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-sm">
+            <option value="">Método de pago</option>
+            {metodosPago.map(item => <option key={item.id} value={item.nombre}>{item.nombre}</option>)}
+          </select>
+          <button type="button" onClick={() => run(() => firestoreService.registrarPagoPedido(pedido.venta_id, Number(amount), paymentMethod))} disabled={busy || Number(amount) <= 0 || !paymentMethod} className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 disabled:opacity-50">
             Registrar pago
           </button>
         </div>
@@ -109,12 +114,15 @@ export const PedidosVenta: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [metodosPago, setMetodosPago] = useState<OpcionListaConfigurable[]>([]);
 
   const load = useCallback(async (refresh = false) => {
     refresh ? setRefreshing(true) : setLoading(true);
     setError("");
     try {
-      setOrders(await firestoreService.getPedidosVenta());
+      const [nextOrders, config] = await Promise.all([firestoreService.getPedidosVenta(), firestoreService.getConfiguracionListasDesplegables()]);
+      setOrders(nextOrders);
+      setMetodosPago(config.metodos_pago_venta.filter(item => item.activa));
     } catch (err: any) {
       setError(err?.message || "No fue posible consultar los pedidos.");
     } finally {
@@ -164,7 +172,7 @@ export const PedidosVenta: React.FC = () => {
                 <div className="space-y-3">
                   {columnOrders.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700 p-8 text-center text-xs text-zinc-500">No hay pedidos en este apartado.</div>
-                  ) : columnOrders.map(order => <PedidoCard key={order.venta_id} pedido={order} onChanged={() => load(true)} />)}
+                  ) : columnOrders.map(order => <PedidoCard key={order.venta_id} pedido={order} metodosPago={metodosPago} onChanged={() => load(true)} />)}
                 </div>
               </div>
             );

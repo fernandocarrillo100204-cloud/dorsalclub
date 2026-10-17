@@ -28,7 +28,7 @@ interface Props {
 
 export default function ConfiguracionModuloModal({ isOpen, module, onClose, onSaved }: Props) {
   const definitions = useMemo(() => module === "ventas"
-    ? [{ key: "canales", label: "Canales de venta", singular: "canal" }, { key: "ubicaciones", label: "Ubicaciones de entrega", singular: "ubicación" }, { key: "repartidores", label: "Quién entrega", singular: "persona" }]
+    ? [{ key: "canales", label: "Canales de venta", singular: "canal" }, { key: "metodos_pago_venta", label: "Métodos de pago", singular: "método de pago" }, { key: "ubicaciones", label: "Ubicaciones de entrega", singular: "ubicación" }, { key: "repartidores", label: "Quién entrega", singular: "persona" }]
     : MODULE_LISTS[module], [module]);
   const [activeKey, setActiveKey] = useState<string>(definitions[0].key);
   const [config, setConfig] = useState<ConfiguracionListasDesplegables | null>(null);
@@ -46,9 +46,10 @@ export default function ConfiguracionModuloModal({ isOpen, module, onClose, onSa
     setError(null);
     try {
       if (module === "ventas") {
-        const [ubicaciones, repartidores, ventaConfig] = await Promise.all([firestoreService.getUbicacionesEntrega(), firestoreService.getRepartidores(), firestoreService.getConfiguracionVentas()]);
+        const [ubicaciones, repartidores, ventaConfig, listasConfig] = await Promise.all([firestoreService.getUbicacionesEntrega(), firestoreService.getRepartidores(), firestoreService.getConfiguracionVentas(), firestoreService.getConfiguracionListasDesplegables()]);
         setSalesLists({ ubicaciones, repartidores });
         setSalesConfig(ventaConfig);
+        setConfig(listasConfig);
       } else {
         setConfig(await firestoreService.getConfiguracionListasDesplegables());
       }
@@ -69,7 +70,8 @@ export default function ConfiguracionModuloModal({ isOpen, module, onClose, onSa
 
   if (!isOpen) return null;
   const currentDefinition = definitions.find(item => item.key === activeKey) || definitions[0];
-  const items = module === "ventas" ? salesLists[activeKey] || [] : config?.[activeKey as ConfigKey] || [];
+  const isSalesCatalog = module === "ventas" && (activeKey === "ubicaciones" || activeKey === "repartidores");
+  const items = isSalesCatalog ? salesLists[activeKey] || [] : config?.[activeKey as ConfigKey] || [];
 
   const saveSalesChannel = async (id: CanalVentaId, field: "porcentaje" | "minimo_piezas" | "anticipo_porcentaje", value: number) => {
     if (!salesConfig) return;
@@ -110,7 +112,7 @@ export default function ConfiguracionModuloModal({ isOpen, module, onClose, onSa
     setSaving(true);
     setError(null);
     try {
-      if (module === "ventas") {
+      if (isSalesCatalog) {
         if (activeKey === "ubicaciones") await firestoreService.addUbicacionEntrega(nombre);
         else await firestoreService.addRepartidor(nombre);
         await load();
@@ -130,7 +132,7 @@ export default function ConfiguracionModuloModal({ isOpen, module, onClose, onSa
     setSaving(true);
     setError(null);
     try {
-      if (module === "ventas") {
+      if (isSalesCatalog) {
         if (activeKey === "ubicaciones") await firestoreService.updateUbicacionEntrega(item.id, patch);
         else await firestoreService.updateRepartidor(item.id, patch);
         await load();
@@ -147,7 +149,7 @@ export default function ConfiguracionModuloModal({ isOpen, module, onClose, onSa
 
   const archive = async (item: OpcionListaConfigurable) => {
     if (!window.confirm(`¿Quitar "${item.nombre}" de las opciones disponibles? Los registros anteriores conservarán su valor.`)) return;
-    if (module !== "ventas") {
+    if (!isSalesCatalog) {
       await update(item, { activa: false });
       return;
     }

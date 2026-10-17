@@ -7,7 +7,6 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { 
   getFirestore,
   initializeFirestore,
-  setLogLevel,
   collection, 
   doc, 
   getDocs, 
@@ -40,6 +39,8 @@ import {
   StockItem, 
   Movimiento, 
   VentaRegistroInput,
+  Venta,
+  PagoVenta,
   Usuario, 
   CategoriaCatalogo, 
   MarcaCatalogo,
@@ -81,31 +82,7 @@ import {
   getPeriodosFinancierosDisponibles,
   clearPeriodosFinancierosCache
 } from "./periodosFinancieros";
-
-// Silence non-critical network retry noise from Firestore client
-try {
-  setLogLevel("silent");
-} catch {
-  // Ignore if not supported in runtime
-}
-
-// Suppress non-critical offline/connection retry notices from Firestore in sandbox environments
-if (typeof window !== "undefined") {
-  const originalConsoleError = console.error;
-  console.error = (...args: any[]) => {
-    const firstArg = args[0];
-    const msg = typeof firstArg === "string" ? firstArg : (firstArg?.message || "");
-    if (
-      msg.includes("Could not reach Cloud Firestore backend") ||
-      msg.includes("The client will operate in offline mode") ||
-      (msg.includes("@firebase/firestore") && msg.includes("unavailable"))
-    ) {
-      console.warn("Firestore operando en modo offline / conexión pendiente:", ...args);
-      return;
-    }
-    originalConsoleError.apply(console, args);
-  };
-}
+import { calculateSaleTotals } from "./ventasCore";
 
 // Detect if Firebase config is present in environment variables
 const metaEnv = (import.meta as any).env || {};
@@ -553,7 +530,8 @@ const DEFAULT_LISTAS_DESPLEGABLES: ConfiguracionListasDesplegables = {
   canales_contacto: makeConfigOptions(["WhatsApp", "Instagram", "Llamada telefónica", "Correo electrónico", "Otro"], "canal"),
   origenes_cliente: makeConfigOptions(["Instagram", "Recomendación / Boca a boca", "Tienda física / Showroom", "Evento / Pop-up", "Otro canal"], "origen"),
   categorias_gasto: makeConfigOptions(CATEGORIAS_GASTO, "categoria"),
-  metodos_pago_gasto: makeConfigOptions(METODOS_PAGO_GASTO, "pago")
+  metodos_pago_gasto: makeConfigOptions(METODOS_PAGO_GASTO, "pago"),
+  metodos_pago_venta: makeConfigOptions(["Efectivo", "Transferencia", "Tarjeta de débito", "Tarjeta de crédito", "Otro"], "pago_venta")
 };
 
 const normalizeConfigOptions = (value: unknown, fallback: OpcionListaConfigurable[]): OpcionListaConfigurable[] => {
@@ -570,7 +548,8 @@ const normalizeListasConfig = (data?: Partial<ConfiguracionListasDesplegables> |
   canales_contacto: normalizeConfigOptions(data?.canales_contacto, DEFAULT_LISTAS_DESPLEGABLES.canales_contacto),
   origenes_cliente: normalizeConfigOptions(data?.origenes_cliente, DEFAULT_LISTAS_DESPLEGABLES.origenes_cliente),
   categorias_gasto: normalizeConfigOptions(data?.categorias_gasto, DEFAULT_LISTAS_DESPLEGABLES.categorias_gasto),
-  metodos_pago_gasto: normalizeConfigOptions(data?.metodos_pago_gasto, DEFAULT_LISTAS_DESPLEGABLES.metodos_pago_gasto)
+  metodos_pago_gasto: normalizeConfigOptions(data?.metodos_pago_gasto, DEFAULT_LISTAS_DESPLEGABLES.metodos_pago_gasto),
+  metodos_pago_venta: normalizeConfigOptions(data?.metodos_pago_venta, DEFAULT_LISTAS_DESPLEGABLES.metodos_pago_venta)
 });
 
 const DEFAULT_CONFIGURACION_VENTAS: ConfiguracionVentas = {
@@ -785,28 +764,16 @@ export const firestoreService = {
         setLocalStorageItem("clientes", list);
         return list.filter(cliente => cliente.en_papelera !== true);
       } catch (err: any) {
-        console.warn("Consulta Firestore clientes no disponible (reglas o permisos de colección), recurriendo a almacenamiento local:", err?.message || err);
-        return getLocalClientes().filter(cliente => cliente.en_papelera !== true);
+        throw new Error(err?.message || "No se pudieron consultar los clientes en Firestore.");
       }
     }
     return getLocalClientes().filter(cliente => cliente.en_papelera !== true);
   },
 
   getClientesRealtime: (onUpdate: (clientes: Cliente[]) => void, onError?: (error: any) => void): (() => void) => {
-    // Deliver local cache immediately so UI doesn't stall in loading
-    const localCached = getLocalClientes().filter(cliente => cliente.en_papelera !== true);
-    onUpdate(localCached);
-
     if (isConfigured && realDb) {
       let isUnsubscribed = false;
       let unsubscribeSnapshot: () => void = () => {};
-
-      // Register local change listener to reflect modifications in real time
-      const updateFromLocal = () => {
-        const list = getLocalClientes();
-        onUpdate(list.filter(cliente => cliente.en_papelera !== true));
-      };
-      listeners.clientes.push(updateFromLocal);
 
       try {
         unsubscribeSnapshot = onSnapshot(
@@ -850,21 +817,10 @@ export const firestoreService = {
           },
           (error: any) => {
             if (isUnsubscribed) return;
-            const isPermission = error?.code === "permission-denied" || (error?.message && error.message.includes("permission"));
-            if (isPermission) {
-              console.warn("Firestore clientes: Reglas de seguridad pendientes en Firebase Console para /clientes. Operando en sincronización local persistente:", error.message);
-            } else {
-              console.warn("Aviso en listener de clientes de Firestore:", error);
-            }
-            const fallbackList = getLocalClientes();
-            onUpdate(fallbackList.filter(cliente => cliente.en_papelera !== true));
             if (onError) onError(error);
           }
         );
       } catch (err) {
-        console.warn("Excepción al suscribir listener de clientes:", err);
-        const fallbackList = getLocalClientes();
-        onUpdate(fallbackList.filter(cliente => cliente.en_papelera !== true));
         if (onError) onError(err);
       }
 
@@ -875,7 +831,6 @@ export const firestoreService = {
         } catch {
           // ignore
         }
-        listeners.clientes = listeners.clientes.filter(cb => cb !== updateFromLocal);
       };
     }
 
@@ -972,37 +927,6 @@ export const firestoreService = {
 
         return createdItem;
       } catch (err: any) {
-        const isPermission = err?.code === "permission-denied" || (err?.message && err.message.includes("permission"));
-        if (isPermission) {
-          console.warn("Escritura Firestore rechazada por reglas. Guardando cliente localmente:", err);
-          const list = getLocalClientes();
-          const newId = "cli_" + Math.random().toString(36).substr(2, 9);
-          const newLocal: Cliente = {
-            id: newId,
-            nombre_completo: cleanNombre,
-            nombre_normalizado,
-            tipo_cliente: clienteData.tipo_cliente,
-            instagram: rawIg,
-            instagram_normalizado,
-            telefono: cleanTel,
-            email: (clienteData.email || "").trim(),
-            ciudad: (clienteData.ciudad || "").trim(),
-            canal_preferido: clienteData.canal_preferido || "WhatsApp",
-            intereses: (clienteData.intereses || "").trim(),
-            marcas_favoritas_ids: marcasFavoritasIds,
-            origen: clienteData.origen || "Instagram",
-            notas: (clienteData.notas || "").trim(),
-            proximo_seguimiento: clienteData.proximo_seguimiento || null,
-            estado,
-            creado_at: new Date(),
-            actualizado_at: new Date(),
-            creado_por: userEmail
-          };
-          list.unshift(newLocal);
-          setLocalStorageItem("clientes", list);
-          notifyListeners("clientes", list);
-          return newLocal;
-        }
         throw err;
       }
     }
@@ -1097,18 +1021,6 @@ export const firestoreService = {
         }
         return;
       } catch (err: any) {
-        const isPermission = err?.code === "permission-denied" || (err?.message && err.message.includes("permission"));
-        if (isPermission) {
-          console.warn("Actualización Firestore rechazada por reglas. Aplicando cambio localmente:", err);
-          const list = getLocalClientes();
-          const idx = list.findIndex(c => c.id === id);
-          if (idx !== -1) {
-            list[idx] = { ...list[idx], ...updates, actualizado_at: new Date() };
-            setLocalStorageItem("clientes", list);
-            notifyListeners("clientes", list);
-          }
-          return;
-        }
         throw err;
       }
     }
@@ -1422,11 +1334,13 @@ export const firestoreService = {
       throw new Error("Una venta puede contener como máximo 50 partidas.");
     }
 
+    const afectaStock = venta.afecta_stock !== false;
     const normalizedItems = venta.items.map((item, index) => {
       const sku = (item.sku || "").trim().toUpperCase();
-      const almacenId = (item.almacen_id || "").trim();
+      const almacenId = (item.almacen_id || "").trim() || (!afectaStock ? "bajo_pedido" : "");
       const cantidad = Number(item.cantidad);
       const precioUnitario = Number(item.precio_unitario_venta);
+      const costoUnitario = Number(item.costo_unitario_venta);
 
       if (!sku) throw new Error(`Selecciona el producto de la partida ${index + 1}.`);
       if (!almacenId) throw new Error(`Selecciona el almacén de la partida ${index + 1}.`);
@@ -1436,13 +1350,18 @@ export const firestoreService = {
       if (!Number.isFinite(precioUnitario) || precioUnitario < 0) {
         throw new Error(`El precio de la partida ${index + 1} debe ser mayor o igual a cero.`);
       }
+      if (!Number.isFinite(costoUnitario) || costoUnitario < 0) {
+        throw new Error(`El costo de la partida ${index + 1} debe ser mayor o igual a cero.`);
+      }
 
       return {
         sku,
         almacen_id: almacenId,
         cantidad,
         precio_unitario_venta: Math.round((precioUnitario + Number.EPSILON) * 100) / 100,
-        total_venta: Math.round((precioUnitario * cantidad + Number.EPSILON) * 100) / 100
+        costo_unitario_venta: Math.round((costoUnitario + Number.EPSILON) * 100) / 100,
+        total_venta: Math.round((precioUnitario * cantidad + Number.EPSILON) * 100) / 100,
+        costo_total: Math.round((costoUnitario * cantidad + Number.EPSILON) * 100) / 100
       };
     });
 
@@ -1456,7 +1375,6 @@ export const firestoreService = {
     if (totalUnidadesVenta < minimoPiezas) {
       throw new Error(`${venta.canal_venta_nombre} requiere un mínimo de ${minimoPiezas} piezas.`);
     }
-    const afectaStock = venta.afecta_stock !== false;
     const anticipoPorcentaje = Math.min(100, Math.max(0, Number(venta.anticipo_porcentaje) || 0));
     const porcentajePrecio = Number(venta.porcentaje_precio);
     if (!Number.isFinite(porcentajePrecio) || porcentajePrecio < 0) {
@@ -1476,28 +1394,42 @@ export const firestoreService = {
     const otrosCargos = normalizeOptionalAmount(venta.otros_cargos_cliente, "Los otros cargos");
     const costoEnvio = normalizeOptionalAmount(venta.costo_envio_venta, "El costo de envío");
     const otrosCostos = normalizeOptionalAmount(venta.otros_costos_venta, "Los otros costos");
-    const ventaSubtotal = Math.round((normalizedItems.reduce((sum, item) => sum + item.total_venta, 0) + Number.EPSILON) * 100) / 100;
-    const ventaTotalCobrado = Math.round((ventaSubtotal + envioCobrado + otrosCargos + Number.EPSILON) * 100) / 100;
-    const ventaTotalRecibido = Math.round((ventaTotalCobrado * anticipoPorcentaje / 100 + Number.EPSILON) * 100) / 100;
-    const ventaSaldoPendiente = Math.max(0, Math.round((ventaTotalCobrado - ventaTotalRecibido + Number.EPSILON) * 100) / 100);
-    const estadoPago = ventaSaldoPendiente > 0 ? "anticipo" : "pagado";
-    const ventaTotalCostos = Math.round((costoEnvio + otrosCostos + Number.EPSILON) * 100) / 100;
+    const calculated = calculateSaleTotals({
+      items: normalizedItems,
+      envio_cobrado_cliente: envioCobrado,
+      otros_cargos_cliente: otrosCargos,
+      costo_envio_venta: costoEnvio,
+      otros_costos_venta: otrosCostos,
+      anticipo_porcentaje: anticipoPorcentaje
+    });
+    const ventaSubtotal = calculated.subtotal;
+    const ventaTotalCobrado = calculated.total;
+    const ventaTotalRecibido = calculated.recibido;
+    const ventaSaldoPendiente = calculated.saldo;
+    const estadoPago = calculated.estadoPago;
+    const ventaTotalCostos = calculated.costosAdicionales;
+    const costoMercancia = calculated.costoMercancia;
+    const metodoPagoInicial = (venta.metodo_pago_inicial || "").trim();
+    if (ventaTotalRecibido > 0 && !metodoPagoInicial) {
+      throw new Error("Selecciona el método de pago del importe recibido.");
+    }
     const now = new Date();
     const todayStr = getLocalDateString(now);
     const periodoKey = getPeriodoKey(now);
 
     if (isConfigured && realDb) {
       const counterRef = doc(realDb, "contadores", "salida");
+      const ventaRef = doc(collection(realDb, "ventas"));
+      const ventaId = ventaRef.id;
       const movementRefs = normalizedItems.map(() => doc(collection(realDb, "movimientos")));
-      const ventaId = movementRefs[0].id;
       const stockRefs = afectaStock ? normalizedItems.map((item) => {
         const key = `${item.sku}_${item.almacen_id}`;
         return { key, ref: doc(realDb!, "stock", key) };
       }) : [];
-      const summaryRefs = afectaStock ? normalizedItems.map((item) => {
+      const summaryRefs = normalizedItems.map((item) => {
         const key = `${todayStr}_${item.sku}_${item.almacen_id}`;
         return { key, ref: doc(realDb!, "resumen_ventas", key) };
-      }) : [];
+      });
       const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
       let generatedFolio = "";
 
@@ -1537,10 +1469,10 @@ export const firestoreService = {
           const currentQty = afectaStock && stockSnaps[index]?.exists()
             ? Number(stockSnaps[index].data()?.cantidad) || 0
             : 0;
-          const previousSummaryQty = afectaStock && summarySnaps[index]?.exists()
+          const previousSummaryQty = summarySnaps[index]?.exists()
             ? Number(summarySnaps[index].data()?.cantidad) || 0
             : 0;
-          const previousSummaryTransactions = afectaStock && summarySnaps[index]?.exists()
+          const previousSummaryTransactions = summarySnaps[index]?.exists()
             ? Number(summarySnaps[index].data()?.total_transacciones) || 0
             : 0;
           const isPrimaryItem = index === 0;
@@ -1554,17 +1486,18 @@ export const firestoreService = {
               actualizado: operationTimestamp
             }, { merge: true });
 
-            transaction.set(summaryRefs[index].ref, {
-              id: summaryRefs[index].key,
-              fecha_str: todayStr,
-              fecha: operationTimestamp,
-              sku: item.sku,
-              almacen_id: item.almacen_id,
-              cantidad: previousSummaryQty + item.cantidad,
-              total_transacciones: previousSummaryTransactions + 1,
-              actualizado: operationTimestamp
-            }, { merge: true });
           }
+
+          transaction.set(summaryRefs[index].ref, {
+            id: summaryRefs[index].key,
+            fecha_str: todayStr,
+            fecha: operationTimestamp,
+            sku: item.sku,
+            almacen_id: item.almacen_id,
+            cantidad: previousSummaryQty + item.cantidad,
+            total_transacciones: previousSummaryTransactions + 1,
+            actualizado: operationTimestamp
+          }, { merge: true });
 
           transaction.set(movementRefs[index], {
             folio: generatedFolio,
@@ -1594,6 +1527,7 @@ export const firestoreService = {
             estado: "activo",
             cliente_nombre: venta.cliente_nombre,
             precio_unitario_venta: item.precio_unitario_venta,
+            costo_unitario_venta: item.costo_unitario_venta,
             total_venta: item.total_venta,
             total_cobrado: Math.round((item.total_venta + (isPrimaryItem ? envioCobrado + otrosCargos : 0) + Number.EPSILON) * 100) / 100,
             ...(venta.cliente_id ? { cliente_id: venta.cliente_id } : {}),
@@ -1609,6 +1543,63 @@ export const firestoreService = {
             ...(venta.ubicacion_entrega_id ? { ubicacion_entrega_id: venta.ubicacion_entrega_id, ubicacion_entrega_nombre: venta.ubicacion_entrega_nombre || "" } : {}),
             ...(venta.repartidor_id ? { repartidor_id: venta.repartidor_id, repartidor_nombre: venta.repartidor_nombre || "" } : {})
           });
+        });
+
+        const initialPayments = ventaTotalRecibido > 0 ? [{
+          id: "inicial",
+          monto: ventaTotalRecibido,
+          metodo_pago: metodoPagoInicial,
+          fecha: operationTimestamp,
+          usuario: usuarioEmail,
+          estado: "activo"
+        }] : [];
+
+        transaction.set(ventaRef, {
+          folio: generatedFolio,
+          fecha: operationTimestamp,
+          fecha_str: todayStr,
+          items: normalizedItems.map(item => ({
+            sku: item.sku,
+            almacen_id: item.almacen_id,
+            cantidad: item.cantidad,
+            precio_unitario: item.precio_unitario_venta,
+            costo_unitario: item.costo_unitario_venta,
+            total: item.total_venta,
+            costo_total: item.costo_total
+          })),
+          total_unidades: totalUnidadesVenta,
+          subtotal: ventaSubtotal,
+          envio_cobrado_cliente: envioCobrado,
+          otros_cargos_cliente: otrosCargos,
+          ...(venta.concepto_otros_cargos ? { concepto_otros_cargos: venta.concepto_otros_cargos } : {}),
+          total: ventaTotalCobrado,
+          costo_mercancia: costoMercancia,
+          costo_envio_venta: costoEnvio,
+          otros_costos_venta: otrosCostos,
+          ...(venta.concepto_otros_costos ? { concepto_otros_costos: venta.concepto_otros_costos } : {}),
+          costos_totales: costoMercancia + ventaTotalCostos,
+          ...(venta.cliente_id ? { cliente_id: venta.cliente_id } : {}),
+          cliente_nombre: venta.cliente_nombre,
+          ...(venta.cliente_tipo ? { cliente_tipo: venta.cliente_tipo } : {}),
+          canal_venta: venta.canal_venta,
+          canal_venta_nombre: venta.canal_venta_nombre,
+          porcentaje_precio: porcentajePrecio,
+          afecta_stock: afectaStock,
+          anticipo_porcentaje: anticipoPorcentaje,
+          recibido: ventaTotalRecibido,
+          saldo: ventaSaldoPendiente,
+          estado_pago: estadoPago,
+          ...(!afectaStock ? { estado_pedido: estadoPago === "pagado" ? "pagado" : "pedido" } : {}),
+          pagos: initialPayments,
+          metodo_pago_inicial: metodoPagoInicial,
+          ...(venta.comentarios_venta ? { comentarios: venta.comentarios_venta } : {}),
+          ...(venta.ubicacion_entrega_id ? { ubicacion_entrega_id: venta.ubicacion_entrega_id, ubicacion_entrega_nombre: venta.ubicacion_entrega_nombre || "" } : {}),
+          ...(venta.repartidor_id ? { repartidor_id: venta.repartidor_id, repartidor_nombre: venta.repartidor_nombre || "" } : {}),
+          creado_por: usuarioEmail,
+          creado_at: operationTimestamp,
+          actualizado_at: operationTimestamp,
+          estado: "activo",
+          en_papelera: false
         });
 
         transaction.set(counterRef, {
@@ -1664,17 +1655,18 @@ export const firestoreService = {
           actualizado: now
         };
 
-        summaryMap[summaryKey] = {
-          id: summaryKey,
-          fecha_str: todayStr,
-          fecha: now,
-          sku: item.sku,
-          almacen_id: item.almacen_id,
-          cantidad: (previousSummary?.cantidad || 0) + item.cantidad,
-          total_transacciones: (previousSummary?.total_transacciones || 0) + 1,
-          actualizado: now
-        };
       }
+
+      summaryMap[summaryKey] = {
+        id: summaryKey,
+        fecha_str: todayStr,
+        fecha: now,
+        sku: item.sku,
+        almacen_id: item.almacen_id,
+        cantidad: (previousSummary?.cantidad || 0) + item.cantidad,
+        total_transacciones: (previousSummary?.total_transacciones || 0) + 1,
+        actualizado: now
+      };
 
       movimientos.push({
         id: `${ventaId}_${index + 1}`,
@@ -1705,6 +1697,7 @@ export const firestoreService = {
         estado: "activo",
         cliente_nombre: venta.cliente_nombre,
         precio_unitario_venta: item.precio_unitario_venta,
+        costo_unitario_venta: item.costo_unitario_venta,
         total_venta: item.total_venta,
         total_cobrado: Math.round((item.total_venta + (isPrimaryItem ? envioCobrado + otrosCargos : 0) + Number.EPSILON) * 100) / 100,
         ...(venta.cliente_id ? { cliente_id: venta.cliente_id } : {}),
@@ -1725,6 +1718,50 @@ export const firestoreService = {
     setLocalStorageItem("stock", stockMap);
     setLocalStorageItem("resumen_ventas", summaryMap);
     setLocalStorageItem("movimientos", movimientos);
+    const ventas = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+    ventas.unshift({
+      id: ventaId,
+      folio: generatedFolio,
+      fecha: now,
+      fecha_str: todayStr,
+      items: normalizedItems.map(item => ({ sku: item.sku, almacen_id: item.almacen_id, cantidad: item.cantidad, precio_unitario: item.precio_unitario_venta, costo_unitario: item.costo_unitario_venta, total: item.total_venta, costo_total: item.costo_total })),
+      total_unidades: totalUnidadesVenta,
+      subtotal: ventaSubtotal,
+      envio_cobrado_cliente: envioCobrado,
+      otros_cargos_cliente: otrosCargos,
+      concepto_otros_cargos: venta.concepto_otros_cargos,
+      total: ventaTotalCobrado,
+      costo_mercancia: costoMercancia,
+      costo_envio_venta: costoEnvio,
+      otros_costos_venta: otrosCostos,
+      concepto_otros_costos: venta.concepto_otros_costos,
+      costos_totales: costoMercancia + ventaTotalCostos,
+      cliente_id: venta.cliente_id,
+      cliente_nombre: venta.cliente_nombre,
+      cliente_tipo: venta.cliente_tipo,
+      canal_venta: venta.canal_venta,
+      canal_venta_nombre: venta.canal_venta_nombre,
+      porcentaje_precio: porcentajePrecio,
+      afecta_stock: afectaStock,
+      anticipo_porcentaje: anticipoPorcentaje,
+      recibido: ventaTotalRecibido,
+      saldo: ventaSaldoPendiente,
+      estado_pago: estadoPago,
+      estado_pedido: !afectaStock ? (estadoPago === "pagado" ? "pagado" : "pedido") : undefined,
+      pagos: ventaTotalRecibido > 0 ? [{ id: "inicial", monto: ventaTotalRecibido, metodo_pago: metodoPagoInicial, fecha: now, usuario: usuarioEmail, estado: "activo" }] : [],
+      metodo_pago_inicial: metodoPagoInicial,
+      comentarios: venta.comentarios_venta,
+      ubicacion_entrega_id: venta.ubicacion_entrega_id,
+      ubicacion_entrega_nombre: venta.ubicacion_entrega_nombre,
+      repartidor_id: venta.repartidor_id,
+      repartidor_nombre: venta.repartidor_nombre,
+      creado_por: usuarioEmail,
+      creado_at: now,
+      actualizado_at: now,
+      estado: "activo",
+      en_papelera: false
+    });
+    setLocalStorageItem("ventas_maestras", ventas);
     notifyListeners("stock", stockMap);
     notifyListeners("movimientos", movimientos);
     clearFinanzasCache();
@@ -1732,10 +1769,104 @@ export const firestoreService = {
     return { id: ventaId, folio: generatedFolio, movimientosCount: normalizedItems.length };
   },
 
+  getVentasMaestrasPaginated: async (options: {
+    pageSize?: number;
+    lastDoc?: any;
+  } = {}): Promise<{ items: Venta[]; lastDoc: any; hasMore: boolean }> => {
+    const pageSize = options.pageSize || 40;
+    if (isConfigured && realDb) {
+      const constraints: any[] = [orderBy("fecha", "desc"), limit(pageSize + 1)];
+      if (options.lastDoc) constraints.push(startAfter(options.lastDoc));
+      const snap = await getDocs(query(collection(realDb, "ventas"), ...constraints));
+      const docs = snap.docs;
+      const hasMore = docs.length > pageSize;
+      const selected = hasMore ? docs.slice(0, pageSize) : docs;
+      const toDate = (value: any): Date => value?.toDate ? value.toDate() : value instanceof Date ? value : value?.seconds ? new Date(value.seconds * 1000) : new Date(value || Date.now());
+      const items = selected.map(snapshot => {
+        const data = snapshot.data();
+        const pagos: PagoVenta[] = Array.isArray(data.pagos) ? data.pagos.map((pago: any) => ({
+          id: String(pago.id || ""),
+          monto: Number(pago.monto) || 0,
+          metodo_pago: String(pago.metodo_pago || "Sin especificar"),
+          fecha: toDate(pago.fecha),
+          usuario: String(pago.usuario || ""),
+          estado: pago.estado === "anulado" ? "anulado" : "activo",
+          ...(pago.motivo_anulacion ? { motivo_anulacion: String(pago.motivo_anulacion) } : {})
+        })) : [];
+        return {
+          id: snapshot.id,
+          folio: String(data.folio || snapshot.id),
+          fecha: toDate(data.fecha),
+          fecha_str: String(data.fecha_str || getLocalDateString(data.fecha)),
+          items: Array.isArray(data.items) ? data.items : [],
+          total_unidades: Number(data.total_unidades) || 0,
+          subtotal: Number(data.subtotal) || 0,
+          envio_cobrado_cliente: Number(data.envio_cobrado_cliente) || 0,
+          otros_cargos_cliente: Number(data.otros_cargos_cliente) || 0,
+          concepto_otros_cargos: data.concepto_otros_cargos || undefined,
+          total: Number(data.total) || 0,
+          costo_mercancia: Number(data.costo_mercancia) || 0,
+          costo_envio_venta: Number(data.costo_envio_venta) || 0,
+          otros_costos_venta: Number(data.otros_costos_venta) || 0,
+          concepto_otros_costos: data.concepto_otros_costos || undefined,
+          costos_totales: Number(data.costos_totales) || 0,
+          cliente_id: data.cliente_id || undefined,
+          cliente_nombre: String(data.cliente_nombre || "Venta sin cliente / Mostrador"),
+          cliente_tipo: data.cliente_tipo || undefined,
+          canal_venta: data.canal_venta || "stock",
+          canal_venta_nombre: String(data.canal_venta_nombre || "Venta directa"),
+          porcentaje_precio: Number(data.porcentaje_precio) || 0,
+          afecta_stock: data.afecta_stock !== false,
+          anticipo_porcentaje: Number(data.anticipo_porcentaje) || 0,
+          recibido: Number(data.recibido) || 0,
+          saldo: Number(data.saldo) || 0,
+          estado_pago: data.estado_pago || "pendiente",
+          estado_pedido: data.estado_pedido || undefined,
+          fecha_estimada: data.fecha_estimada || undefined,
+          comentarios_pedido: data.comentarios_pedido || undefined,
+          entregado_at: data.entregado_at ? toDate(data.entregado_at) : undefined,
+          pagos,
+          metodo_pago_inicial: String(data.metodo_pago_inicial || ""),
+          comentarios: data.comentarios || undefined,
+          ubicacion_entrega_id: data.ubicacion_entrega_id || undefined,
+          ubicacion_entrega_nombre: data.ubicacion_entrega_nombre || undefined,
+          repartidor_id: data.repartidor_id || undefined,
+          repartidor_nombre: data.repartidor_nombre || undefined,
+          creado_por: String(data.creado_por || ""),
+          creado_at: toDate(data.creado_at || data.fecha),
+          actualizado_at: toDate(data.actualizado_at || data.fecha),
+          estado: data.estado || "activo",
+          motivo_anulacion: data.motivo_anulacion || undefined,
+          anulado_at: data.anulado_at ? toDate(data.anulado_at) : undefined,
+          anulado_por: data.anulado_por || undefined,
+          en_papelera: data.en_papelera === true,
+          monto_reembolsado: Number(data.monto_reembolsado) || 0,
+          motivo_devolucion: data.motivo_devolucion || undefined,
+          devuelto_at: data.devuelto_at ? toDate(data.devuelto_at) : undefined,
+          devuelto_por: data.devuelto_por || undefined
+        } as Venta;
+      }).filter(item => item.en_papelera !== true);
+      return { items, lastDoc: selected.length ? selected[selected.length - 1] : null, hasMore };
+    }
+    const all = getLocalStorageItem<Venta[]>("ventas_maestras", []).filter(item => item.en_papelera !== true);
+    const start = typeof options.lastDoc === "number" ? options.lastDoc : 0;
+    const items = all.slice(start, start + pageSize);
+    return { items, lastDoc: start + items.length, hasMore: start + items.length < all.length };
+  },
+
   getPedidosVenta: async (): Promise<PedidoVenta[]> => {
     let movimientos: Array<Movimiento & { id?: string }> = [];
+    const ventasMaestras: Venta[] = [];
 
     if (isConfigured && realDb) {
+      let cursor: any = null;
+      let moreMasters = true;
+      while (moreMasters) {
+        const page = await firestoreService.getVentasMaestrasPaginated({ pageSize: 200, lastDoc: cursor });
+        ventasMaestras.push(...page.items.filter(item => item.afecta_stock === false));
+        cursor = page.lastDoc;
+        moreMasters = page.hasMore;
+      }
       const [salesSnap, trackingSnap] = await Promise.all([
         getDocs(query(collection(realDb, "movimientos"), where("tipo", "==", "salida"), orderBy("fecha", "desc"), limit(500))),
         getDocs(query(collection(realDb, "movimientos"), where("tipo", "==", "ajuste"), orderBy("fecha", "desc"), limit(250)))
@@ -1743,7 +1874,10 @@ export const firestoreService = {
       movimientos = [...salesSnap.docs, ...trackingSnap.docs].map(item => ({ id: item.id, ...item.data() } as Movimiento));
     } else {
       movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+      ventasMaestras.push(...getLocalStorageItem<Venta[]>("ventas_maestras", []).filter(item => item.afecta_stock === false));
     }
+
+    const masterIds = new Set(ventasMaestras.map(item => item.id));
 
     const grupos = new Map<string, Movimiento[]>();
     const eventos = new Map<string, Movimiento[]>();
@@ -1754,7 +1888,7 @@ export const firestoreService = {
         eventos.set(movimiento.venta_relacionada_id, actuales);
         return;
       }
-      if (!movimiento.venta_id || movimiento.afecta_stock !== false) return;
+      if (!movimiento.venta_id || masterIds.has(movimiento.venta_id) || movimiento.afecta_stock !== false) return;
       if (movimiento.canal_venta !== "bajo_pedido" && movimiento.canal_venta !== "mayoreo") return;
       if ((movimiento.estado || "activo") === "anulado" || movimiento.en_papelera === true) return;
       const actuales = grupos.get(movimiento.venta_id) || [];
@@ -1769,7 +1903,7 @@ export const firestoreService = {
       return new Date(value || Date.now());
     };
 
-    return Array.from(grupos.entries()).map(([ventaId, partidas]) => {
+    const legacyOrders = Array.from(grupos.entries()).map(([ventaId, partidas]) => {
       const ordered = [...partidas].sort((a, b) => (a.venta_partida || 0) - (b.venta_partida || 0));
       const principal = ordered[0];
       const orderEvents = (eventos.get(ventaId) || []).sort((a, b) => toDate(a.fecha).getTime() - toDate(b.fecha).getTime());
@@ -1805,17 +1939,103 @@ export const firestoreService = {
           total: Number(item.total_venta) || 0
         }))
       } satisfies PedidoVenta;
-    }).sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
+    });
+
+    const masterOrders: PedidoVenta[] = ventasMaestras
+      .filter(item => item.estado !== "anulado" && item.en_papelera !== true && (item.canal_venta === "bajo_pedido" || item.canal_venta === "mayoreo"))
+      .map(item => ({
+        venta_id: item.id,
+        folio: item.folio,
+        cliente_id: item.cliente_id,
+        cliente_nombre: item.cliente_nombre,
+        canal_venta: item.canal_venta as "bajo_pedido" | "mayoreo",
+        canal_venta_nombre: item.canal_venta_nombre,
+        fecha: item.fecha instanceof Date ? item.fecha : new Date((item.fecha as any).seconds * 1000),
+        total: item.total,
+        recibido: item.recibido,
+        saldo: item.saldo,
+        estado: item.estado_pedido === "entregado" ? "entregado" : item.saldo <= 0 ? "pagado" : "pedido",
+        fecha_estimada: item.fecha_estimada,
+        comentarios: item.comentarios_pedido || item.comentarios,
+        ubicacion_entrega_nombre: item.ubicacion_entrega_nombre,
+        repartidor_nombre: item.repartidor_nombre,
+        items: item.items.map(line => ({ sku: line.sku, cantidad: line.cantidad, precio_unitario: line.precio_unitario, total: line.total })),
+        pagos: item.pagos
+      }));
+
+    return [...masterOrders, ...legacyOrders].sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
   },
 
-  registrarPagoPedido: async (ventaId: string, monto: number): Promise<void> => {
+  registrarPagoPedido: async (ventaId: string, monto: number, metodoPago: string): Promise<void> => {
     const cleanAmount = Math.round((Number(monto) + Number.EPSILON) * 100) / 100;
     if (!Number.isFinite(cleanAmount) || cleanAmount <= 0) throw new Error("El pago debe ser mayor a cero.");
+    const cleanMethod = (metodoPago || "").trim();
+    if (!cleanMethod) throw new Error("Selecciona el método de pago.");
     const user = authService.getCurrentUser();
     const now = new Date();
     const periodoKey = getPeriodoKey(now);
 
     if (isConfigured && realDb) {
+      const masterRef = doc(realDb, "ventas", ventaId);
+      const masterSnap = await getDoc(masterRef);
+      if (masterSnap.exists()) {
+        const paymentRef = doc(collection(realDb, "movimientos"));
+        const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+        await runTransaction(realDb, async transaction => {
+          const currentSale = await transaction.get(masterRef);
+          const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+          if (!currentSale.exists()) throw new Error("El pedido ya no existe.");
+          const data = currentSale.data();
+          if (data.estado === "anulado" || data.en_papelera === true) throw new Error("El pedido está cancelado o ya no está disponible.");
+          const total = Math.max(0, Number(data.total) || 0);
+          const currentReceived = Math.max(0, Number(data.recibido) || 0);
+          const currentBalance = Math.max(0, Math.round((total - currentReceived + Number.EPSILON) * 100) / 100);
+          if (currentBalance <= 0) throw new Error("Este pedido ya está pagado.");
+          if (cleanAmount > currentBalance) throw new Error(`El pago no puede superar el saldo de $${currentBalance.toFixed(2)}.`);
+          const timestamp = Timestamp.now();
+          const nuevoRecibido = Math.round((currentReceived + cleanAmount + Number.EPSILON) * 100) / 100;
+          const nuevoSaldo = Math.max(0, Math.round((total - nuevoRecibido + Number.EPSILON) * 100) / 100);
+          const payment: PagoVenta = { id: paymentRef.id, monto: cleanAmount, metodo_pago: cleanMethod, fecha: timestamp as any, usuario: user?.email || "Sistema", estado: "activo" };
+          const pagos = Array.isArray(data.pagos) ? [...data.pagos, payment] : [payment];
+          transaction.update(masterRef, {
+            pagos,
+            recibido: nuevoRecibido,
+            saldo: nuevoSaldo,
+            estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo",
+            estado_pedido: nuevoSaldo === 0 ? "pagado" : "pedido",
+            actualizado_at: timestamp
+          });
+          transaction.set(paymentRef, {
+            folio: `Abono-${data.folio || ventaId}`,
+            venta_relacionada_id: ventaId,
+            subtipo: "abono_venta",
+            sku: "ABONO",
+            almacen_id: "bajo_pedido",
+            tipo: "salida",
+            cantidad: 1,
+            referencia: `Pago de ${data.folio || ventaId}`,
+            usuario: user?.email || "Sistema",
+            fecha: timestamp,
+            estado: "activo",
+            cliente_id: data.cliente_id || "",
+            cliente_nombre: data.cliente_nombre || "Cliente",
+            canal_venta: data.canal_venta,
+            canal_venta_nombre: data.canal_venta_nombre,
+            afecta_stock: false,
+            venta_total_recibido: cleanAmount,
+            venta_saldo_pendiente: nuevoSaldo,
+            ingreso_reconocido: cleanAmount,
+            total_venta: 0,
+            total_cobrado: cleanAmount,
+            metodo_pago: cleanMethod,
+            estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo"
+          });
+          if (periodRef && periodoKey) transaction.set(periodRef, computeNewPeriodIndexData(periodSnap?.exists() ? periodSnap.data() : null, periodoKey, 1, 0, 0), { merge: true });
+        });
+        clearFinanzasCache();
+        clearPeriodosFinancierosCache();
+        return;
+      }
       const saleQuery = query(collection(realDb, "movimientos"), where("venta_id", "==", ventaId));
       const paymentsQuery = query(collection(realDb, "movimientos"), where("venta_relacionada_id", "==", ventaId));
       const [saleSnap, paymentsSnap] = await Promise.all([getDocs(saleQuery), getDocs(paymentsQuery)]);
@@ -1864,6 +2084,7 @@ export const firestoreService = {
           venta_total_recibido: cleanAmount,
           venta_saldo_pendiente: nuevoSaldo,
           ingreso_reconocido: cleanAmount,
+          metodo_pago: cleanMethod,
           total_venta: 0,
           total_cobrado: cleanAmount,
           estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo"
@@ -1875,6 +2096,23 @@ export const firestoreService = {
       });
     } else {
       const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+      const masterSales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+      const masterIndex = masterSales.findIndex(item => item.id === ventaId);
+      if (masterIndex >= 0) {
+        const sale = masterSales[masterIndex];
+        if (sale.estado === "anulado" || sale.en_papelera) throw new Error("El pedido está cancelado o ya no está disponible.");
+        if (cleanAmount > sale.saldo) throw new Error(`El pago no puede superar el saldo de $${sale.saldo.toFixed(2)}.`);
+        const paymentId = `abono_${Math.random().toString(36).slice(2, 11)}`;
+        const nuevoRecibido = Math.round((sale.recibido + cleanAmount + Number.EPSILON) * 100) / 100;
+        const nuevoSaldo = Math.max(0, Math.round((sale.total - nuevoRecibido + Number.EPSILON) * 100) / 100);
+        masterSales[masterIndex] = { ...sale, recibido: nuevoRecibido, saldo: nuevoSaldo, estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo", estado_pedido: nuevoSaldo === 0 ? "pagado" : "pedido", actualizado_at: now, pagos: [...sale.pagos, { id: paymentId, monto: cleanAmount, metodo_pago: cleanMethod, fecha: now, usuario: user?.email || "Sistema", estado: "activo" }] };
+        movimientos.push({ id: paymentId, folio: `Abono-${sale.folio}`, venta_relacionada_id: ventaId, subtipo: "abono_venta", sku: "ABONO", almacen_id: "bajo_pedido", tipo: "salida", cantidad: 1, referencia: `Pago de ${sale.folio}`, usuario: user?.email || "Sistema", fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, venta_total_recibido: cleanAmount, venta_saldo_pendiente: nuevoSaldo, ingreso_reconocido: cleanAmount, total_venta: 0, total_cobrado: cleanAmount, estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo" });
+        setLocalStorageItem("ventas_maestras", masterSales);
+        setLocalStorageItem("movimientos", movimientos);
+        notifyListeners("movimientos", movimientos);
+        clearFinanzasCache(); clearPeriodosFinancierosCache();
+        return;
+      }
       const targets = movimientos.filter(item => item.venta_id === ventaId && (item.estado || "activo") !== "anulado");
       if (targets.length === 0) throw new Error("El pedido ya no existe.");
       const principal = targets.find(item => item.venta_partida === 1) || targets[0];
@@ -1920,6 +2158,31 @@ export const firestoreService = {
   actualizarSeguimientoPedido: async (ventaId: string, data: { fecha_estimada?: string; comentarios?: string; marcar_entregado?: boolean }): Promise<void> => {
     const now = new Date();
     if (isConfigured && realDb) {
+      const masterRef = doc(realDb, "ventas", ventaId);
+      const masterSnap = await getDoc(masterRef);
+      if (masterSnap.exists()) {
+        await runTransaction(realDb, async transaction => {
+          const current = await transaction.get(masterRef);
+          if (!current.exists()) throw new Error("El pedido ya no existe.");
+          const currentData = current.data();
+          if (currentData.estado === "anulado" || currentData.en_papelera === true) {
+            throw new Error("El pedido está cancelado o ya no está disponible.");
+          }
+          const saldo = Math.max(0, Number(currentData.saldo) || 0);
+          if (data.marcar_entregado && saldo > 0.009) {
+            throw new Error("Liquida el saldo antes de marcar el pedido como entregado.");
+          }
+          const changes: Record<string, unknown> = { actualizado_at: Timestamp.now() };
+          if (data.fecha_estimada !== undefined) changes.fecha_estimada = data.fecha_estimada;
+          if (data.comentarios !== undefined) changes.comentarios_pedido = data.comentarios.trim();
+          if (data.marcar_entregado) {
+            changes.estado_pedido = "entregado";
+            changes.entregado_at = Timestamp.now();
+          }
+          transaction.update(masterRef, changes);
+        });
+        return;
+      }
       const [saleSnap, eventSnap] = await Promise.all([
         getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", ventaId))),
         getDocs(query(collection(realDb, "movimientos"), where("venta_relacionada_id", "==", ventaId)))
@@ -1949,6 +2212,22 @@ export const firestoreService = {
       return;
     }
     const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const masterSales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+    const masterIndex = masterSales.findIndex(item => item.id === ventaId);
+    if (masterIndex >= 0) {
+      const sale = masterSales[masterIndex];
+      if (sale.estado === "anulado" || sale.en_papelera) throw new Error("El pedido está cancelado o ya no está disponible.");
+      if (data.marcar_entregado && sale.saldo > 0.009) throw new Error("Liquida el saldo antes de marcar el pedido como entregado.");
+      masterSales[masterIndex] = {
+        ...sale,
+        ...(data.fecha_estimada !== undefined ? { fecha_estimada: data.fecha_estimada } : {}),
+        ...(data.comentarios !== undefined ? { comentarios_pedido: data.comentarios.trim() } : {}),
+        ...(data.marcar_entregado ? { estado_pedido: "entregado" as const, entregado_at: now } : {}),
+        actualizado_at: now
+      };
+      setLocalStorageItem("ventas_maestras", masterSales);
+      return;
+    }
     const targets = movimientos.filter(item => item.venta_id === ventaId);
     if (targets.length === 0) throw new Error("El pedido ya no existe.");
     const principal = targets.find(item => item.venta_partida === 1) || targets[0];
@@ -1975,6 +2254,119 @@ export const firestoreService = {
     });
     setLocalStorageItem("movimientos", movimientos);
     notifyListeners("movimientos", movimientos);
+  },
+
+  devolverVentaCompleta: async (ventaId: string, motivo: string): Promise<void> => {
+    const cleanReason = motivo.trim();
+    if (!cleanReason) throw new Error("Escribe el motivo de la devolución.");
+    const userEmail = authService.getCurrentUser()?.email || "Sistema";
+    const now = new Date();
+    const periodoKey = getPeriodoKey(now);
+
+    if (isConfigured && realDb) {
+      const saleRef = doc(realDb, "ventas", ventaId);
+      const refundRef = doc(collection(realDb, "movimientos"));
+      const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+      await runTransaction(realDb, async transaction => {
+        const saleSnap = await transaction.get(saleRef);
+        if (!saleSnap.exists()) throw new Error("La venta no existe o es anterior al historial consolidado.");
+        const sale = saleSnap.data();
+        if (sale.estado === "anulado") throw new Error("Una venta anulada no se puede devolver.");
+        if (sale.estado === "devuelto") throw new Error("Esta venta ya fue devuelta.");
+        if (sale.en_papelera === true) throw new Error("Restaura la venta antes de devolverla.");
+        const items = Array.isArray(sale.items) ? sale.items : [];
+        if (items.length === 0) throw new Error("La venta no contiene partidas válidas.");
+
+        const stockEntries = sale.afecta_stock !== false ? items.map((item: any) => {
+          const sku = String(item.sku || "").trim().toUpperCase();
+          const warehouseId = String(item.almacen_id || "").trim();
+          const key = `${sku}_${warehouseId}`;
+          return { sku, warehouseId, key, quantity: Number(item.cantidad) || 0, ref: doc(realDb!, "stock", key) };
+        }) : [];
+        const summaryEntries = items.map((item: any) => {
+          const sku = String(item.sku || "").trim().toUpperCase();
+          const warehouseId = String(item.almacen_id || "").trim();
+          const key = `${String(sale.fecha_str || getLocalDateString(sale.fecha))}_${sku}_${warehouseId}`;
+          return { quantity: Number(item.cantidad) || 0, ref: doc(realDb!, "resumen_ventas", key) };
+        });
+        const stockSnaps: any[] = [];
+        for (const entry of stockEntries) stockSnaps.push(await transaction.get(entry.ref));
+        const summarySnaps: any[] = [];
+        for (const entry of summaryEntries) summarySnaps.push(await transaction.get(entry.ref));
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+        const timestamp = Timestamp.now();
+
+        stockEntries.forEach((entry: any, index: number) => {
+          const current = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
+          transaction.set(entry.ref, { id: entry.key, sku: entry.sku, almacen_id: entry.warehouseId, cantidad: current + entry.quantity, actualizado: timestamp }, { merge: true });
+        });
+        summaryEntries.forEach((entry: any, index: number) => {
+          if (!summarySnaps[index].exists()) return;
+          const current = Number(summarySnaps[index].data()?.cantidad) || 0;
+          const transactions = Number(summarySnaps[index].data()?.total_transacciones) || 0;
+          transaction.set(entry.ref, { cantidad: Math.max(0, current - entry.quantity), total_transacciones: Math.max(0, transactions - 1), actualizado: timestamp }, { merge: true });
+        });
+
+        const refundAmount = Math.max(0, Number(sale.recibido) || 0);
+        transaction.update(saleRef, {
+          estado: "devuelto",
+          monto_reembolsado: refundAmount,
+          motivo_devolucion: cleanReason,
+          devuelto_at: timestamp,
+          devuelto_por: userEmail,
+          saldo: 0,
+          actualizado_at: timestamp
+        });
+        if (refundAmount > 0) {
+          transaction.set(refundRef, {
+            folio: `Reembolso-${sale.folio || ventaId}`,
+            venta_relacionada_id: ventaId,
+            subtipo: "reembolso_venta",
+            sku: "REEMBOLSO",
+            almacen_id: "devoluciones",
+            tipo: "salida",
+            cantidad: 1,
+            unidades_devueltas: Number(sale.total_unidades) || 0,
+            referencia: `Devolución de ${sale.folio || ventaId}: ${cleanReason}`,
+            usuario: userEmail,
+            fecha: timestamp,
+            estado: "activo",
+            cliente_id: sale.cliente_id || "",
+            cliente_nombre: sale.cliente_nombre || "Cliente",
+            canal_venta: sale.canal_venta,
+            canal_venta_nombre: sale.canal_venta_nombre,
+            afecta_stock: false,
+            total_venta: -refundAmount,
+            total_cobrado: -refundAmount,
+            metodo_pago: sale.metodo_pago_inicial || "Método original"
+          });
+          if (periodRef && periodoKey) transaction.set(periodRef, computeNewPeriodIndexData(periodSnap?.exists() ? periodSnap.data() : null, periodoKey, 1, 0, 0), { merge: true });
+        }
+      });
+      clearFinanzasCache(); clearPeriodosFinancierosCache();
+      return;
+    }
+
+    const sales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+    const index = sales.findIndex(item => item.id === ventaId);
+    if (index === -1) throw new Error("La venta no existe o es anterior al historial consolidado.");
+    const sale = sales[index];
+    if (sale.estado === "anulado" || sale.estado === "devuelto") throw new Error("Esta venta no está disponible para devolución.");
+    const stock = getLocalStorageItem<Record<string, StockItem>>("stock", {});
+    const summaries = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
+    if (sale.afecta_stock) sale.items.forEach(item => {
+      const key = `${item.sku}_${item.almacen_id}`;
+      stock[key] = { ...(stock[key] || { id: key, sku: item.sku, almacen_id: item.almacen_id }), cantidad: (stock[key]?.cantidad || 0) + item.cantidad, actualizado: now } as StockItem;
+    });
+    sale.items.forEach(item => {
+      const key = `${sale.fecha_str}_${item.sku}_${item.almacen_id}`;
+      if (summaries[key]) summaries[key] = { ...summaries[key], cantidad: Math.max(0, summaries[key].cantidad - item.cantidad), total_transacciones: Math.max(0, summaries[key].total_transacciones - 1), actualizado: now };
+    });
+    sales[index] = { ...sale, estado: "devuelto", monto_reembolsado: sale.recibido, motivo_devolucion: cleanReason, devuelto_at: now, devuelto_por: userEmail, saldo: 0, actualizado_at: now };
+    const movements = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    if (sale.recibido > 0) movements.push({ id: `refund_${Math.random().toString(36).slice(2, 11)}`, folio: `Reembolso-${sale.folio}`, venta_relacionada_id: ventaId, subtipo: "reembolso_venta", sku: "REEMBOLSO", almacen_id: "devoluciones", tipo: "salida", cantidad: 1, unidades_devueltas: sale.total_unidades, referencia: `Devolución de ${sale.folio}: ${cleanReason}`, usuario: userEmail, fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, total_venta: -sale.recibido, total_cobrado: -sale.recibido, metodo_pago: sale.metodo_pago_inicial });
+    setLocalStorageItem("ventas_maestras", sales); setLocalStorageItem("stock", stock); setLocalStorageItem("resumen_ventas", summaries); setLocalStorageItem("movimientos", movements);
+    notifyListeners("stock", stock); notifyListeners("movimientos", movements); clearFinanzasCache(); clearPeriodosFinancierosCache();
   },
 
   ensureProductExists: async (sku: string, nombre: string, categoria = "General", stockMinimo = 5, unidad = "uds"): Promise<Producto> => {
@@ -2387,18 +2779,21 @@ export const firestoreService = {
         collection(realDb, "movimientos"),
         where("venta_id", "==", ventaId)
       );
-      const ventaSnapshot = await getDocs(ventaQuery);
+      const relatedQuery = query(collection(realDb, "movimientos"), where("venta_relacionada_id", "==", ventaId));
+      const [ventaSnapshot, relatedSnapshot] = await Promise.all([getDocs(ventaQuery), getDocs(relatedQuery)]);
       if (ventaSnapshot.empty) {
         throw new Error("La venta que intentas anular no existe en el sistema.");
       }
 
-      const movementRefs = ventaSnapshot.docs.map((movementDoc) => movementDoc.ref);
+      const movementRefs = [...ventaSnapshot.docs, ...relatedSnapshot.docs].map((movementDoc) => movementDoc.ref);
+      const masterRef = doc(realDb, "ventas", ventaId);
 
       await runTransaction(realDb, async (transaction) => {
         const movementSnaps: any[] = [];
         for (const movementRef of movementRefs) {
           movementSnaps.push(await transaction.get(movementRef));
         }
+        const masterSnap = await transaction.get(masterRef);
 
         const movementData = movementSnaps
           .map((snapshot, index) => ({ snapshot, ref: movementRefs[index] }))
@@ -2410,25 +2805,26 @@ export const firestoreService = {
         if (activeMovements.length === 0) {
           throw new Error("Esta venta ya ha sido anulada previamente.");
         }
-        if (activeMovements.some(({ data }) => data.tipo !== "salida")) {
+        if (activeMovements.filter(({ data }) => data.venta_id === ventaId).some(({ data }) => data.tipo !== "salida")) {
           throw new Error("La agrupación contiene movimientos incompatibles y no puede anularse como venta.");
         }
 
-        const inventoryMovements = activeMovements.filter(({ data }) => data.afecta_stock !== false);
+        const saleItemMovements = activeMovements.filter(({ data }) => data.venta_id === ventaId && !data.subtipo);
+        const inventoryMovements = saleItemMovements.filter(({ data }) => data.afecta_stock !== false);
         const stockEntries = inventoryMovements.map(({ data }) => {
           const sku = String(data.sku || "").trim().toUpperCase();
           const almacenId = String(data.almacen_id || "").trim();
           const key = `${sku}_${almacenId}`;
           return { sku, almacenId, key, ref: doc(realDb!, "stock", key), cantidad: Number(data.cantidad) || 0 };
         });
-        const summaryEntries = inventoryMovements.map(({ data }) => {
+        const summaryEntries = saleItemMovements.map(({ data }) => {
           const sku = String(data.sku || "").trim().toUpperCase();
           const almacenId = String(data.almacen_id || "").trim();
           const fechaStr = getLocalDateString(data.fecha);
           const key = `${fechaStr}_${sku}_${almacenId}`;
           return { key, ref: doc(realDb!, "resumen_ventas", key), cantidad: Number(data.cantidad) || 0 };
         });
-        const periodoKey = getPeriodoKey(activeMovements[0].data.fecha);
+        const periodoKey = getPeriodoKey(saleItemMovements[0]?.data.fecha);
         const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
 
         const stockSnaps: any[] = [];
@@ -2436,6 +2832,10 @@ export const firestoreService = {
         const summarySnaps: any[] = [];
         for (const entry of summaryEntries) summarySnaps.push(await transaction.get(entry.ref));
         const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+
+        if (masterSnap.exists() && masterSnap.data().estado === "devuelto") {
+          throw new Error("Una venta devuelta no puede anularse nuevamente.");
+        }
 
         const cancellationTimestamp = Timestamp.now();
         activeMovements.forEach(({ ref }) => {
@@ -2446,6 +2846,15 @@ export const firestoreService = {
             motivo_anulacion: motivo
           });
         });
+        if (masterSnap.exists()) {
+          transaction.update(masterRef, {
+            estado: "anulado",
+            anulado_at: cancellationTimestamp,
+            anulado_por: usuarioEmail,
+            motivo_anulacion: motivo,
+            actualizado_at: cancellationTimestamp
+          });
+        }
 
         stockEntries.forEach((entry, index) => {
           const currentQty = stockSnaps[index].exists()
@@ -2459,15 +2868,17 @@ export const firestoreService = {
             actualizado: cancellationTimestamp
           }, { merge: true });
 
-          if (summarySnaps[index].exists()) {
-            const previousQty = Number(summarySnaps[index].data()?.cantidad) || 0;
-            const previousTransactions = Number(summarySnaps[index].data()?.total_transacciones) || 0;
-            transaction.set(summaryEntries[index].ref, {
-              cantidad: Math.max(0, previousQty - entry.cantidad),
-              total_transacciones: Math.max(0, previousTransactions - 1),
-              actualizado: cancellationTimestamp
-            }, { merge: true });
-          }
+        });
+
+        summaryEntries.forEach((entry, index) => {
+          if (!summarySnaps[index].exists()) return;
+          const previousQty = Number(summarySnaps[index].data()?.cantidad) || 0;
+          const previousTransactions = Number(summarySnaps[index].data()?.total_transacciones) || 0;
+          transaction.set(entry.ref, {
+            cantidad: Math.max(0, previousQty - entry.cantidad),
+            total_transacciones: Math.max(0, previousTransactions - 1),
+            actualizado: cancellationTimestamp
+          }, { merge: true });
         });
 
         if (periodRef && periodoKey && !hadPreviouslyCancelledItems) {
@@ -2488,9 +2899,11 @@ export const firestoreService = {
     }
 
     const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const existingMasterSale = getLocalStorageItem<Venta[]>("ventas_maestras", []).find(item => item.id === ventaId);
+    if (existingMasterSale?.estado === "devuelto") throw new Error("Una venta devuelta no puede anularse nuevamente.");
     const groupedIndexes = movimientos
       .map((movement, index) => ({ movement, index }))
-      .filter(({ movement }) => movement.venta_id === ventaId);
+      .filter(({ movement }) => movement.venta_id === ventaId || movement.venta_relacionada_id === ventaId);
     const activeItems = groupedIndexes.filter(({ movement }) => movement.estado !== "anulado");
 
     if (groupedIndexes.length === 0) throw new Error("La venta no existe en el sistema.");
@@ -2502,7 +2915,8 @@ export const firestoreService = {
 
     activeItems.forEach(({ movement, index }) => {
       const sku = movement.sku.trim().toUpperCase();
-      if (movement.afecta_stock !== false) {
+      const isSaleItem = movement.venta_id === ventaId && !movement.subtipo;
+      if (isSaleItem && movement.afecta_stock !== false) {
         const stockKey = `${sku}_${movement.almacen_id}`;
         const currentQty = stockMap[stockKey]?.cantidad || 0;
         stockMap[stockKey] = {
@@ -2513,15 +2927,16 @@ export const firestoreService = {
           actualizado: cancellationDate
         };
 
-        const summaryKey = `${getLocalDateString(movement.fecha)}_${sku}_${movement.almacen_id}`;
-        if (summaryMap[summaryKey]) {
-          summaryMap[summaryKey] = {
-            ...summaryMap[summaryKey],
-            cantidad: Math.max(0, summaryMap[summaryKey].cantidad - (Number(movement.cantidad) || 0)),
-            total_transacciones: Math.max(0, summaryMap[summaryKey].total_transacciones - 1),
-            actualizado: cancellationDate
-          };
-        }
+      }
+
+      const summaryKey = `${getLocalDateString(movement.fecha)}_${sku}_${movement.almacen_id}`;
+      if (isSaleItem && summaryMap[summaryKey]) {
+        summaryMap[summaryKey] = {
+          ...summaryMap[summaryKey],
+          cantidad: Math.max(0, summaryMap[summaryKey].cantidad - (Number(movement.cantidad) || 0)),
+          total_transacciones: Math.max(0, summaryMap[summaryKey].total_transacciones - 1),
+          actualizado: cancellationDate
+        };
       }
 
       movimientos[index] = {
@@ -2532,6 +2947,20 @@ export const firestoreService = {
         motivo_anulacion: motivo
       };
     });
+
+    const masterSales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+    const masterIndex = masterSales.findIndex(item => item.id === ventaId);
+    if (masterIndex >= 0) {
+      masterSales[masterIndex] = {
+        ...masterSales[masterIndex],
+        estado: "anulado",
+        anulado_at: cancellationDate,
+        anulado_por: usuarioEmail,
+        motivo_anulacion: motivo,
+        actualizado_at: cancellationDate
+      };
+      setLocalStorageItem("ventas_maestras", masterSales);
+    }
 
     setLocalStorageItem("stock", stockMap);
     setLocalStorageItem("resumen_ventas", summaryMap);
@@ -2814,20 +3243,32 @@ export const firestoreService = {
       if (!initial.exists()) throw new Error("El movimiento no existe.");
       const initialData = initial.data();
       if (initialData.compra_id) return firestoreService.enviarCompraPapelera(initialData.compra_id);
+      const masterSaleSnap = initialData.venta_id ? await getDoc(doc(realDb, "ventas", initialData.venta_id)) : null;
+      const isReturnedSale = masterSaleSnap?.exists() && masterSaleSnap.data().estado === "devuelto";
       const snapshots = initialData.venta_id
-        ? (await getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", initialData.venta_id)))).docs
+        ? (await Promise.all([
+            getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", initialData.venta_id))),
+            getDocs(query(collection(realDb, "movimientos"), where("venta_relacionada_id", "==", initialData.venta_id)))
+          ])).flatMap(result => result.docs)
         : [initial];
-      const periodoDescontado = snapshots.length > 0
+      const periodoDescontado = !isReturnedSale && snapshots.length > 0
         && snapshots.every(snapshot => snapshot.data().estado !== "anulado")
         && snapshots.some(snapshot => snapshot.data().tipo === "salida");
-      if (initialData.estado !== "anulado") await firestoreService.anularMovimiento(id, "Movimiento enviado a Papelera");
+      if (!isReturnedSale && initialData.estado !== "anulado") await firestoreService.anularMovimiento(id, "Movimiento enviado a Papelera");
       const batch = writeBatch(realDb);
       snapshots.forEach(snapshot => batch.set(snapshot.ref, {
         en_papelera: true,
         desactivado_at: Timestamp.now(),
-        estado_antes_papelera: snapshot.data().estado === "anulado" ? "anulado" : "activo",
+        estado_antes_papelera: isReturnedSale || snapshot.data().estado === "anulado" ? "anulado" : "activo",
         periodo_descontado_papelera: periodoDescontado
       }, { merge: true }));
+      if (initialData.venta_id) {
+        batch.set(doc(realDb, "ventas", initialData.venta_id), {
+          en_papelera: true,
+          desactivado_at: Timestamp.now(),
+          estado_antes_papelera: masterSaleSnap?.exists() ? masterSaleSnap.data().estado || "activo" : "activo"
+        }, { merge: true });
+      }
       await batch.commit();
       return;
     }
@@ -2835,25 +3276,48 @@ export const firestoreService = {
     const selected = movimientos.find(movimiento => movimiento.id === id);
     if (!selected) throw new Error("El movimiento no existe.");
     if (selected.compra_id) return firestoreService.enviarCompraPapelera(selected.compra_id);
-    const previousTargets = movimientos.filter(movimiento => movimiento.id === id || (selected.venta_id && movimiento.venta_id === selected.venta_id));
+    const localMasterSales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+    const localMasterSale = selected.venta_id ? localMasterSales.find(item => item.id === selected.venta_id) : undefined;
+    const isReturnedSale = localMasterSale?.estado === "devuelto";
+    const previousTargets = movimientos.filter(movimiento => movimiento.id === id || (selected.venta_id && (movimiento.venta_id === selected.venta_id || movimiento.venta_relacionada_id === selected.venta_id)));
     const previousState = new Map<string | undefined, "activo" | "anulado">(
       previousTargets.map(movimiento => [movimiento.id, movimiento.estado === "anulado" ? "anulado" : "activo"])
     );
-    const periodoDescontado = previousTargets.length > 0 && previousTargets.every(movimiento => movimiento.estado !== "anulado") && previousTargets.some(movimiento => movimiento.tipo === "salida");
-    if (selected.estado !== "anulado") await firestoreService.anularMovimiento(id, "Movimiento enviado a Papelera");
+    const periodoDescontado = !isReturnedSale && previousTargets.length > 0 && previousTargets.every(movimiento => movimiento.estado !== "anulado") && previousTargets.some(movimiento => movimiento.tipo === "salida");
+    if (!isReturnedSale && selected.estado !== "anulado") await firestoreService.anularMovimiento(id, "Movimiento enviado a Papelera");
     const updated = getLocalStorageItem<Movimiento[]>("movimientos", []);
     const now = new Date();
     updated.forEach((movimiento, index) => {
-      if (movimiento.id === id || (selected.venta_id && movimiento.venta_id === selected.venta_id)) updated[index] = {
+      if (movimiento.id === id || (selected.venta_id && (movimiento.venta_id === selected.venta_id || movimiento.venta_relacionada_id === selected.venta_id))) updated[index] = {
         ...movimiento,
         en_papelera: true,
         desactivado_at: now,
-        estado_antes_papelera: previousState.get(movimiento.id) || "activo",
+        estado_antes_papelera: isReturnedSale ? "anulado" : previousState.get(movimiento.id) || "activo",
         periodo_descontado_papelera: periodoDescontado
       };
     });
     setLocalStorageItem("movimientos", updated);
+    if (selected.venta_id) {
+      const masterSales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+      const masterIndex = masterSales.findIndex(item => item.id === selected.venta_id);
+      if (masterIndex >= 0) {
+        masterSales[masterIndex] = { ...masterSales[masterIndex], en_papelera: true, desactivado_at: now, estado_antes_papelera: localMasterSale?.estado || "activo" };
+        setLocalStorageItem("ventas_maestras", masterSales);
+      }
+    }
     notifyListeners("movimientos", updated);
+  },
+
+  enviarVentaPapelera: async (ventaId: string): Promise<void> => {
+    if (!ventaId) throw new Error("ID de venta no proporcionado.");
+    if (isConfigured && realDb) {
+      const snapshot = await getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", ventaId), limit(1)));
+      if (snapshot.empty) throw new Error("No se encontraron las partidas de la venta.");
+      return firestoreService.enviarMovimientoPapelera(snapshot.docs[0].id);
+    }
+    const movement = getLocalStorageItem<Movimiento[]>("movimientos", []).find(item => item.venta_id === ventaId);
+    if (!movement?.id) throw new Error("No se encontraron las partidas de la venta.");
+    return firestoreService.enviarMovimientoPapelera(movement.id);
   },
 
   restaurarMovimientoPapelera: async (id: string): Promise<void> => {
@@ -2864,12 +3328,17 @@ export const firestoreService = {
       const initialData = initial.data();
       if (initialData.compra_id) return firestoreService.restaurarCompraPapelera(initialData.compra_id);
       const refs = initialData.venta_id
-        ? (await getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", initialData.venta_id)))).docs.map(item => item.ref)
+        ? (await Promise.all([
+            getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", initialData.venta_id))),
+            getDocs(query(collection(realDb, "movimientos"), where("venta_relacionada_id", "==", initialData.venta_id)))
+          ])).flatMap(result => result.docs.map(item => item.ref))
         : [doc(realDb, "movimientos", id)];
+      const masterRef = initialData.venta_id ? doc(realDb, "ventas", initialData.venta_id) : null;
 
       await runTransaction(realDb, async transaction => {
         const movementSnaps: any[] = [];
         for (const ref of refs) movementSnaps.push(await transaction.get(ref));
+        const masterSnap = masterRef ? await transaction.get(masterRef) : null;
         const activeTargets = movementSnaps.filter(snapshot => snapshot.exists() && snapshot.data().en_papelera === true);
         if (activeTargets.length === 0) throw new Error("El movimiento ya está activo.");
         const restorableTargets = activeTargets.filter(snapshot => snapshot.data().estado_antes_papelera !== "anulado");
@@ -2900,9 +3369,8 @@ export const firestoreService = {
           if (currentQty + entry.delta < 0) throw new Error(`No hay stock suficiente de ${entry.sku} para reactivar la operación.`);
         });
 
-        const saleTargets = restorableTargets.filter(snapshot => snapshot.data().tipo === "salida");
-        const inventorySaleTargets = saleTargets.filter(snapshot => snapshot.data().afecta_stock !== false);
-        const summaryEntries = inventorySaleTargets.map(snapshot => {
+        const saleTargets = restorableTargets.filter(snapshot => snapshot.data().tipo === "salida" && !snapshot.data().subtipo && String(snapshot.data().sku || "").toUpperCase() !== "ABONO");
+        const summaryEntries = saleTargets.map(snapshot => {
           const data = snapshot.data();
           const sku = String(data.sku || "").trim().toUpperCase();
           const key = `${getLocalDateString(data.fecha)}_${sku}_${data.almacen_id}`;
@@ -2931,6 +3399,12 @@ export const firestoreService = {
             ? { en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField(), periodo_descontado_papelera: deleteField() }
             : { estado: "activo", anulado_at: deleteField(), anulado_por: deleteField(), motivo_anulacion: deleteField(), en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField(), periodo_descontado_papelera: deleteField() });
         });
+        if (masterRef && masterSnap?.exists()) {
+          const previousMasterState = masterSnap.data().estado_antes_papelera || masterSnap.data().estado;
+          transaction.update(masterRef, previousMasterState === "anulado" || previousMasterState === "devuelto"
+            ? { en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField(), actualizado_at: now }
+            : { estado: "activo", en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField(), anulado_at: deleteField(), anulado_por: deleteField(), motivo_anulacion: deleteField(), actualizado_at: now });
+        }
         if (periodRef && periodoKey) transaction.set(periodRef, computeNewPeriodIndexData(periodSnap?.exists() ? periodSnap.data() : null, periodoKey, 1, 0, 0), { merge: true });
       });
       clearFinanzasCache(); clearPeriodosFinancierosCache();
@@ -2941,7 +3415,7 @@ export const firestoreService = {
     const selected = movimientos.find(movimiento => movimiento.id === id);
     if (!selected) throw new Error("El movimiento no existe.");
     if (selected.compra_id) return firestoreService.restaurarCompraPapelera(selected.compra_id);
-    const targets = movimientos.filter(movimiento => movimiento.id === id || (selected.venta_id && movimiento.venta_id === selected.venta_id));
+    const targets = movimientos.filter(movimiento => movimiento.id === id || (selected.venta_id && (movimiento.venta_id === selected.venta_id || movimiento.venta_relacionada_id === selected.venta_id)));
     const restorableTargets = targets.filter(movimiento => movimiento.estado_antes_papelera !== "anulado");
     const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
     const summaryMap = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
@@ -2973,7 +3447,7 @@ export const firestoreService = {
         stockMap[originKey] = { ...stockMap[originKey], cantidad: originQty - qty, actualizado: now };
         stockMap[destKey] = { ...(stockMap[destKey] || { id: destKey, sku, almacen_id: target.almacen_destino_id }), cantidad: (stockMap[destKey]?.cantidad || 0) + qty, actualizado: now } as StockItem;
       }
-      if (target.tipo === "salida" && target.afecta_stock !== false) {
+      if (target.tipo === "salida" && !target.subtipo) {
         const summaryKey = `${getLocalDateString(target.fecha)}_${sku}_${target.almacen_id}`;
         const previous = summaryMap[summaryKey];
         summaryMap[summaryKey] = { id: summaryKey, fecha_str: getLocalDateString(target.fecha), fecha: target.fecha, sku, almacen_id: target.almacen_id, cantidad: (previous?.cantidad || 0) + qty, total_transacciones: (previous?.total_transacciones || 0) + 1, actualizado: now };
@@ -2983,6 +3457,21 @@ export const firestoreService = {
       movimientos[index] = restored;
     });
     setLocalStorageItem("stock", stockMap); setLocalStorageItem("resumen_ventas", summaryMap); setLocalStorageItem("movimientos", movimientos);
+    if (selected.venta_id) {
+      const masterSales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+      const masterIndex = masterSales.findIndex(item => item.id === selected.venta_id);
+      if (masterIndex >= 0) {
+        const previousState = masterSales[masterIndex].estado_antes_papelera || masterSales[masterIndex].estado;
+        const preservedState = previousState === "anulado" || previousState === "devuelto";
+        masterSales[masterIndex] = { ...masterSales[masterIndex], estado: preservedState ? previousState : "activo", en_papelera: false, actualizado_at: now };
+        delete masterSales[masterIndex].estado_antes_papelera;
+        delete masterSales[masterIndex].desactivado_at;
+        if (!preservedState) {
+          delete masterSales[masterIndex].anulado_at; delete masterSales[masterIndex].anulado_por; delete masterSales[masterIndex].motivo_anulacion;
+        }
+        setLocalStorageItem("ventas_maestras", masterSales);
+      }
+    }
     notifyListeners("stock", stockMap); notifyListeners("movimientos", movimientos);
     clearFinanzasCache(); clearPeriodosFinancierosCache();
   },
@@ -3053,6 +3542,7 @@ export const firestoreService = {
             venta_total_recibido: typeof data.venta_total_recibido === "number" ? data.venta_total_recibido : undefined,
             venta_saldo_pendiente: typeof data.venta_saldo_pendiente === "number" ? data.venta_saldo_pendiente : undefined,
             ingreso_reconocido: typeof data.ingreso_reconocido === "number" ? data.ingreso_reconocido : undefined,
+            unidades_devueltas: typeof data.unidades_devueltas === "number" ? data.unidades_devueltas : undefined,
             estado_pago: data.estado_pago || undefined,
             sku: data.sku,
             almacen_id: data.almacen_id,
@@ -3086,7 +3576,8 @@ export const firestoreService = {
             estado: data.estado || "activo",
             anulado_at: data.anulado_at ? (data.anulado_at as Timestamp).toDate() : undefined,
             anulado_por: data.anulado_por,
-            motivo_anulacion: data.motivo_anulacion
+            motivo_anulacion: data.motivo_anulacion,
+            en_papelera: data.en_papelera === true
           };
         });
 
@@ -3097,84 +3588,8 @@ export const firestoreService = {
           totalLoaded: list.length
         };
       } catch (err: any) {
-        console.warn("Error en query indexado de movimientos, ejecutando consulta fallback:", err);
-        if (err?.code === "failed-precondition" || (err?.message && err.message.includes("index"))) {
-          const qFallback = query(collection(realDb, "movimientos"), limit(pageSize * 2));
-          const snap = await getDocs(qFallback);
-          let list: Movimiento[] = snap.docs.filter(d => d.data().en_papelera !== true).map(d => {
-            const data = d.data();
-            return {
-              id: d.id,
-              folio: data.folio,
-              venta_id: data.venta_id,
-              venta_partida: typeof data.venta_partida === "number" ? data.venta_partida : undefined,
-              venta_total_partidas: typeof data.venta_total_partidas === "number" ? data.venta_total_partidas : undefined,
-              venta_subtotal: typeof data.venta_subtotal === "number" ? data.venta_subtotal : undefined,
-              venta_total_cobrado: typeof data.venta_total_cobrado === "number" ? data.venta_total_cobrado : undefined,
-              venta_total_costos: typeof data.venta_total_costos === "number" ? data.venta_total_costos : undefined,
-              canal_venta: data.canal_venta || undefined,
-              canal_venta_nombre: data.canal_venta_nombre || undefined,
-              porcentaje_precio: typeof data.porcentaje_precio === "number" ? data.porcentaje_precio : undefined,
-              afecta_stock: typeof data.afecta_stock === "boolean" ? data.afecta_stock : undefined,
-              anticipo_porcentaje: typeof data.anticipo_porcentaje === "number" ? data.anticipo_porcentaje : undefined,
-              venta_total_recibido: typeof data.venta_total_recibido === "number" ? data.venta_total_recibido : undefined,
-              venta_saldo_pendiente: typeof data.venta_saldo_pendiente === "number" ? data.venta_saldo_pendiente : undefined,
-              ingreso_reconocido: typeof data.ingreso_reconocido === "number" ? data.ingreso_reconocido : undefined,
-              estado_pago: data.estado_pago || undefined,
-              sku: data.sku,
-              almacen_id: data.almacen_id,
-              tipo: data.tipo,
-              cantidad: data.cantidad,
-              referencia: data.referencia,
-              usuario: data.usuario,
-              fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
-              almacen_destino_id: data.almacen_destino_id,
-              compra_id: data.compra_id,
-              lote_id: data.lote_id,
-              costo_unitario: typeof data.costo_unitario === "number" ? data.costo_unitario : undefined,
-              cliente_id: data.cliente_id,
-              cliente_nombre: data.cliente_nombre,
-              cliente_tipo: data.cliente_tipo,
-              precio_unitario_venta: typeof data.precio_unitario_venta === "number" ? data.precio_unitario_venta : undefined,
-              total_venta: typeof data.total_venta === "number" ? data.total_venta : undefined,
-              envio_cobrado_cliente: typeof data.envio_cobrado_cliente === "number" ? data.envio_cobrado_cliente : undefined,
-              otros_cargos_cliente: typeof data.otros_cargos_cliente === "number" ? data.otros_cargos_cliente : undefined,
-              concepto_otros_cargos: data.concepto_otros_cargos || undefined,
-              costo_envio_venta: typeof data.costo_envio_venta === "number" ? data.costo_envio_venta : undefined,
-              otros_costos_venta: typeof data.otros_costos_venta === "number" ? data.otros_costos_venta : undefined,
-              concepto_otros_costos: data.concepto_otros_costos || undefined,
-              total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
-              total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
-              comentarios_venta: data.comentarios_venta || undefined,
-              ubicacion_entrega_id: data.ubicacion_entrega_id || undefined,
-              ubicacion_entrega_nombre: data.ubicacion_entrega_nombre || undefined,
-              repartidor_id: data.repartidor_id || undefined,
-              repartidor_nombre: data.repartidor_nombre || undefined,
-              estado: data.estado || "activo",
-              anulado_at: data.anulado_at ? (data.anulado_at as Timestamp).toDate() : undefined,
-              anulado_por: data.anulado_por,
-              motivo_anulacion: data.motivo_anulacion
-            };
-          });
-          list.sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
-          if (options.skuFilter) {
-            list = list.filter(m => m.sku?.trim().toUpperCase() === options.skuFilter?.trim().toUpperCase());
-          }
-          if (options.warehouseFilter && options.warehouseFilter !== "all") {
-            list = list.filter(m => m.almacen_id === options.warehouseFilter || m.almacen_destino_id === options.warehouseFilter);
-          }
-          if (options.tipoFilter && options.tipoFilter !== "all") {
-            list = list.filter(m => m.tipo === options.tipoFilter);
-          }
-          if (options.estadoFilter && options.estadoFilter !== "all") {
-            list = list.filter(m => (m.estado || "activo") === options.estadoFilter);
-          }
-          return {
-            items: list.slice(0, pageSize),
-            lastDoc: null,
-            hasMore: list.length > pageSize,
-            totalLoaded: list.slice(0, pageSize).length
-          };
+        if (err?.code === "failed-precondition" || String(err?.message || "").toLowerCase().includes("index")) {
+          throw new Error("Falta un índice de Firestore para aplicar estos filtros. Créalo desde el enlace del error en la consola y vuelve a intentarlo cuando esté habilitado.");
         }
         throw err;
       }
@@ -3288,6 +3703,7 @@ export const firestoreService = {
             venta_total_recibido: typeof data.venta_total_recibido === "number" ? data.venta_total_recibido : undefined,
             venta_saldo_pendiente: typeof data.venta_saldo_pendiente === "number" ? data.venta_saldo_pendiente : undefined,
             ingreso_reconocido: typeof data.ingreso_reconocido === "number" ? data.ingreso_reconocido : undefined,
+            unidades_devueltas: typeof data.unidades_devueltas === "number" ? data.unidades_devueltas : undefined,
             estado_pago: data.estado_pago || undefined,
             sku: data.sku,
             almacen_id: data.almacen_id,
@@ -3321,7 +3737,8 @@ export const firestoreService = {
             estado: data.estado || "activo",
             anulado_at: data.anulado_at ? (data.anulado_at.toDate ? data.anulado_at.toDate() : new Date(data.anulado_at)) : undefined,
             anulado_por: data.anulado_por,
-            motivo_anulacion: data.motivo_anulacion
+            motivo_anulacion: data.motivo_anulacion,
+            en_papelera: data.en_papelera === true
           };
         });
 
@@ -3542,6 +3959,7 @@ export const firestoreService = {
     }
 
     const validItems: CompraItem[] = [];
+    const purchaseSkus = new Set<string>();
     let totalUnidades = 0;
     let subtotal = 0;
 
@@ -3559,6 +3977,10 @@ export const firestoreService = {
       if (isNaN(unitCost) || unitCost < 0) {
         throw new Error(`El costo unitario para el SKU ${cleanSku} no puede ser negativo.`);
       }
+      if (purchaseSkus.has(cleanSku)) {
+        throw new Error(`El SKU ${cleanSku} está repetido. Unifica su cantidad en una sola partida.`);
+      }
+      purchaseSkus.add(cleanSku);
 
       const itemSubtotal = qty * unitCost;
       totalUnidades += qty;
@@ -3640,6 +4062,11 @@ export const firestoreService = {
             almacen_id: almacenId,
             cantidad: newQty,
             actualizado: Timestamp.now()
+          }, { merge: true });
+
+          transaction.set(doc(realDb, "productos", item.sku), {
+            precio_costo: item.costo_unitario,
+            actualizado_at: Timestamp.now()
           }, { merge: true });
 
           // Registrar movimiento de auditoría interna
@@ -3724,6 +4151,7 @@ export const firestoreService = {
     // --- MODO LOCAL / EMULADOR ---
     const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
     const comprasList = getLocalStorageItem<Compra[]>("compras", []);
+    const productosList = getLocalStorageItem<Producto[]>("productos", []);
     const movimientosList = getLocalStorageItem<Movimiento[]>("movimientos", []);
     const counters = getLocalStorageItem<Record<string, number>>("contadores_movimientos", {
       entrada: 0,
@@ -3771,12 +4199,16 @@ export const firestoreService = {
         costo_unitario: item.costo_unitario,
         estado: "activo"
       });
+      const productIndex = productosList.findIndex(producto => producto.sku === item.sku);
+      if (productIndex >= 0) productosList[productIndex] = { ...productosList[productIndex], precio_costo: item.costo_unitario, actualizado_at: new Date() };
     }
 
     setLocalStorageItem("contadores_movimientos", counters);
     setLocalStorageItem("stock", stockMap);
     notifyListeners("stock", stockMap);
     setLocalStorageItem("movimientos", movimientosList);
+    setLocalStorageItem("productos", productosList);
+    notifyListeners("productos", productosList);
     notifyListeners("movimientos", movimientosList);
 
     const nuevaCompra: Compra = {
@@ -4189,43 +4621,11 @@ export const firestoreService = {
           hasMore,
           totalLoaded: list.length
         };
-      } catch (err) {
-        console.warn("Error en query indexado de compras, ejecutando consulta fallback:", err);
-        const qFallback = query(collection(realDb, "compras"), limit(pageSize * 2));
-        const snap = await getDocs(qFallback);
-        let list: Compra[] = snap.docs.filter(d => d.data().en_papelera !== true).map(d => {
-          const data = d.data();
-          return {
-            id: d.id,
-            folio: data.folio,
-            proveedor: data.proveedor,
-            fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
-            fecha_str: data.fecha_str,
-            almacen_id: data.almacen_id,
-            items: data.items || [],
-            total_unidades: Number(data.total_unidades) || 0,
-            subtotal: Number(data.subtotal) || 0,
-            costo_envio: Number(data.costo_envio) || 0,
-            comisiones: Number(data.comisiones) || 0,
-            descuentos: Number(data.descuentos) || 0,
-            total: Number(data.total) || 0,
-            referencia: data.referencia || "",
-            notas: data.notas || "",
-            creado_por: data.creado_por || "",
-            creado_at: data.creado_at ? (data.creado_at as Timestamp).toDate() : new Date(),
-            estado: data.estado || "completada"
-          };
-        });
-        list.sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
-        if (options.warehouseFilter && options.warehouseFilter !== "all") {
-          list = list.filter(c => c.almacen_id === options.warehouseFilter);
+      } catch (err: any) {
+        if (err?.code === "failed-precondition" || String(err?.message || "").toLowerCase().includes("index")) {
+          throw new Error("Falta un índice de Firestore para consultar las compras con estos filtros. Habilita el índice indicado por Firebase y vuelve a intentarlo.");
         }
-        return {
-          items: list.slice(0, pageSize),
-          lastDoc: null,
-          hasMore: list.length > pageSize,
-          totalLoaded: list.slice(0, pageSize).length
-        };
+        throw err;
       }
     }
 
@@ -5890,13 +6290,15 @@ export const firestoreService = {
       const purchaseIds = new Set(byName.get("compras")?.docs.map(item => item.id) || []);
       byName.get("compras")?.docs.forEach(item => { const data = item.data(); items.push(makeItem("compra", item.id, data.folio || item.id, `${data.proveedor || "Sin proveedor"} · $${Number(data.total || 0).toFixed(2)}`, data)); });
       const groupedSales = new Set<string>();
-      byName.get("movimientos")?.docs.forEach(item => {
+      const trashedMovements = [...(byName.get("movimientos")?.docs || [])].sort((a, b) => Number(Boolean(b.data().venta_id)) - Number(Boolean(a.data().venta_id)));
+      trashedMovements.forEach(item => {
         const data = item.data();
         if (data.compra_id && purchaseIds.has(data.compra_id)) return;
-        if (data.venta_id) {
-          if (groupedSales.has(data.venta_id)) return;
-          groupedSales.add(data.venta_id);
-          items.push(makeItem("venta", item.id, data.folio || "Venta", `${data.cliente_nombre || "Mostrador"} · ${data.venta_total_partidas || 1} partida(s)`, data, data.venta_id));
+        const groupedSaleId = data.venta_id || data.venta_relacionada_id;
+        if (groupedSaleId) {
+          if (groupedSales.has(groupedSaleId)) return;
+          groupedSales.add(groupedSaleId);
+          items.push(makeItem("venta", item.id, data.folio || "Venta", `${data.cliente_nombre || "Mostrador"} · ${data.venta_total_partidas || 1} partida(s)`, data, groupedSaleId));
           return;
         }
         items.push(makeItem("movimiento", item.id, data.folio || item.id, `${data.tipo || "movimiento"} · ${data.sku || "Sin SKU"} · ${Number(data.cantidad || 0)} uds`, data));
@@ -5919,12 +6321,13 @@ export const firestoreService = {
     const purchaseIds = new Set(compras.map(item => item.id));
     compras.forEach(item => items.push(makeItem("compra", item.id || "", item.folio, `${item.proveedor} · $${Number(item.total || 0).toFixed(2)}`, item)));
     const groupedSales = new Set<string>();
-    getLocalStorageItem<Movimiento[]>("movimientos", []).filter(item => item.en_papelera).forEach(item => {
+    getLocalStorageItem<Movimiento[]>("movimientos", []).filter(item => item.en_papelera).sort((a, b) => Number(Boolean(b.venta_id)) - Number(Boolean(a.venta_id))).forEach(item => {
       if (item.compra_id && purchaseIds.has(item.compra_id)) return;
-      if (item.venta_id) {
-        if (groupedSales.has(item.venta_id)) return;
-        groupedSales.add(item.venta_id);
-        items.push(makeItem("venta", item.id || "", item.folio || "Venta", `${item.cliente_nombre || "Mostrador"} · ${item.venta_total_partidas || 1} partida(s)`, item, item.venta_id));
+      const groupedSaleId = item.venta_id || item.venta_relacionada_id;
+      if (groupedSaleId) {
+        if (groupedSales.has(groupedSaleId)) return;
+        groupedSales.add(groupedSaleId);
+        items.push(makeItem("venta", item.id || "", item.folio || "Venta", `${item.cliente_nombre || "Mostrador"} · ${item.venta_total_partidas || 1} partida(s)`, item, groupedSaleId));
       } else items.push(makeItem("movimiento", item.id || "", item.folio || item.id || "Movimiento", `${item.tipo} · ${item.sku} · ${item.cantidad} uds`, item));
     });
     getLocalStorageItem<Gasto[]>("gastos", []).filter(item => item.en_papelera).forEach(item => items.push(makeItem("gasto", item.id || "", item.concepto, `${item.categoria} · $${Number(item.monto || 0).toFixed(2)}`, item)));
@@ -5937,7 +6340,7 @@ export const firestoreService = {
 
   vaciarPapelera: async (): Promise<number> => {
     const collectionNames = [
-      "clientes", "movimientos", "compras", "gastos", "productos", "almacenes",
+      "clientes", "ventas", "movimientos", "compras", "gastos", "productos", "almacenes",
       "catalogo_categorias", "catalogo_marcas", "catalogo_colores", "catalogo_tallas_ropa",
       "catalogo_tallas_calzado", "catalogo_unidades", "catalogo_ubicaciones_entrega", "catalogo_repartidores"
     ] as const;
@@ -5965,6 +6368,7 @@ export const firestoreService = {
 
     const localCollections: Array<{ storageKey: string; listenerKey: keyof typeof listeners }> = [
       { storageKey: "clientes", listenerKey: "clientes" },
+      { storageKey: "ventas_maestras", listenerKey: "movimientos" },
       { storageKey: "movimientos", listenerKey: "movimientos" },
       { storageKey: "compras", listenerKey: "compras" },
       { storageKey: "gastos", listenerKey: "gastos" },
@@ -6104,6 +6508,7 @@ export const firestoreService = {
             venta_total_recibido: typeof data.venta_total_recibido === "number" ? data.venta_total_recibido : undefined,
             venta_saldo_pendiente: typeof data.venta_saldo_pendiente === "number" ? data.venta_saldo_pendiente : undefined,
             ingreso_reconocido: typeof data.ingreso_reconocido === "number" ? data.ingreso_reconocido : undefined,
+            unidades_devueltas: typeof data.unidades_devueltas === "number" ? data.unidades_devueltas : undefined,
             estado_pago: data.estado_pago || undefined,
             sku: data.sku,
             almacen_id: data.almacen_id,
@@ -6145,7 +6550,8 @@ export const firestoreService = {
                 : new Date(data.anulado_at)
               : undefined,
             anulado_por: data.anulado_por,
-            motivo_anulacion: data.motivo_anulacion
+            motivo_anulacion: data.motivo_anulacion,
+            en_papelera: data.en_papelera === true
           };
         });
 
@@ -6262,7 +6668,7 @@ export const firestoreService = {
     rawGastos = rawGastos.filter(g => g.en_papelera !== true && g.estado !== "inactivo");
 
     // 1. Filtrar ventas activas (no anuladas)
-    const activeVentas = rawVentas.filter(m => (m.estado || "activo") !== "anulado");
+    const activeVentas = rawVentas.filter(m => (m.estado || "activo") !== "anulado" && m.en_papelera !== true);
     let ingresosMercanciaVendida = 0;
     let enviosCobradosClientes = 0;
     let otrosCargosClientes = 0;
@@ -6275,8 +6681,8 @@ export const firestoreService = {
 
     for (const v of activeVentas) {
       const ventaKey = v.venta_id || v.venta_relacionada_id || v.folio || v.id || `venta-${ventasActivasIds.size + 1}`;
-      ventasActivasIds.add(ventaKey);
-      const qty = v.subtipo ? 0 : (Number(v.cantidad) || 0);
+      if (v.subtipo !== "reembolso_venta") ventasActivasIds.add(ventaKey);
+      const qty = v.subtipo === "reembolso_venta" ? -(Number(v.unidades_devueltas) || 0) : v.subtipo ? 0 : (Number(v.cantidad) || 0);
       unidadesVendidas += qty;
 
       const usaIngresoReconocido = typeof v.venta_total_recibido === "number" && !isNaN(v.venta_total_recibido);

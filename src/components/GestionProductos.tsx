@@ -63,6 +63,7 @@ interface VariantFormRow {
   talla: string;
   sku: string;
   codigo_barras: string;
+  precio_costo: number | string;
   precio_venta_sugerido: number | string;
   stock_minimo_almacenes: Record<string, number | string>;
   stock_minimo: number | string;
@@ -75,6 +76,12 @@ function generateBaseId(brand: string, name: string): string {
   const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8) || "prod";
   const rand = Math.random().toString(36).substring(2, 7);
   return `${cleanBrand}-${cleanName}-${rand}`;
+}
+
+function generateVariantSku(): string {
+  const time = Date.now().toString(36).toUpperCase().slice(-6);
+  const random = Math.random().toString(36).toUpperCase().slice(2, 6);
+  return `AO-${time}-${random}`;
 }
 
 export default function GestionProductos({ 
@@ -132,8 +139,9 @@ export default function GestionProductos({
     id: Math.random().toString(36).substring(2, 9),
     color: "",
     talla: currentTipoTalla === "unica" ? "Única" : "",
-    sku: "",
+    sku: generateVariantSku(),
     codigo_barras: "",
+    precio_costo: "",
     precio_venta_sugerido: "",
     stock_minimo_almacenes: {},
     stock_minimo: "",
@@ -360,6 +368,7 @@ export default function GestionProductos({
         talla: v.talla || "",
         sku: v.sku,
         codigo_barras: v.codigo_barras || "",
+        precio_costo: v.precio_costo ?? "",
         precio_venta_sugerido: v.precio_venta_sugerido ?? "",
         stock_minimo_almacenes: minMap,
         stock_minimo: v.stock_minimo ?? "",
@@ -411,8 +420,9 @@ export default function GestionProductos({
           id: Math.random().toString(36).substring(2, 9),
           color: col,
           talla: sz,
-          sku: "", // Manual capture required, completely empty
+          sku: generateVariantSku(),
           codigo_barras: "",
+          precio_costo: "",
           precio_venta_sugerido: matrixPrice,
           stock_minimo_almacenes: {},
           stock_minimo: matrixMinStock,
@@ -438,6 +448,7 @@ export default function GestionProductos({
       if (!row.color || !row.color.trim()) return false;
       if (formTipoTalla !== "unica" && (!row.talla || !row.talla.trim())) return false;
       if (!row.sku || !row.sku.trim()) return false;
+      if (row.precio_costo === "" || isNaN(Number(row.precio_costo)) || Number(row.precio_costo) < 0) return false;
       if (row.precio_venta_sugerido === "" || isNaN(Number(row.precio_venta_sugerido)) || Number(row.precio_venta_sugerido) < 0) return false;
       if (row.stock_minimo === "" || isNaN(Number(row.stock_minimo)) || Number(row.stock_minimo) < 0) return false;
     }
@@ -531,6 +542,11 @@ export default function GestionProductos({
         setFormErrors(errors);
         return;
       }
+      if (row.precio_costo === "" || isNaN(Number(row.precio_costo)) || Number(row.precio_costo) < 0) {
+        setGeneralError(`La variante en la fila ${rowNum} debe tener un costo válido en MXN.`);
+        setFormErrors(errors);
+        return;
+      }
 
       if (row.stock_minimo === "" || isNaN(Number(row.stock_minimo)) || Number(row.stock_minimo) < 0) {
         setGeneralError(`La variante en la fila ${rowNum} debe tener un stock mínimo válido.`);
@@ -552,6 +568,7 @@ export default function GestionProductos({
       const productsToSave: Omit<Producto, "id">[] = variantRows.map(row => {
         const minStockNum = Number(row.stock_minimo);
         const priceNum = Number(row.precio_venta_sugerido);
+        const costNum = Number(row.precio_costo);
 
         const minStockMap: Record<string, number> = {};
         almacenes.forEach(alm => {
@@ -572,6 +589,7 @@ export default function GestionProductos({
           talla: formTipoTalla === "unica" ? "Única" : row.talla.trim(),
           sku: row.sku.trim().toUpperCase(),
           codigo_barras: (row.codigo_barras || "").trim(),
+          precio_costo: costNum >= 0 ? costNum : 0,
           precio_venta_sugerido: priceNum >= 0 ? priceNum : 0,
           stock_minimo: minStockNum >= 0 ? minStockNum : 0,
           stock_minimo_almacenes: minStockMap,
@@ -698,7 +716,7 @@ export default function GestionProductos({
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
           <input
             type="text"
-            placeholder="Buscar por modelo, SKU, marca, color o código de barras..."
+            placeholder="Buscar por modelo, SKU, marca o color..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-9 pr-3.5 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white text-zinc-900 dark:text-white"
@@ -1323,9 +1341,9 @@ export default function GestionProductos({
                       <tr>
                         <th className="py-2.5 px-3">Color</th>
                         <th className="py-2.5 px-3">Talla</th>
-                        <th className="py-2.5 px-3">SKU Único *</th>
-                        <th className="py-2.5 px-3">Código Barras</th>
-                        <th className="py-2.5 px-3">Precio MXN</th>
+                        <th className="py-2.5 px-3">SKU automático</th>
+                        <th className="py-2.5 px-3">Costo MXN</th>
+                        <th className="py-2.5 px-3">Precio sugerido</th>
                         <th className="py-2.5 px-3">Stock Mínimo</th>
                         <th className="py-2.5 px-3 text-center">Activo</th>
                         <th className="py-2.5 px-3 text-right">Quitar</th>
@@ -1384,21 +1402,23 @@ export default function GestionProductos({
                               type="text"
                               placeholder="Ej. DC-TEE-NEG-M"
                               value={row.sku}
-                              onChange={(e) => handleUpdateVariantField(row.id, "sku", e.target.value.toUpperCase().replace(/\s+/g, "-"))}
-                              className={`w-full px-2.5 py-1 text-xs uppercase bg-white dark:bg-zinc-900 border ${
+                              readOnly
+                              className={`w-full px-2.5 py-1 text-xs uppercase bg-zinc-100 dark:bg-zinc-950 border ${
                                 formSubmitted && !row.sku.trim() ? "border-rose-500" : "border-zinc-300 dark:border-zinc-700"
                               } rounded-lg text-zinc-900 dark:text-white font-bold tracking-tight focus:outline-none`}
                             />
                           </td>
 
-                          {/* Código de barras */}
+                          {/* Costo actual */}
                           <td className="py-2.5 px-3">
                             <input
-                              type="text"
-                              placeholder="Opcional"
-                              value={row.codigo_barras}
-                              onChange={(e) => handleUpdateVariantField(row.id, "codigo_barras", e.target.value)}
-                              className="w-full px-2.5 py-1 text-xs bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-white font-mono focus:outline-none"
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              placeholder="0.00"
+                              value={row.precio_costo}
+                              onChange={(e) => handleUpdateVariantField(row.id, "precio_costo", e.target.value)}
+                              className={`w-24 px-2 py-1 text-xs bg-white dark:bg-zinc-900 border ${formSubmitted && (row.precio_costo === "" || isNaN(Number(row.precio_costo))) ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"} rounded-lg text-zinc-900 dark:text-white font-semibold focus:outline-none`}
                             />
                           </td>
 
