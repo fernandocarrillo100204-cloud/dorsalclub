@@ -5935,6 +5935,63 @@ export const firestoreService = {
     return items.sort((a, b) => (b.fecha?.getTime() || 0) - (a.fecha?.getTime() || 0));
   },
 
+  vaciarPapelera: async (): Promise<number> => {
+    const collectionNames = [
+      "clientes", "movimientos", "compras", "gastos", "productos", "almacenes",
+      "catalogo_categorias", "catalogo_marcas", "catalogo_colores", "catalogo_tallas_ropa",
+      "catalogo_tallas_calzado", "catalogo_unidades", "catalogo_ubicaciones_entrega", "catalogo_repartidores"
+    ] as const;
+
+    if (isConfigured && realDb) {
+      const snapshots = await Promise.all(
+        collectionNames.map(collectionName =>
+          getDocs(query(collection(realDb!, collectionName), where("en_papelera", "==", true)))
+        )
+      );
+      const documentRefs = snapshots.flatMap(snapshot => snapshot.docs.map(document => document.ref));
+
+      // Firestore limita cada lote a 500 operaciones. Dejamos margen para mantener
+      // este proceso seguro si la Papelera acumula muchos registros de prueba.
+      for (let index = 0; index < documentRefs.length; index += 400) {
+        const batch = writeBatch(realDb);
+        documentRefs.slice(index, index + 400).forEach(documentRef => batch.delete(documentRef));
+        await batch.commit();
+      }
+
+      clearFinanzasCache();
+      clearPeriodosFinancierosCache();
+      return documentRefs.length;
+    }
+
+    const localCollections: Array<{ storageKey: string; listenerKey: keyof typeof listeners }> = [
+      { storageKey: "clientes", listenerKey: "clientes" },
+      { storageKey: "movimientos", listenerKey: "movimientos" },
+      { storageKey: "compras", listenerKey: "compras" },
+      { storageKey: "gastos", listenerKey: "gastos" },
+      { storageKey: "productos", listenerKey: "productos" },
+      { storageKey: "almacenes", listenerKey: "almacenes" },
+      { storageKey: "categorias", listenerKey: "categorias" },
+      { storageKey: "marcas", listenerKey: "marcas" },
+      { storageKey: "colores", listenerKey: "colores" },
+      { storageKey: "tallas_ropa", listenerKey: "tallas_ropa" },
+      { storageKey: "tallas_calzado", listenerKey: "tallas_calzado" },
+      { storageKey: "unidades", listenerKey: "unidades" },
+      { storageKey: "ubicaciones_entrega", listenerKey: "ubicaciones_entrega" },
+      { storageKey: "repartidores", listenerKey: "repartidores" }
+    ];
+    let deletedCount = 0;
+    localCollections.forEach(({ storageKey, listenerKey }) => {
+      const current = getLocalStorageItem<any[]>(storageKey, []);
+      const remaining = current.filter(item => item.en_papelera !== true);
+      deletedCount += current.length - remaining.length;
+      setLocalStorageItem(storageKey, remaining);
+      notifyListeners(listenerKey, remaining);
+    });
+    clearFinanzasCache();
+    clearPeriodosFinancierosCache();
+    return deletedCount;
+  },
+
   restaurarPapeleraItem: async (item: PapeleraItem): Promise<void> => {
     if (item.tipo === "cliente") return firestoreService.restaurarClientePapelera(item.id);
     if (item.tipo === "venta" || item.tipo === "movimiento") return firestoreService.restaurarMovimientoPapelera(item.id);
