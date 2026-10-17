@@ -50,8 +50,6 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
   const [marcas, setMarcas] = useState<MarcaCatalogo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isUsingLocalFallback, setIsUsingLocalFallback] = useState(false);
-  const [dismissNotice, setDismissNotice] = useState(false);
 
   // Search and filters
   const [searchTerm, setSearchTerm] = useState("");
@@ -98,13 +96,8 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
       (err: any) => {
         if (!isMounted) return;
         setLoading(false);
-        const isPermission = err?.code === "permission-denied" || (err?.message && err.message.includes("permission"));
-        if (isPermission) {
-          setIsUsingLocalFallback(true);
-        } else {
-          console.warn("Aviso en clientes:", err);
-          setError("No se pudieron sincronizar algunos datos con la nube. Los clientes locales se muestran a continuación.");
-        }
+        console.warn("Aviso en clientes:", err);
+        setError("No se pudieron consultar los clientes en Firebase. Revisa tu conexión o permisos y vuelve a intentarlo.");
       }
     );
 
@@ -381,25 +374,6 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Reintentar</span>
-          </button>
-        </div>
-      )}
-
-      {/* Local mode / Firestore rules notice (non-blocking) */}
-      {isUsingLocalFallback && !dismissNotice && (
-        <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center justify-between gap-3 text-amber-800 dark:text-amber-300 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="inline-block w-2 h-2 rounded-full bg-amber-500 shrink-0" />
-            <span>
-              <strong>Modo de sincronización local activo:</strong> Las ventas y clientes se guardan y vinculan localmente de forma segura. Para sincronización en tiempo real en la nube, asegúrate de que tu Firebase Console tenga configurada la regla para <code className="bg-amber-500/15 px-1 py-0.5 rounded font-mono text-[11px]">/clientes</code>.
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setDismissNotice(true)}
-            className="text-amber-700 dark:text-amber-400 hover:underline shrink-0 text-xs font-medium cursor-pointer"
-          >
-            Entendido
           </button>
         </div>
       )}

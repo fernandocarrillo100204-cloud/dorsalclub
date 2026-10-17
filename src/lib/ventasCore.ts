@@ -15,6 +15,38 @@ export interface SaleCalculationInput {
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
+export interface SaleIncomeCompositionInput {
+  recognizedAmount: number;
+  merchandiseSubtotal: number;
+  shippingCharged?: number;
+  otherCharges?: number;
+}
+
+/**
+ * Distribuye una entrada (o reembolso) entre los componentes originales de
+ * la venta. La asignación proporcional mantiene correcto el desglose de flujo
+ * incluso cuando el cliente paga solamente un anticipo.
+ */
+export const allocateRecognizedSaleIncome = (input: SaleIncomeCompositionInput) => {
+  const recognizedAmount = money(Number.isFinite(input.recognizedAmount) ? input.recognizedAmount : 0);
+  const merchandiseSubtotal = Math.max(0, Number(input.merchandiseSubtotal) || 0);
+  const shippingCharged = Math.max(0, Number(input.shippingCharged) || 0);
+  const otherCharges = Math.max(0, Number(input.otherCharges) || 0);
+  const saleTotal = merchandiseSubtotal + shippingCharged + otherCharges;
+
+  if (saleTotal <= 0 || recognizedAmount === 0) {
+    return { merchandise: recognizedAmount, shipping: 0, other: 0 };
+  }
+
+  const merchandise = money(recognizedAmount * merchandiseSubtotal / saleTotal);
+  const shipping = money(recognizedAmount * shippingCharged / saleTotal);
+  // El último componente absorbe cualquier diferencia de redondeo para que
+  // la suma sea exactamente igual al importe reconocido.
+  const other = money(recognizedAmount - merchandise - shipping);
+
+  return { merchandise, shipping, other };
+};
+
 export const calculateSaleTotals = (input: SaleCalculationInput) => {
   const subtotal = money(input.items.reduce((sum, item) => sum + item.cantidad * item.precio_unitario_venta, 0));
   const costoMercancia = money(input.items.reduce((sum, item) => sum + item.cantidad * item.costo_unitario_venta, 0));

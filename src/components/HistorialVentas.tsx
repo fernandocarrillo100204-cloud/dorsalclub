@@ -264,7 +264,7 @@ export default function HistorialVentas({
         clienteId: venta.cliente_id,
         clienteNombre: venta.cliente_nombre,
         canal: venta.canal_venta_nombre,
-        estado: venta.estado === "anulado" ? "anulado" : "activo",
+        estado: venta.estado === "anulado" ? "anulado" : venta.estado === "devuelto" ? "devuelto" : "activo",
         estadoPago: venta.estado_pago,
         unidades: venta.total_unidades,
         total: venta.total,
@@ -394,9 +394,10 @@ export default function HistorialVentas({
           {canales.map((canal) => <option key={canal} value={canal}>{canal}</option>)}
         </select>
         <select value={estadoFilter} onChange={(event) => setEstadoFilter(event.target.value)} className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500">
-          <option value="all">Activas y anuladas</option>
+          <option value="all">Todos los estados</option>
           <option value="activo">Solo activas</option>
           <option value="anulado">Solo anuladas</option>
+          <option value="devuelto">Solo devueltas</option>
         </select>
       </div>
 

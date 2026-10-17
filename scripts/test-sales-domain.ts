@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { calculateSaleTotals } from "../src/lib/ventasCore";
+import { allocateRecognizedSaleIncome, calculateSaleTotals } from "../src/lib/ventasCore";
 
 const directSale = calculateSaleTotals({
   items: [
@@ -31,5 +31,35 @@ assert.equal(preorder.total, 800);
 assert.equal(preorder.recibido, 400);
 assert.equal(preorder.saldo, 400);
 assert.equal(preorder.estadoPago, "anticipo");
+
+assert.deepEqual(allocateRecognizedSaleIncome({
+  recognizedAmount: 1000,
+  merchandiseSubtotal: 900,
+  shippingCharged: 100
+}), {
+  merchandise: 900,
+  shipping: 100,
+  other: 0
+});
+
+assert.deepEqual(allocateRecognizedSaleIncome({
+  recognizedAmount: 400,
+  merchandiseSubtotal: 750,
+  otherCharges: 50
+}), {
+  merchandise: 375,
+  shipping: 0,
+  other: 25
+});
+
+assert.deepEqual(allocateRecognizedSaleIncome({
+  recognizedAmount: -400,
+  merchandiseSubtotal: 750,
+  otherCharges: 50
+}), {
+  merchandise: -375,
+  shipping: 0,
+  other: -25
+});
 
 console.log("Pruebas de dominio de ventas: aprobadas");

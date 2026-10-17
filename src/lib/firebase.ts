@@ -82,7 +82,7 @@ import {
   getPeriodosFinancierosDisponibles,
   clearPeriodosFinancierosCache
 } from "./periodosFinancieros";
-import { calculateSaleTotals } from "./ventasCore";
+import { allocateRecognizedSaleIncome, calculateSaleTotals } from "./ventasCore";
 
 // Detect if Firebase config is present in environment variables
 const metaEnv = (import.meta as any).env || {};
@@ -2025,6 +2025,10 @@ export const firestoreService = {
             venta_total_recibido: cleanAmount,
             venta_saldo_pendiente: nuevoSaldo,
             ingreso_reconocido: cleanAmount,
+            venta_subtotal: Number(data.subtotal) || 0,
+            venta_total_cobrado: total,
+            envio_cobrado_cliente: Number(data.envio_cobrado_cliente) || 0,
+            otros_cargos_cliente: Number(data.otros_cargos_cliente) || 0,
             total_venta: 0,
             total_cobrado: cleanAmount,
             metodo_pago: cleanMethod,
@@ -2084,6 +2088,10 @@ export const firestoreService = {
           venta_total_recibido: cleanAmount,
           venta_saldo_pendiente: nuevoSaldo,
           ingreso_reconocido: cleanAmount,
+          venta_subtotal: Number(data.venta_subtotal) || 0,
+          venta_total_cobrado: total,
+          envio_cobrado_cliente: Number(data.envio_cobrado_cliente) || 0,
+          otros_cargos_cliente: Number(data.otros_cargos_cliente) || 0,
           metodo_pago: cleanMethod,
           total_venta: 0,
           total_cobrado: cleanAmount,
@@ -2106,7 +2114,7 @@ export const firestoreService = {
         const nuevoRecibido = Math.round((sale.recibido + cleanAmount + Number.EPSILON) * 100) / 100;
         const nuevoSaldo = Math.max(0, Math.round((sale.total - nuevoRecibido + Number.EPSILON) * 100) / 100);
         masterSales[masterIndex] = { ...sale, recibido: nuevoRecibido, saldo: nuevoSaldo, estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo", estado_pedido: nuevoSaldo === 0 ? "pagado" : "pedido", actualizado_at: now, pagos: [...sale.pagos, { id: paymentId, monto: cleanAmount, metodo_pago: cleanMethod, fecha: now, usuario: user?.email || "Sistema", estado: "activo" }] };
-        movimientos.push({ id: paymentId, folio: `Abono-${sale.folio}`, venta_relacionada_id: ventaId, subtipo: "abono_venta", sku: "ABONO", almacen_id: "bajo_pedido", tipo: "salida", cantidad: 1, referencia: `Pago de ${sale.folio}`, usuario: user?.email || "Sistema", fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, venta_total_recibido: cleanAmount, venta_saldo_pendiente: nuevoSaldo, ingreso_reconocido: cleanAmount, total_venta: 0, total_cobrado: cleanAmount, estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo" });
+        movimientos.push({ id: paymentId, folio: `Abono-${sale.folio}`, venta_relacionada_id: ventaId, subtipo: "abono_venta", sku: "ABONO", almacen_id: "bajo_pedido", tipo: "salida", cantidad: 1, referencia: `Pago de ${sale.folio}`, usuario: user?.email || "Sistema", fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, venta_total_recibido: cleanAmount, venta_saldo_pendiente: nuevoSaldo, ingreso_reconocido: cleanAmount, venta_subtotal: sale.subtotal, venta_total_cobrado: sale.total, envio_cobrado_cliente: sale.envio_cobrado_cliente, otros_cargos_cliente: sale.otros_cargos_cliente, total_venta: 0, total_cobrado: cleanAmount, estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo" });
         setLocalStorageItem("ventas_maestras", masterSales);
         setLocalStorageItem("movimientos", movimientos);
         notifyListeners("movimientos", movimientos);
@@ -2144,6 +2152,10 @@ export const firestoreService = {
         venta_total_recibido: cleanAmount,
         venta_saldo_pendiente: nuevoSaldo,
         ingreso_reconocido: cleanAmount,
+        venta_subtotal: Number(principal.venta_subtotal) || 0,
+        venta_total_cobrado: total,
+        envio_cobrado_cliente: Number(principal.envio_cobrado_cliente) || 0,
+        otros_cargos_cliente: Number(principal.otros_cargos_cliente) || 0,
         total_venta: 0,
         total_cobrado: cleanAmount,
         estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo"
@@ -2336,6 +2348,12 @@ export const firestoreService = {
             canal_venta: sale.canal_venta,
             canal_venta_nombre: sale.canal_venta_nombre,
             afecta_stock: false,
+            venta_total_recibido: -refundAmount,
+            ingreso_reconocido: -refundAmount,
+            venta_subtotal: Number(sale.subtotal) || 0,
+            venta_total_cobrado: Number(sale.total) || 0,
+            envio_cobrado_cliente: Number(sale.envio_cobrado_cliente) || 0,
+            otros_cargos_cliente: Number(sale.otros_cargos_cliente) || 0,
             total_venta: -refundAmount,
             total_cobrado: -refundAmount,
             metodo_pago: sale.metodo_pago_inicial || "Método original"
@@ -2364,7 +2382,7 @@ export const firestoreService = {
     });
     sales[index] = { ...sale, estado: "devuelto", monto_reembolsado: sale.recibido, motivo_devolucion: cleanReason, devuelto_at: now, devuelto_por: userEmail, saldo: 0, actualizado_at: now };
     const movements = getLocalStorageItem<Movimiento[]>("movimientos", []);
-    if (sale.recibido > 0) movements.push({ id: `refund_${Math.random().toString(36).slice(2, 11)}`, folio: `Reembolso-${sale.folio}`, venta_relacionada_id: ventaId, subtipo: "reembolso_venta", sku: "REEMBOLSO", almacen_id: "devoluciones", tipo: "salida", cantidad: 1, unidades_devueltas: sale.total_unidades, referencia: `Devolución de ${sale.folio}: ${cleanReason}`, usuario: userEmail, fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, total_venta: -sale.recibido, total_cobrado: -sale.recibido, metodo_pago: sale.metodo_pago_inicial });
+    if (sale.recibido > 0) movements.push({ id: `refund_${Math.random().toString(36).slice(2, 11)}`, folio: `Reembolso-${sale.folio}`, venta_relacionada_id: ventaId, subtipo: "reembolso_venta", sku: "REEMBOLSO", almacen_id: "devoluciones", tipo: "salida", cantidad: 1, unidades_devueltas: sale.total_unidades, referencia: `Devolución de ${sale.folio}: ${cleanReason}`, usuario: userEmail, fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, venta_total_recibido: -sale.recibido, ingreso_reconocido: -sale.recibido, venta_subtotal: sale.subtotal, venta_total_cobrado: sale.total, envio_cobrado_cliente: sale.envio_cobrado_cliente, otros_cargos_cliente: sale.otros_cargos_cliente, total_venta: -sale.recibido, total_cobrado: -sale.recibido, metodo_pago: sale.metodo_pago_inicial });
     setLocalStorageItem("ventas_maestras", sales); setLocalStorageItem("stock", stock); setLocalStorageItem("resumen_ventas", summaries); setLocalStorageItem("movimientos", movements);
     notifyListeners("stock", stock); notifyListeners("movimientos", movements); clearFinanzasCache(); clearPeriodosFinancierosCache();
   },
@@ -6687,8 +6705,21 @@ export const firestoreService = {
 
       const usaIngresoReconocido = typeof v.venta_total_recibido === "number" && !isNaN(v.venta_total_recibido);
       let mercanciaVal = 0;
+      let envioCobrado = 0;
+      let otrosCargos = 0;
       if (usaIngresoReconocido) {
-        mercanciaVal = typeof v.ingreso_reconocido === "number" && !isNaN(v.ingreso_reconocido) ? Math.max(0, v.ingreso_reconocido) : 0;
+        const recognizedAmount = typeof v.ingreso_reconocido === "number" && !isNaN(v.ingreso_reconocido)
+          ? v.ingreso_reconocido
+          : 0;
+        const allocation = allocateRecognizedSaleIncome({
+          recognizedAmount,
+          merchandiseSubtotal: Number(v.venta_subtotal) || 0,
+          shippingCharged: Number(v.envio_cobrado_cliente) || 0,
+          otherCharges: Number(v.otros_cargos_cliente) || 0
+        });
+        mercanciaVal = allocation.merchandise;
+        envioCobrado = allocation.shipping;
+        otrosCargos = allocation.other;
       } else if (typeof v.total_venta === "number" && !isNaN(v.total_venta)) {
         mercanciaVal = v.total_venta;
       } else if (typeof v.precio_unitario_venta === "number" && !isNaN(v.precio_unitario_venta)) {
@@ -6697,12 +6728,14 @@ export const firestoreService = {
         ventasSinImporteIds.add(ventaKey);
       }
 
-      const envioCobrado = !usaIngresoReconocido && typeof v.envio_cobrado_cliente === "number" && !isNaN(v.envio_cobrado_cliente)
-        ? Math.max(0, v.envio_cobrado_cliente)
-        : 0;
-      const otrosCargos = !usaIngresoReconocido && typeof v.otros_cargos_cliente === "number" && !isNaN(v.otros_cargos_cliente)
-        ? Math.max(0, v.otros_cargos_cliente)
-        : 0;
+      if (!usaIngresoReconocido) {
+        envioCobrado = typeof v.envio_cobrado_cliente === "number" && !isNaN(v.envio_cobrado_cliente)
+          ? Math.max(0, v.envio_cobrado_cliente)
+          : 0;
+        otrosCargos = typeof v.otros_cargos_cliente === "number" && !isNaN(v.otros_cargos_cliente)
+          ? Math.max(0, v.otros_cargos_cliente)
+          : 0;
+      }
 
       ingresosMercanciaVendida += mercanciaVal;
       enviosCobradosClientes += envioCobrado;
@@ -6805,7 +6838,7 @@ export const firestoreService = {
       if (day >= 1 && day <= daysInMonth) {
         let ingresoVenta = 0;
         if (typeof v.venta_total_recibido === "number" && !isNaN(v.venta_total_recibido)) {
-          ingresoVenta = typeof v.ingreso_reconocido === "number" && !isNaN(v.ingreso_reconocido) ? Math.max(0, v.ingreso_reconocido) : 0;
+          ingresoVenta = typeof v.ingreso_reconocido === "number" && !isNaN(v.ingreso_reconocido) ? v.ingreso_reconocido : 0;
         } else if (typeof v.total_cobrado === "number" && !isNaN(v.total_cobrado)) {
           ingresoVenta = v.total_cobrado;
         } else {

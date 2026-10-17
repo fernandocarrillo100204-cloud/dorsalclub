@@ -80,7 +80,7 @@ export default function Ventas({
     const initialProduct = productos.find((product) => product.sku === preselectedSku);
     return [createVentaItem(
       preselectedSku,
-      preselectedAlmacenId || almacenes[0]?.id || "",
+      preselectedAlmacenId,
       initialProduct?.precio_venta ?? "",
       initialProduct?.precio_costo ?? ""
     )];
@@ -251,7 +251,7 @@ export default function Ventas({
   const addItem = () => {
     setItems((current) => [
       ...current,
-      createVentaItem("", current[0]?.almacenId || almacenes[0]?.id || "")
+      createVentaItem()
     ]);
   };
 
@@ -466,7 +466,7 @@ export default function Ventas({
         `¡Venta registrada con éxito! Folio: ${res.folio}. ${res.movimientosCount} ${res.movimientosCount === 1 ? "partida registrada" : "partidas registradas"}.`
       );
 
-      setItems([createVentaItem("", almacenes[0]?.id || "")]);
+      setItems([createVentaItem()]);
       setSelectedClienteId("");
       setEnvioCobradoCliente("");
       setOtrosCargosCliente("");
@@ -650,6 +650,7 @@ export default function Ventas({
                           onChange={(event) => updateItem(item.id, { almacenId: event.target.value })}
                           className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
                         >
+                          <option value="">-- Seleccionar almacén --</option>
                           {almacenes.map((warehouse) => (
                             <option key={warehouse.id} value={warehouse.id}>{warehouse.nombre}</option>
                           ))}

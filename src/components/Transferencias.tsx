@@ -34,8 +34,8 @@ export default function Transferencias({
   onCancel
 }: TransferenciasProps) {
   const [sku, setSku] = useState(preselectedSku);
-  const [almacenOrigenId, setAlmacenOrigenId] = useState<string>(preselectedAlmacenId || almacenes[0]?.id || "");
-  const [almacenDestinoId, setAlmacenDestinoId] = useState<string>(almacenes[1]?.id || "");
+  const [almacenOrigenId, setAlmacenOrigenId] = useState<string>(preselectedAlmacenId);
+  const [almacenDestinoId, setAlmacenDestinoId] = useState<string>("");
   const [cantidad, setCantidad] = useState<number | string>(1);
 
   const [stockList, setStockList] = useState<StockItem[]>([]);
@@ -48,19 +48,6 @@ export default function Transferencias({
     if (preselectedSku) setSku(preselectedSku);
     if (preselectedAlmacenId) setAlmacenOrigenId(preselectedAlmacenId);
   }, [preselectedSku, preselectedAlmacenId]);
-
-  // Set default distinct destination warehouse
-  useEffect(() => {
-    if (almacenes.length >= 2) {
-      if (!almacenOrigenId) {
-        setAlmacenOrigenId(almacenes[0].id);
-      }
-      if (!almacenDestinoId || almacenDestinoId === almacenOrigenId) {
-        const other = almacenes.find((a) => a.id !== almacenOrigenId);
-        if (other) setAlmacenDestinoId(other.id);
-      }
-    }
-  }, [almacenes, almacenOrigenId, almacenDestinoId]);
 
   // Subscribe to stock in realtime
   useEffect(() => {
@@ -250,6 +237,7 @@ export default function Transferencias({
                   onChange={(e) => setAlmacenOrigenId(e.target.value)}
                   className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl pl-9 pr-3 py-2 text-xs text-zinc-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
                 >
+                  <option value="">-- Seleccionar almacén de origen --</option>
                   {almacenes.map((alm) => (
                     <option key={alm.id} value={alm.id}>
                       {alm.nombre} — {alm.ubicacion}
@@ -289,6 +277,7 @@ export default function Transferencias({
                   onChange={(e) => setAlmacenDestinoId(e.target.value)}
                   className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl pl-9 pr-3 py-2 text-xs text-zinc-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
                 >
+                  <option value="">-- Seleccionar almacén de destino --</option>
                   {almacenes.map((alm) => (
                     <option
                       key={alm.id}

@@ -52,6 +52,14 @@ interface NewItemRow {
   costo_unitario: number | "";
 }
 
+const createEmptyPurchaseItem = (): NewItemRow => ({
+  sku: "",
+  nombre_producto: "",
+  variante_label: "",
+  cantidad: 1,
+  costo_unitario: ""
+});
+
 export default function Compras({
   almacenes,
   productos,
@@ -106,7 +114,7 @@ export default function Compras({
   // Form state (/compras/nueva)
   const [proveedor, setProveedor] = useState("");
   const [fecha, setFecha] = useState(() => new Date().toISOString().split("T")[0]);
-  const [almacenId, setAlmacenId] = useState(almacenes[0]?.id || "");
+  const [almacenId, setAlmacenId] = useState("");
   const [notas, setNotas] = useState("");
   const [costoEnvio, setCostoEnvio] = useState<number | "">("");
   const [comisiones, setComisiones] = useState<number | "">("");
@@ -124,27 +132,12 @@ export default function Compras({
   useEffect(() => { loadPurchaseSettings(); }, []);
 
   // Items in the current purchase draft
-  const [items, setItems] = useState<NewItemRow[]>([
-    {
-      sku: productos[0]?.sku || "",
-      nombre_producto: productos[0]?.nombre || "",
-      variante_label: productos[0] ? `${productos[0].color || ""} - Talla ${productos[0].talla || "U"}` : "",
-      cantidad: 1,
-      costo_unitario: productos[0]?.precio_costo || 0
-    }
-  ]);
+  const [items, setItems] = useState<NewItemRow[]>([createEmptyPurchaseItem()]);
 
   // Form submission state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
-
-  // Set default warehouse if none selected
-  useEffect(() => {
-    if (!almacenId && almacenes.length > 0) {
-      setAlmacenId(almacenes[0].id);
-    }
-  }, [almacenes, almacenId]);
 
   // Fetch first 50 compras records
   const loadFirstPage = async (isFirstMount = false) => {
@@ -251,17 +244,7 @@ export default function Compras({
 
   // Row manipulation handlers
   const handleAddItemRow = () => {
-    const firstProd = productos[0];
-    setItems((prev) => [
-      ...prev,
-      {
-        sku: firstProd?.sku || "",
-        nombre_producto: firstProd?.nombre || "",
-        variante_label: firstProd ? `${firstProd.color || ""} - Talla ${firstProd.talla || "U"}` : "",
-        cantidad: 1,
-        costo_unitario: firstProd?.precio_costo || 0
-      }
-    ]);
+    setItems((prev) => [...prev, createEmptyPurchaseItem()]);
   };
 
   const handleRemoveItemRow = (index: number) => {
@@ -378,16 +361,8 @@ export default function Compras({
       setCostoEnvio("");
       setComisiones("");
       setDescuentos("");
-      const firstProd = productos[0];
-      setItems([
-        {
-          sku: firstProd?.sku || "",
-          nombre_producto: firstProd?.nombre || "",
-          variante_label: firstProd ? `${firstProd.color || ""} - Talla ${firstProd.talla || "U"}` : "",
-          cantidad: 1,
-          costo_unitario: firstProd?.precio_costo || 0
-        }
-      ]);
+      setAlmacenId("");
+      setItems([createEmptyPurchaseItem()]);
       loadFirstPage(false);
       goToHistory();
     } catch (err: any) {
@@ -520,6 +495,7 @@ export default function Compras({
                     onChange={(e) => setAlmacenId(e.target.value)}
                     className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl py-2 pl-9 pr-3 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white transition-all font-medium"
                   >
+                    <option value="">-- Seleccionar almacén --</option>
                     {almacenes.map((alm) => (
                       <option key={alm.id} value={alm.id}>
                         {alm.nombre} — {alm.ubicacion}
