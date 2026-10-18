@@ -32,7 +32,7 @@ import {
   Tooltip,
   Cell
 } from "recharts";
-import { Almacen, Producto, ResumenVentaDiaria, PeriodoVenta } from "../types";
+import { Almacen, Producto, ResumenVentaDiaria, PeriodoVenta, Movimiento, Venta } from "../types";
 import { firestoreService } from "../lib/firebase";
 import { useTheme } from "../context/ThemeContext";
 
@@ -209,6 +209,8 @@ export default function AnalisisVentas({ almacenes, productos, onNavigateToHisto
 
   // Scoped date-range sales summaries state
   const [resumenesVentas, setResumenesVentas] = useState<ResumenVentaDiaria[]>([]);
+  const [movimientosVenta, setMovimientosVenta] = useState<Movimiento[]>([]);
+  const [ventasMaestras, setVentasMaestras] = useState<Venta[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -219,12 +221,24 @@ export default function AnalisisVentas({ almacenes, productos, onNavigateToHisto
       setLoading(true);
       setError(null);
       try {
-        const data = await firestoreService.getResumenVentasByDateRange(
-          periodRanges.currentStart,
-          periodRanges.currentEnd
-        );
+        const [summaries, movements, masterSales] = await Promise.all([
+          firestoreService.getResumenVentasByDateRange(
+            periodRanges.currentStart,
+            periodRanges.currentEnd
+          ),
+          firestoreService.getVentasByDateRange(
+            periodRanges.currentStart,
+            periodRanges.currentEnd
+          ),
+          firestoreService.getVentasMaestrasByDateRange(
+            periodRanges.currentStart,
+            periodRanges.currentEnd
+          )
+        ]);
         if (isMounted) {
-          setResumenesVentas(data);
+          setResumenesVentas(summaries);
+          setMovimientosVenta(movements);
+          setVentasMaestras(masterSales);
           setLoading(false);
         }
       } catch (err: any) {
@@ -291,6 +305,44 @@ export default function AnalisisVentas({ almacenes, productos, onNavigateToHisto
     });
   }, [resumenesVentas, selectedAlmacen, selectedSku, selectedCategoria, selectedUnidad, productosMap]);
 
+  // Sale rows are queried only for the selected interval and are used to count
+  // unique tickets. The summaries remain the source for units and charts.
+  const filteredSaleMovements = useMemo(() => {
+    return movimientosVenta.filter(movement => {
+      if (movement.cantidad <= 0 || movement.subtipo || movement.en_papelera === true || (movement.estado || "activo") === "anulado") {
+        return false;
+      }
+
+      const sku = (movement.sku || "").trim().toUpperCase();
+      const product = productosMap.get(sku);
+      const unit = (product?.unidad || "uds").trim();
+
+      if (selectedCategoria !== "all" && product?.categoria !== selectedCategoria) return false;
+      if (selectedSku !== "all" && sku !== selectedSku.toUpperCase()) return false;
+      if (selectedAlmacen !== "all" && movement.almacen_id !== selectedAlmacen) return false;
+      if (selectedUnidad !== "all" && unit !== selectedUnidad) return false;
+      return true;
+    });
+  }, [movimientosVenta, selectedAlmacen, selectedSku, selectedCategoria, selectedUnidad, productosMap]);
+
+  const saleMatchesFilters = (sale: Venta): boolean => sale.items.some(item => {
+    const sku = (item.sku || "").trim().toUpperCase();
+    const product = productosMap.get(sku);
+    const unit = (product?.unidad || "uds").trim();
+    if (selectedCategoria !== "all" && product?.categoria !== selectedCategoria) return false;
+    if (selectedSku !== "all" && sku !== selectedSku.toUpperCase()) return false;
+    if (selectedAlmacen !== "all" && item.almacen_id !== selectedAlmacen) return false;
+    if (selectedUnidad !== "all" && unit !== selectedUnidad) return false;
+    return true;
+  });
+
+  const filteredMasterSales = ventasMaestras.filter(sale =>
+    sale.en_papelera !== true &&
+    sale.estado !== "anulado" &&
+    sale.estado !== "devuelto" &&
+    saleMatchesFilters(sale)
+  );
+
   // Unit of measure breakdown analysis
   const unitAnalysis = useMemo(() => {
     const breakdown: Record<string, number> = {};
@@ -322,7 +374,16 @@ export default function AnalisisVentas({ almacenes, productos, onNavigateToHisto
   // Aggregate Metrics from incremental daily summaries
   const metrics = useMemo(() => {
     const totalUnitsSingle = filteredSummaries.reduce((acc, r) => acc + Number(r.cantidad || 0), 0);
-    const totalTransactions = filteredSummaries.reduce((acc, r) => acc + (Number(r.total_transacciones) || 1), 0);
+    const totalLineItems = filteredSummaries.reduce((acc, r) => acc + (Number(r.total_transacciones) || 1), 0);
+    const masterSaleIds = new Set(ventasMaestras.map(sale => sale.id));
+    const legacySaleMovements = filteredSaleMovements.filter(movement =>
+      !movement.venta_id || !masterSaleIds.has(movement.venta_id)
+    );
+    const legacySales = new Set(legacySaleMovements.map((movement, index) =>
+      movement.venta_id || movement.folio || movement.id ||
+      `legacy-${normalizeDate(movement.fecha).getTime()}-${movement.sku}-${movement.almacen_id}-${index}`
+    )).size;
+    const totalSales = filteredMasterSales.length + legacySales;
 
     // Top Product
     const productUnitsMap: Record<string, number> = {};
@@ -372,7 +433,8 @@ export default function AnalisisVentas({ almacenes, productos, onNavigateToHisto
 
     return {
       totalUnitsSingle,
-      totalTransactions,
+      totalSales,
+      totalLineItems,
       topProductSku,
       topProductUnits,
       topProduct,
@@ -384,7 +446,7 @@ export default function AnalisisVentas({ almacenes, productos, onNavigateToHisto
       dailyAverageBreakdown,
       daysElapsed: periodRanges.daysElapsed
     };
-  }, [filteredSummaries, periodRanges, productosMap, almacenesMap, unitAnalysis]);
+  }, [filteredSummaries, filteredSaleMovements, filteredMasterSales, ventasMaestras, periodRanges, productosMap, almacenesMap, unitAnalysis]);
 
   // Chart 1: Sales by day (Vertical Bar Chart from pre-aggregated daily summaries)
   const salesByDayData = useMemo(() => {
@@ -806,9 +868,9 @@ export default function AnalisisVentas({ almacenes, productos, onNavigateToHisto
                 </div>
               </div>
               <div className="mt-2 text-[11px] text-[#64748B] dark:text-[#94A3B8] pt-1.5 border-t border-[#E2E8F0] dark:border-[#263449] flex items-center justify-between">
-                <span>Total transacciones:</span>
+                <span>Ventas registradas:</span>
                 <span className="font-mono text-[#172033] dark:text-[#F8FAFC] font-medium">
-                  {metrics.totalTransactions} operaciones
+                  {metrics.totalSales} {metrics.totalSales === 1 ? "venta" : "ventas"}
                 </span>
               </div>
             </div>
@@ -913,7 +975,7 @@ export default function AnalisisVentas({ almacenes, productos, onNavigateToHisto
                     <li className="flex items-start space-x-1.5">
                       <span className="text-[#059669] dark:text-emerald-400 font-bold">•</span>
                       <span>
-                        <strong>Total vendido:</strong> {unitAnalysis.isSingleUnit ? `${metrics.totalUnitsSingle} ${unitAnalysis.activeSingleUnit}` : unitAnalysis.formattedBreakdown} a través de {metrics.totalTransactions} operaciones de venta.
+                        <strong>Total vendido:</strong> {unitAnalysis.isSingleUnit ? `${metrics.totalUnitsSingle} ${unitAnalysis.activeSingleUnit}` : unitAnalysis.formattedBreakdown} en {metrics.totalSales} {metrics.totalSales === 1 ? "venta" : "ventas"}.
                       </span>
                     </li>
 
@@ -1174,7 +1236,7 @@ export default function AnalisisVentas({ almacenes, productos, onNavigateToHisto
               </div>
               <div className="flex items-center space-x-2.5">
                 <span className="text-[11px] font-mono text-[#64748B] dark:text-[#94A3B8] bg-[#F8FAFC] dark:bg-[#182235] px-2 py-0.5 rounded border border-[#E2E8F0] dark:border-[#263449]">
-                  {filteredSummaries.length} registros ({metrics.totalTransactions} transacciones)
+                  {filteredSummaries.length} resúmenes ({metrics.totalLineItems} {metrics.totalLineItems === 1 ? "partida" : "partidas"})
                 </span>
                 {onNavigateToHistory && (
                   <button
@@ -1202,7 +1264,7 @@ export default function AnalisisVentas({ almacenes, productos, onNavigateToHisto
                       <th className="py-2.5 px-3">Producto y SKU</th>
                       <th className="py-2.5 px-3">Almacén</th>
                       <th className="py-2.5 px-3 text-right">Cantidad Vendida</th>
-                      <th className="py-2.5 px-3.5 text-right">Operaciones</th>
+                      <th className="py-2.5 px-3.5 text-right">Partidas</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#E2E8F0] dark:divide-[#263449] text-xs sm:text-sm">
@@ -1234,7 +1296,7 @@ export default function AnalisisVentas({ almacenes, productos, onNavigateToHisto
                             </span>
                           </td>
                           <td className="py-2.5 px-3.5 text-right font-mono text-xs text-[#64748B] dark:text-[#94A3B8]">
-                            {resumen.total_transacciones || 1} {((resumen.total_transacciones || 1) === 1 ? 'salida' : 'salidas')}
+                            {resumen.total_transacciones || 1} {((resumen.total_transacciones || 1) === 1 ? 'partida' : 'partidas')}
                           </td>
                         </tr>
                       );

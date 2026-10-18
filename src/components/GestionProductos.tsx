@@ -642,18 +642,29 @@ export default function GestionProductos({
   // Delete product confirmation
   const handleConfirmDelete = async () => {
     if (!productToDelete) return;
+    const targets = productToDelete.isBase
+      ? productos.filter(p => p.producto_base_id === productToDelete.id || `legacy-${p.nombre.toLowerCase().trim()}` === productToDelete.id)
+      : productos.filter(p => p.sku.trim().toUpperCase() === productToDelete.sku.trim().toUpperCase());
+    const targetSkus = targets.map(product => product.sku.trim().toUpperCase());
+    const stockBySku = targetSkus.map(sku => ({
+      sku,
+      units: stockList.reduce(
+        (total, item) => item.sku?.trim().toUpperCase() === sku
+          ? total + Math.max(0, Number(item.cantidad) || 0)
+          : total,
+        0
+      )
+    })).filter(item => item.units > 0);
+
+    if (stockBySku.length > 0) {
+      const detail = stockBySku.map(item => `${item.sku} (${item.units} uds)`).join(", ");
+      alert(`No se puede enviar a la papelera porque aún hay existencias: ${detail}. Vende, transfiere o corrige ese stock primero.`);
+      return;
+    }
+
     setSubmitLoading(true);
     try {
-      if (productToDelete.isBase) {
-        // Delete all variants of base model
-        const toDelete = productos.filter(p => p.producto_base_id === productToDelete.id || `legacy-${p.nombre.toLowerCase().trim()}` === productToDelete.id);
-        for (const p of toDelete) {
-          await firestoreService.deleteProducto(p.sku);
-        }
-      } else {
-        // Delete single variant
-        await firestoreService.deleteProducto(productToDelete.sku);
-      }
+      await firestoreService.deleteProducts(targetSkus);
       setIsDeleteModalOpen(false);
       setProductToDelete(null);
     } catch (err: any) {
@@ -1530,8 +1541,8 @@ export default function GestionProductos({
               </h3>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
                 {productToDelete.isBase 
-                  ? "El modelo y todas sus variantes quedarán desactivados. Podrás restaurarlos desde Papelera y el historial previo se conservará."
-                  : "La variante quedará desactivada y podrás restaurarla desde Papelera."}
+                  ? "El modelo y todas sus variantes quedarán desactivados. Podrás restaurarlos desde Papelera y el historial previo se conservará. Si alguna variante tiene existencias, primero tendrás que venderlas, transferirlas o corregirlas."
+                  : "La variante quedará desactivada y podrás restaurarla desde Papelera. Si todavía tiene existencias, primero tendrás que venderlas, transferirlas o corregirlas."}
               </p>
             </div>
             <div className="flex gap-2 justify-end pt-2">

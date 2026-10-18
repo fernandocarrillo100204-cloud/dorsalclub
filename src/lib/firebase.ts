@@ -700,6 +700,24 @@ export const firestoreService = {
 
   deleteAlmacen: async (id: string): Promise<void> => {
     if (isConfigured && realDb) {
+      const warehouseSnap = await getDoc(doc(realDb, "almacenes", id));
+      const warehouseName = String(warehouseSnap.data()?.nombre || "").trim();
+      const warehouseAliases = [...new Set([id, warehouseName].filter(Boolean))];
+      const stockSnaps = await Promise.all(warehouseAliases.map(alias => getDocs(query(
+        collection(realDb, "stock"),
+        where("almacen_id", "==", alias)
+      ))));
+      const stockDocs = new Map<string, any>();
+      stockSnaps.forEach(snapshot => snapshot.docs.forEach(stockDoc => stockDocs.set(stockDoc.id, stockDoc)));
+      const totalStock = [...stockDocs.values()].reduce(
+        (total, stockDoc) => total + Math.max(0, Number(stockDoc.data()?.cantidad) || 0),
+        0
+      );
+      if (totalStock > 0) {
+        throw new Error(
+          `No se puede enviar este almacén a la papelera porque todavía contiene ${totalStock} unidades. Transfiere o corrige sus existencias primero.`
+        );
+      }
       await setDoc(doc(realDb, "almacenes", id), {
         activo: false,
         en_papelera: true,
@@ -708,6 +726,20 @@ export const firestoreService = {
       return;
     }
     const list = getLocalStorageItem<Almacen[]>("almacenes", []);
+    const warehouseName = list.find(warehouse => warehouse.id === id)?.nombre?.trim() || "";
+    const warehouseAliases = new Set([id, warehouseName].filter(Boolean));
+    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
+    const totalStock = Object.values(stockMap).reduce(
+      (total, item) => warehouseAliases.has(item.almacen_id)
+        ? total + Math.max(0, Number(item.cantidad) || 0)
+        : total,
+      0
+    );
+    if (totalStock > 0) {
+      throw new Error(
+        `No se puede enviar este almacén a la papelera porque todavía contiene ${totalStock} unidades. Transfiere o corrige sus existencias primero.`
+      );
+    }
     const index = list.findIndex(a => a.id === id);
     if (index !== -1) list[index] = { ...list[index], activo: false, en_papelera: true, desactivado_at: new Date() };
     setLocalStorageItem("almacenes", list);
@@ -1296,21 +1328,79 @@ export const firestoreService = {
     return firestoreService.updateProduct(sku, { activo: !currentActive });
   },
 
-  deleteProduct: async (sku: string): Promise<void> => {
-    const cleanSku = sku.trim().toUpperCase();
+  deleteProducts: async (skus: string[]): Promise<void> => {
+    const cleanSkus = [...new Set(
+      skus.map(sku => sku.trim().toUpperCase()).filter(Boolean)
+    )];
+    if (cleanSkus.length === 0) return;
+
     if (isConfigured && realDb) {
-      await setDoc(doc(realDb, "productos", cleanSku), {
-        activo: false,
-        en_papelera: true,
-        desactivado_at: Timestamp.now()
-      }, { merge: true });
+      const stockSnaps = await Promise.all(cleanSkus.map(sku => getDocs(query(
+        collection(realDb, "stock"),
+        where("sku", "==", sku)
+      ))));
+      const productsWithStock = cleanSkus.flatMap((sku, index) => {
+        const units = stockSnaps[index].docs.reduce(
+          (total, stockDoc) => total + Math.max(0, Number(stockDoc.data()?.cantidad) || 0),
+          0
+        );
+        return units > 0 ? [{ sku, units }] : [];
+      });
+      if (productsWithStock.length > 0) {
+        const detail = productsWithStock
+          .map(item => `${item.sku} (${item.units} uds)`)
+          .join(", ");
+        throw new Error(
+          `No se puede enviar a la papelera porque aún hay existencias: ${detail}. Vende, transfiere o corrige ese stock primero.`
+        );
+      }
+
+      const batch = writeBatch(realDb);
+      const disabledAt = Timestamp.now();
+      cleanSkus.forEach(sku => {
+        batch.set(doc(realDb, "productos", sku), {
+          activo: false,
+          en_papelera: true,
+          desactivado_at: disabledAt
+        }, { merge: true });
+      });
+      await batch.commit();
       return;
     }
+
+    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
+    const productsWithStock = cleanSkus.flatMap(sku => {
+      const units = Object.values(stockMap).reduce(
+        (total, item) => item.sku?.trim().toUpperCase() === sku
+          ? total + Math.max(0, Number(item.cantidad) || 0)
+          : total,
+        0
+      );
+      return units > 0 ? [{ sku, units }] : [];
+    });
+    if (productsWithStock.length > 0) {
+      const detail = productsWithStock
+        .map(item => `${item.sku} (${item.units} uds)`)
+        .join(", ");
+      throw new Error(
+        `No se puede enviar a la papelera porque aún hay existencias: ${detail}. Vende, transfiere o corrige ese stock primero.`
+      );
+    }
+
     const list = getLocalStorageItem<Producto[]>("productos", []);
-    const index = list.findIndex(p => p.sku === cleanSku);
-    if (index !== -1) list[index] = { ...list[index], activo: false, en_papelera: true, desactivado_at: new Date() };
+    const disabledAt = new Date();
+    cleanSkus.forEach(sku => {
+      const index = list.findIndex(p => p.sku.trim().toUpperCase() === sku);
+      if (index !== -1) {
+        list[index] = { ...list[index], activo: false, en_papelera: true, desactivado_at: disabledAt };
+      }
+    });
     setLocalStorageItem("productos", list);
     notifyListeners("productos", list);
+  },
+
+  deleteProduct: async (sku: string): Promise<void> => {
+    return firestoreService.deleteProducts([sku]);
   },
 
   deleteProducto: async (sku: string): Promise<void> => {
@@ -3876,6 +3966,44 @@ export const firestoreService = {
     });
   },
 
+  getVentasMaestrasByDateRange: async (startDate: Date, endDate: Date): Promise<Venta[]> => {
+    const startMs = startDate.getTime();
+    const endMs = endDate.getTime();
+    const toDate = (value: any): Date => value?.toDate
+      ? value.toDate()
+      : value instanceof Date
+        ? value
+        : value?.seconds
+          ? new Date(value.seconds * 1000)
+          : new Date(value || Date.now());
+
+    if (isConfigured && realDb) {
+      const snap = await getDocs(query(
+        collection(realDb, "ventas"),
+        where("fecha", ">=", Timestamp.fromDate(startDate)),
+        where("fecha", "<=", Timestamp.fromDate(endDate)),
+        orderBy("fecha", "desc")
+      ));
+      return snap.docs.map(snapshot => {
+        const data = snapshot.data();
+        return {
+          ...data,
+          id: snapshot.id,
+          folio: String(data.folio || snapshot.id),
+          fecha: toDate(data.fecha),
+          items: Array.isArray(data.items) ? data.items : [],
+          estado: data.estado || "activo",
+          en_papelera: data.en_papelera === true
+        } as Venta;
+      });
+    }
+
+    return getLocalStorageItem<Venta[]>("ventas_maestras", []).filter(sale => {
+      const saleTime = toDate(sale.fecha).getTime();
+      return saleTime >= startMs && saleTime <= endMs;
+    });
+  },
+
   // Fallback para consultas directas de movimientos de salida si fuera necesario
   getVentasByDateRange: async (startDate: Date, endDate: Date): Promise<Movimiento[]> => {
     const startMs = startDate.getTime();
@@ -3899,7 +4027,7 @@ export const firestoreService = {
 
         snap.forEach(d => {
           const data = d.data();
-          if ((data.estado || "activo") === "anulado") return;
+          if ((data.estado || "activo") === "anulado" || data.en_papelera === true) return;
 
           const docDate = data.fecha
             ? (data.fecha as Timestamp).toDate
@@ -3924,6 +4052,8 @@ export const firestoreService = {
             venta_total_recibido: typeof data.venta_total_recibido === "number" ? data.venta_total_recibido : undefined,
             venta_saldo_pendiente: typeof data.venta_saldo_pendiente === "number" ? data.venta_saldo_pendiente : undefined,
             ingreso_reconocido: typeof data.ingreso_reconocido === "number" ? data.ingreso_reconocido : undefined,
+            subtipo: data.subtipo || undefined,
+            venta_relacionada_id: data.venta_relacionada_id || undefined,
             estado_pago: data.estado_pago || undefined,
             sku: data.sku,
             almacen_id: data.almacen_id,
@@ -3972,7 +4102,7 @@ export const firestoreService = {
 
     const movs = getLocalStorageItem<Movimiento[]>("movimientos", []);
     return movs.filter(m => {
-      if (m.tipo !== "salida" || (m.estado || "activo") === "anulado") return false;
+      if (m.tipo !== "salida" || (m.estado || "activo") === "anulado" || m.en_papelera === true) return false;
       const mDate = m.fecha instanceof Date ? m.fecha : new Date(typeof m.fecha === "string" ? m.fecha : (m.fecha as any).seconds * 1000);
       const time = mDate.getTime();
       return time >= startMs && time <= endMs;
