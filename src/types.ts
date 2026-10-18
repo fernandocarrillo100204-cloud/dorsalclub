@@ -256,6 +256,7 @@ export interface ConfiguracionVentas {
 
 export interface PedidoVenta {
   venta_id: string;
+  es_consolidado?: boolean;
   folio: string;
   cliente_id?: string;
   cliente_nombre: string;

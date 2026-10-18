@@ -1918,6 +1918,7 @@ export const firestoreService = {
         : saldo <= 0 ? "pagado" : "pedido";
       return {
         venta_id: ventaId,
+        es_consolidado: false,
         folio: principal.folio,
         cliente_id: principal.cliente_id,
         cliente_nombre: principal.cliente_nombre || "Cliente sin nombre",
@@ -1945,6 +1946,7 @@ export const firestoreService = {
       .filter(item => item.estado !== "anulado" && item.estado !== "devuelto" && item.en_papelera !== true && (item.canal_venta === "bajo_pedido" || item.canal_venta === "mayoreo"))
       .map(item => ({
         venta_id: item.id,
+        es_consolidado: true,
         folio: item.folio,
         cliente_id: item.cliente_id,
         cliente_nombre: item.cliente_nombre,

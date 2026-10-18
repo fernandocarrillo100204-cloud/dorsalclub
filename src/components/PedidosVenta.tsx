@@ -49,9 +49,11 @@ const PedidoCard: React.FC<{ pedido: PedidoVenta; metodosPago: OpcionListaConfig
           <h3 className="font-bold text-zinc-900 dark:text-white">{pedido.cliente_nombre}</h3>
           <p className="text-xs text-zinc-500">{pedido.folio} · {pedido.fecha.toLocaleDateString("es-MX")}</p>
         </div>
-        <button type="button" onClick={cancelOrder} disabled={busy} className="p-2 rounded-lg text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50" aria-label={`${pedido.recibido > 0.009 ? "Cancelar y reembolsar" : "Cancelar"} ${pedido.folio}`} title={pedido.recibido > 0.009 ? "Cancelar y reembolsar pedido" : "Cancelar pedido"}>
-          {pedido.recibido > 0.009 ? <RotateCcw className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
-        </button>
+        {(pedido.recibido <= 0.009 || pedido.es_consolidado !== false) && (
+          <button type="button" onClick={cancelOrder} disabled={busy} className="p-2 rounded-lg text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50" aria-label={`${pedido.recibido > 0.009 ? "Cancelar y reembolsar" : "Cancelar"} ${pedido.folio}`} title={pedido.recibido > 0.009 ? "Cancelar y reembolsar pedido" : "Cancelar pedido"}>
+            {pedido.recibido > 0.009 ? <RotateCcw className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
+          </button>
+        )}
       </div>
 
       <div className="space-y-1 text-sm">
