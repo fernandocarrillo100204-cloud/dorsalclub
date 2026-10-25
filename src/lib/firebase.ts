@@ -72,7 +72,9 @@ import {
   PeriodoFinancieroIndex,
   PedidoVenta,
   PapeleraItem,
-  PapeleraTipo
+  PapeleraTipo,
+  Drop,
+  EstadoDrop
 } from "../types";
 import {
   getPeriodoKey,
@@ -624,6 +626,121 @@ export const firestoreService = {
       return;
     }
     setLocalStorageItem("configuracion_ventas", normalized);
+  },
+
+  // --- DROPS / LOTES COMERCIALES ---
+  getDrops: async (): Promise<Drop[]> => {
+    if (isConfigured && realDb) {
+      const snapshot = await getDocs(query(collection(realDb, "drops"), orderBy("creado_at", "desc")));
+      return snapshot.docs
+        .map(item => ({ id: item.id, ...item.data() } as Drop))
+        .filter(item => item.en_papelera !== true);
+    }
+
+    return getLocalStorageItem<Drop[]>("drops", [])
+      .filter(item => item.en_papelera !== true)
+      .sort((a, b) => {
+        const aTime = a.creado_at instanceof Date ? a.creado_at.getTime() : Number((a.creado_at as any)?.seconds || 0) * 1000;
+        const bTime = b.creado_at instanceof Date ? b.creado_at.getTime() : Number((b.creado_at as any)?.seconds || 0) * 1000;
+        return bTime - aTime;
+      });
+  },
+
+  addDrop: async (input: { nombre: string; descripcion?: string; estado?: EstadoDrop }): Promise<Drop> => {
+    const nombre = (input.nombre || "").trim();
+    const descripcion = (input.descripcion || "").trim();
+    const estado: EstadoDrop = input.estado || "preparacion";
+    if (!nombre) throw new Error("El nombre del drop es obligatorio.");
+    if (nombre.length > 100) throw new Error("El nombre del drop no puede exceder 100 caracteres.");
+    if (descripcion.length > 500) throw new Error("La descripción no puede exceder 500 caracteres.");
+    if (!["preparacion", "en_venta", "cerrado"].includes(estado)) throw new Error("El estado del drop no es válido.");
+
+    const usuarioEmail = authService.getCurrentUser()?.email || "sistema@empresa.com";
+    if (isConfigured && realDb) {
+      const dropRef = doc(collection(realDb, "drops"));
+      const now = Timestamp.now();
+      const data = {
+        nombre,
+        ...(descripcion ? { descripcion } : {}),
+        estado,
+        creado_por: usuarioEmail,
+        creado_at: now,
+        actualizado_at: now,
+        en_papelera: false
+      };
+      await setDoc(dropRef, data);
+      return { id: dropRef.id, ...data } as Drop;
+    }
+
+    const list = getLocalStorageItem<Drop[]>("drops", []);
+    const now = new Date();
+    const created: Drop = {
+      id: `drop_${Math.random().toString(36).slice(2, 11)}`,
+      nombre,
+      ...(descripcion ? { descripcion } : {}),
+      estado,
+      creado_por: usuarioEmail,
+      creado_at: now,
+      actualizado_at: now,
+      en_papelera: false
+    };
+    setLocalStorageItem("drops", [created, ...list]);
+    return created;
+  },
+
+  updateDrop: async (dropId: string, input: { nombre?: string; descripcion?: string; estado?: EstadoDrop }): Promise<void> => {
+    const cleanId = (dropId || "").trim();
+    if (!cleanId) throw new Error("Selecciona un drop válido.");
+    const updates: Record<string, any> = {};
+    if (input.nombre !== undefined) {
+      const nombre = input.nombre.trim();
+      if (!nombre) throw new Error("El nombre del drop es obligatorio.");
+      if (nombre.length > 100) throw new Error("El nombre del drop no puede exceder 100 caracteres.");
+      updates.nombre = nombre;
+    }
+    if (input.descripcion !== undefined) {
+      const descripcion = input.descripcion.trim();
+      if (descripcion.length > 500) throw new Error("La descripción no puede exceder 500 caracteres.");
+      updates.descripcion = descripcion;
+    }
+    if (input.estado !== undefined) {
+      if (!["preparacion", "en_venta", "cerrado"].includes(input.estado)) throw new Error("El estado del drop no es válido.");
+      updates.estado = input.estado;
+    }
+
+    if (isConfigured && realDb) {
+      const dropRef = doc(realDb, "drops", cleanId);
+      const snapshot = await getDoc(dropRef);
+      if (!snapshot.exists() || snapshot.data().en_papelera === true) throw new Error("El drop ya no está disponible.");
+      await setDoc(dropRef, { ...updates, actualizado_at: Timestamp.now() }, { merge: true });
+      return;
+    }
+
+    const list = getLocalStorageItem<Drop[]>("drops", []);
+    const index = list.findIndex(item => item.id === cleanId && item.en_papelera !== true);
+    if (index < 0) throw new Error("El drop ya no está disponible.");
+    list[index] = { ...list[index], ...updates, actualizado_at: new Date() };
+    setLocalStorageItem("drops", list);
+  },
+
+  getDropDetail: async (dropId: string): Promise<{ compras: Compra[]; ventas: Venta[] }> => {
+    const cleanId = (dropId || "").trim();
+    if (!cleanId) return { compras: [], ventas: [] };
+    if (isConfigured && realDb) {
+      const [comprasSnapshot, ventasSnapshot] = await Promise.all([
+        getDocs(query(collection(realDb, "compras"), where("drop_id", "==", cleanId))),
+        getDocs(query(collection(realDb, "ventas"), where("drop_id", "==", cleanId)))
+      ]);
+      return {
+        compras: comprasSnapshot.docs.map(item => ({ id: item.id, ...item.data() } as Compra)),
+        ventas: ventasSnapshot.docs.map(item => ({ id: item.id, ...item.data() } as Venta))
+      };
+    }
+
+    return {
+      compras: getLocalStorageItem<Compra[]>("compras", []).filter(item => item.drop_id === cleanId),
+      ventas: getLocalStorageItem<Venta[]>("ventas_maestras", []).filter(item => item.drop_id === cleanId)
+    };
   },
 
   // --- ALMACENES ---
@@ -1549,6 +1666,7 @@ export const firestoreService = {
     const now = new Date();
     const todayStr = getLocalDateString(now);
     const periodoKey = getPeriodoKey(now);
+    const dropId = (venta.drop_id || "").trim();
 
     if (isConfigured && realDb) {
       const counterRef = doc(realDb, "contadores", "salida");
@@ -1564,7 +1682,9 @@ export const firestoreService = {
         return { key, ref: doc(realDb!, "resumen_ventas", key) };
       });
       const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+      const dropRef = dropId ? doc(realDb, "drops", dropId) : null;
       let generatedFolio = "";
+      let dropNombre = "";
 
       await runTransaction(realDb, async (transaction) => {
         const counterSnap = await transaction.get(counterRef);
@@ -1584,6 +1704,16 @@ export const firestoreService = {
         }
 
         const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+        const dropSnap = dropRef ? await transaction.get(dropRef) : null;
+        if (dropRef) {
+          if (!dropSnap?.exists() || dropSnap.data()?.en_papelera === true) {
+            throw new Error("El drop seleccionado ya no está disponible.");
+          }
+          if (dropSnap.data()?.estado !== "en_venta") {
+            throw new Error("Solo puedes registrar ventas en un drop con estado En venta.");
+          }
+          dropNombre = String(dropSnap.data()?.nombre || "").trim();
+        }
 
         if (afectaStock) normalizedItems.forEach((item, index) => {
           const currentQty = stockSnaps[index].exists()
@@ -1658,6 +1788,7 @@ export const firestoreService = {
             usuario: usuarioEmail,
             fecha: operationTimestamp,
             estado: "activo",
+            ...(dropId ? { drop_id: dropId, drop_nombre: dropNombre } : {}),
             cliente_nombre: venta.cliente_nombre,
             precio_unitario_venta: item.precio_unitario_venta,
             costo_unitario_venta: item.costo_unitario_venta,
@@ -1714,6 +1845,7 @@ export const firestoreService = {
           ...(venta.cliente_id ? { cliente_id: venta.cliente_id } : {}),
           cliente_nombre: venta.cliente_nombre,
           ...(venta.cliente_tipo ? { cliente_tipo: venta.cliente_tipo } : {}),
+          ...(dropId ? { drop_id: dropId, drop_nombre: dropNombre } : {}),
           canal_venta: venta.canal_venta,
           canal_venta_nombre: venta.canal_venta_nombre,
           porcentaje_precio: porcentajePrecio,
@@ -1756,6 +1888,14 @@ export const firestoreService = {
       clearFinanzasCache();
       clearPeriodosFinancierosCache();
       return { id: ventaId, folio: generatedFolio, movimientosCount: normalizedItems.length };
+    }
+
+    let localDropNombre = "";
+    if (dropId) {
+      const localDrop = getLocalStorageItem<Drop[]>("drops", []).find(item => item.id === dropId && item.en_papelera !== true);
+      if (!localDrop) throw new Error("El drop seleccionado ya no está disponible.");
+      if (localDrop.estado !== "en_venta") throw new Error("Solo puedes registrar ventas en un drop con estado En venta.");
+      localDropNombre = localDrop.nombre;
     }
 
     const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
@@ -1828,6 +1968,7 @@ export const firestoreService = {
         usuario: usuarioEmail,
         fecha: now,
         estado: "activo",
+        ...(dropId ? { drop_id: dropId, drop_nombre: localDropNombre } : {}),
         cliente_nombre: venta.cliente_nombre,
         precio_unitario_venta: item.precio_unitario_venta,
         costo_unitario_venta: item.costo_unitario_venta,
@@ -1872,6 +2013,8 @@ export const firestoreService = {
       cliente_id: venta.cliente_id,
       cliente_nombre: venta.cliente_nombre,
       cliente_tipo: venta.cliente_tipo,
+      drop_id: dropId || undefined,
+      drop_nombre: dropId ? localDropNombre : undefined,
       canal_venta: venta.canal_venta,
       canal_venta_nombre: venta.canal_venta_nombre,
       porcentaje_precio: porcentajePrecio,
@@ -1946,6 +2089,8 @@ export const firestoreService = {
           cliente_id: data.cliente_id || undefined,
           cliente_nombre: String(data.cliente_nombre || "Venta sin cliente / Mostrador"),
           cliente_tipo: data.cliente_tipo || undefined,
+          drop_id: data.drop_id || undefined,
+          drop_nombre: data.drop_nombre || undefined,
           canal_venta: data.canal_venta || "stock",
           canal_venta_nombre: String(data.canal_venta_nombre || "Venta directa"),
           porcentaje_precio: Number(data.porcentaje_precio) || 0,
@@ -4167,6 +4312,7 @@ export const firestoreService = {
     descuentos?: number;
     referencia?: string;
     notas?: string;
+    drop_id?: string;
   }): Promise<{ id: string; folio: string; movimientosCount: number }> => {
     const user = authService.getCurrentUser();
     const usuarioEmail = user ? user.email : "sistema@empresa.com";
@@ -4230,6 +4376,7 @@ export const firestoreService = {
 
     const purchaseDate = compraData.fecha instanceof Date ? compraData.fecha : new Date();
     const fechaStr = getLocalDateString(purchaseDate);
+    const dropId = (compraData.drop_id || "").trim();
 
     if (isConfigured && realDb) {
       const compraCounterRef = doc(realDb, "contadores", "compra");
@@ -4239,8 +4386,10 @@ export const firestoreService = {
 
       const periodoKey = getPeriodoKey(purchaseDate);
       const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+      const dropRef = dropId ? doc(realDb, "drops", dropId) : null;
 
       let generatedCompraFolio = "";
+      let dropNombre = "";
 
       await runTransaction(realDb, async (transaction) => {
         // 1. Obtener consecutivo de compras
@@ -4275,6 +4424,16 @@ export const firestoreService = {
         }
 
         const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+        const dropSnap = dropRef ? await transaction.get(dropRef) : null;
+        if (dropRef) {
+          if (!dropSnap?.exists() || dropSnap.data()?.en_papelera === true) {
+            throw new Error("El drop seleccionado ya no está disponible.");
+          }
+          if (dropSnap.data()?.estado === "cerrado") {
+            throw new Error("No puedes registrar compras en un drop cerrado.");
+          }
+          dropNombre = String(dropSnap.data()?.nombre || "").trim();
+        }
 
         // 3. Procesar stock y movimientos de cada partida
         for (let i = 0; i < stockSnaps.length; i++) {
@@ -4313,6 +4472,7 @@ export const firestoreService = {
             usuario: usuarioEmail,
             fecha: Timestamp.fromDate(purchaseDate),
             compra_id: compraDocId,
+            ...(dropId ? { drop_id: dropId, drop_nombre: dropNombre } : {}),
             lote_id: generatedCompraFolio,
             costo_unitario: item.costo_unitario,
             estado: "activo"
@@ -4339,6 +4499,7 @@ export const firestoreService = {
           fecha: Timestamp.fromDate(purchaseDate),
           fecha_str: fechaStr,
           almacen_id: almacenId,
+          ...(dropId ? { drop_id: dropId, drop_nombre: dropNombre } : {}),
           items: validItems,
           total_unidades: totalUnidades,
           subtotal: subtotal,
@@ -4376,6 +4537,14 @@ export const firestoreService = {
     }
 
     // --- MODO LOCAL / EMULADOR ---
+    let localDropNombre = "";
+    if (dropId) {
+      const localDrop = getLocalStorageItem<Drop[]>("drops", []).find(item => item.id === dropId && item.en_papelera !== true);
+      if (!localDrop) throw new Error("El drop seleccionado ya no está disponible.");
+      if (localDrop.estado === "cerrado") throw new Error("No puedes registrar compras en un drop cerrado.");
+      localDropNombre = localDrop.nombre;
+    }
+
     const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
     const comprasList = getLocalStorageItem<Compra[]>("compras", []);
     const productosList = getLocalStorageItem<Producto[]>("productos", []);
@@ -4422,6 +4591,7 @@ export const firestoreService = {
         usuario: usuarioEmail,
         fecha: purchaseDate,
         compra_id: compraDocId,
+        ...(dropId ? { drop_id: dropId, drop_nombre: localDropNombre } : {}),
         lote_id: generatedCompraFolio,
         costo_unitario: item.costo_unitario,
         estado: "activo"
@@ -4445,6 +4615,8 @@ export const firestoreService = {
       fecha: purchaseDate,
       fecha_str: fechaStr,
       almacen_id: almacenId,
+      drop_id: dropId || undefined,
+      drop_nombre: dropId ? localDropNombre : undefined,
       items: validItems,
       total_unidades: totalUnidades,
       subtotal: subtotal,
@@ -4760,6 +4932,8 @@ export const firestoreService = {
           fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
           fecha_str: data.fecha_str,
           almacen_id: data.almacen_id,
+          drop_id: data.drop_id || undefined,
+          drop_nombre: data.drop_nombre || undefined,
           items: data.items || [],
           total_unidades: Number(data.total_unidades) || 0,
           subtotal: Number(data.subtotal) || 0,
@@ -4827,6 +5001,8 @@ export const firestoreService = {
             fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
             fecha_str: data.fecha_str,
             almacen_id: data.almacen_id,
+            drop_id: data.drop_id || undefined,
+            drop_nombre: data.drop_nombre || undefined,
             items: data.items || [],
             total_unidades: Number(data.total_unidades) || 0,
             subtotal: Number(data.subtotal) || 0,
@@ -4873,6 +5049,7 @@ export const firestoreService = {
       parsed = parsed.filter(c => 
         (c.folio && c.folio.toLowerCase().includes(term)) ||
         (c.proveedor && c.proveedor.toLowerCase().includes(term)) ||
+        (c.drop_nombre && c.drop_nombre.toLowerCase().includes(term)) ||
         (c.referencia && c.referencia.toLowerCase().includes(term)) ||
         c.items?.some(it => it.sku.toLowerCase().includes(term) || it.nombre_producto?.toLowerCase().includes(term))
       );

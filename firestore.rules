@@ -149,6 +149,20 @@ service cloud.firestore {
       allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
+    // Drops comerciales: agrupadores independientes del calendario para compras y ventas.
+    match /drops/{dropId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(dropId)
+        && incoming().nombre is string
+        && incoming().nombre.size() > 0 && incoming().nombre.size() <= 100
+        && incoming().estado in ['preparacion', 'en_venta', 'cerrado']
+        && (!('descripcion' in incoming()) || (
+          incoming().descripcion is string && incoming().descripcion.size() <= 500
+        ));
+      allow delete: if false;
+    }
+
     // Migraciones Collection (one-time migration trackers)
     match /migraciones/{migracionId} {
       allow read, create, update: if isSignedIn();

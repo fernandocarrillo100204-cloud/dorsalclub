@@ -24,6 +24,7 @@ import {
   Receipt,
   ChevronRight,
   Boxes,
+  Layers,
   ClipboardList,
   Trash2,
   Settings,
@@ -119,7 +120,7 @@ const NAV_GROUPS: NavGroup[] = [
     id: "inventario",
     label: "Inventario",
     icon: Boxes,
-    matchActive: (curr) => ["dashboard", "catalogo", "almacenes", "transferencias_nueva", "historial"].includes(curr),
+    matchActive: (curr) => ["dashboard", "catalogo", "drops", "almacenes", "transferencias_nueva", "historial"].includes(curr),
     items: [
       {
         id: "dashboard",
@@ -132,6 +133,12 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Productos",
         icon: Package,
         matchActive: (curr) => curr === "catalogo"
+      },
+      {
+        id: "drops",
+        label: "Drops",
+        icon: Layers,
+        matchActive: (curr) => curr === "drops"
       },
       {
         id: "almacenes",

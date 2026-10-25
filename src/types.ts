@@ -68,6 +68,8 @@ export interface Movimiento {
   } | Date;
   almacen_destino_id?: string; // Para transferencias
   compra_id?: string; // Trazabilidad con lote de compra
+  drop_id?: string; // Agrupa compras y ventas dentro de un drop comercial
+  drop_nombre?: string; // Snapshot legible del drop al registrar la operación
   lote_id?: string; // Identificador de lote
   costo_unitario?: number; // Costo unitario al registrar compra
   costo_unitario_venta?: number; // Snapshot del costo utilizado al vender
@@ -177,6 +179,8 @@ export interface Venta {
   cliente_id?: string;
   cliente_nombre: string;
   cliente_tipo?: TipoCliente | string;
+  drop_id?: string;
+  drop_nombre?: string;
   canal_venta: CanalVentaId;
   canal_venta_nombre: string;
   porcentaje_precio: number;
@@ -218,6 +222,7 @@ export interface VentaRegistroInput {
   cliente_id?: string;
   cliente_nombre: string;
   cliente_tipo?: TipoCliente | string;
+  drop_id?: string;
   envio_cobrado_cliente?: number;
   otros_cargos_cliente?: number;
   concepto_otros_cargos?: string;
@@ -280,6 +285,25 @@ export type CanalPreferido = string;
 export type OrigenCliente = string;
 export type EstadoCliente = "activo" | "inactivo";
 
+export type EstadoDrop = "preparacion" | "en_venta" | "cerrado";
+
+export interface Drop {
+  id: string;
+  nombre: string;
+  descripcion?: string;
+  estado: EstadoDrop;
+  creado_por: string;
+  creado_at: {
+    seconds: number;
+    nanoseconds: number;
+  } | Date;
+  actualizado_at: {
+    seconds: number;
+    nanoseconds: number;
+  } | Date;
+  en_papelera?: boolean;
+}
+
 export interface Cliente {
   id?: string;
   nombre_completo: string; // obligatorio
@@ -341,6 +365,7 @@ export type NavigationTab =
   | "analisis_clientes"
   | "almacenes" 
   | "catalogo"
+  | "drops"
   | "papelera"
   | "configuracion"
   | "ventas" // legacy/alias for sales analysis
@@ -365,6 +390,8 @@ export interface Compra {
   } | Date;
   fecha_str?: string; // YYYY-MM-DD
   almacen_id: string; // Almacén de recepción
+  drop_id?: string;
+  drop_nombre?: string;
   items: CompraItem[];
   total_unidades: number;
   subtotal: number;

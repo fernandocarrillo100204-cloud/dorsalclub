@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
-import { Compra, CompraItem, Almacen, Producto, OpcionListaConfigurable } from "../types";
+import { Compra, CompraItem, Almacen, Producto, OpcionListaConfigurable, Drop } from "../types";
 import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 import {
   ShoppingBag,
@@ -110,11 +110,14 @@ export default function Compras({
   const [archivingCompraId, setArchivingCompraId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [proveedores, setProveedores] = useState<OpcionListaConfigurable[]>([]);
+  const [drops, setDrops] = useState<Drop[]>([]);
+  const [dropsError, setDropsError] = useState<string | null>(null);
 
   // Form state (/compras/nueva)
   const [proveedor, setProveedor] = useState("");
   const [fecha, setFecha] = useState(() => new Date().toISOString().split("T")[0]);
   const [almacenId, setAlmacenId] = useState("");
+  const [dropId, setDropId] = useState("");
   const [notas, setNotas] = useState("");
   const [costoEnvio, setCostoEnvio] = useState<number | "">("");
   const [comisiones, setComisiones] = useState<number | "">("");
@@ -130,6 +133,12 @@ export default function Compras({
   };
 
   useEffect(() => { loadPurchaseSettings(); }, []);
+
+  useEffect(() => {
+    firestoreService.getDrops()
+      .then(items => setDrops(items.filter(item => item.estado !== "cerrado")))
+      .catch((error: any) => setDropsError(error?.message || "No se pudieron cargar los drops."));
+  }, []);
 
   // Items in the current purchase draft
   const [items, setItems] = useState<NewItemRow[]>([createEmptyPurchaseItem()]);
@@ -350,7 +359,8 @@ export default function Compras({
         costo_envio: typeof costoEnvio === "number" ? costoEnvio : 0,
         comisiones: typeof comisiones === "number" ? comisiones : 0,
         descuentos: typeof descuentos === "number" ? descuentos : 0,
-        notas: notas.trim()
+        notas: notas.trim(),
+        drop_id: dropId || undefined
       });
 
       setFormSuccess(`¡Compra registrada con éxito! Folio generado: ${res.folio}. El inventario ha sido actualizado.`);
@@ -362,6 +372,7 @@ export default function Compras({
       setComisiones("");
       setDescuentos("");
       setAlmacenId("");
+      setDropId("");
       setItems([createEmptyPurchaseItem()]);
       loadFirstPage(false);
       goToHistory();
@@ -383,12 +394,13 @@ export default function Compras({
       if (!term) return true;
       const inFolio = c.folio?.toLowerCase().includes(term);
       const inProveedor = c.proveedor?.toLowerCase().includes(term);
+      const inDrop = c.drop_nombre?.toLowerCase().includes(term);
       const inRef = c.referencia?.toLowerCase().includes(term);
       const inItems = c.items?.some(
         (it) => it.sku.toLowerCase().includes(term) || it.nombre_producto?.toLowerCase().includes(term)
       );
 
-      return inFolio || inProveedor || inRef || inItems;
+      return inFolio || inProveedor || inDrop || inRef || inItems;
     });
   }, [compras, searchTerm, selectedWarehouseFilter]);
 
@@ -481,7 +493,7 @@ export default function Compras({
               </div>
 
               {/* Almacén de recepción */}
-              <div className="sm:col-span-2">
+              <div>
                 <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
                   Almacén de Recepción <span className="text-rose-500">*</span>
                 </label>
@@ -503,6 +515,25 @@ export default function Compras({
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {/* Drop comercial */}
+              <div>
+                <label htmlFor="compra-drop" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                  Drop relacionado (Opcional)
+                </label>
+                <select
+                  id="compra-drop"
+                  value={dropId}
+                  onChange={(event) => setDropId(event.target.value)}
+                  disabled={Boolean(dropsError)}
+                  className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white disabled:opacity-60"
+                >
+                  <option value="">Sin drop</option>
+                  {drops.map(item => <option key={item.id} value={item.id}>{item.nombre} — {item.estado === "en_venta" ? "En venta" : "Preparación"}</option>)}
+                </select>
+                {dropsError && <p className="text-[10px] text-rose-500 mt-1">{dropsError}</p>}
+                {!dropsError && drops.length === 0 && <p className="text-[10px] text-zinc-400 mt-1">Puedes crear uno desde Inventario → Drops.</p>}
               </div>
 
               {/* Notas */}
@@ -981,6 +1012,7 @@ export default function Compras({
                         <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
                           {compra.folio || "COMP-—"}
                         </span>
+                        {compra.drop_nombre && <div className="text-[10px] text-zinc-500 mt-1 max-w-32 truncate">{compra.drop_nombre}</div>}
                       </td>
 
                       {/* Fecha */}

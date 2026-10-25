@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
-import { Almacen, Producto, StockItem, Cliente, TipoCliente, VentaPartidaInput, UbicacionEntregaCatalogo, RepartidorCatalogo, CanalVentaId, ConfiguracionVentas, OpcionListaConfigurable, normalizeOptionalMoney } from "../types";
+import { Almacen, Producto, StockItem, Cliente, TipoCliente, VentaPartidaInput, UbicacionEntregaCatalogo, RepartidorCatalogo, CanalVentaId, ConfiguracionVentas, OpcionListaConfigurable, Drop, normalizeOptionalMoney } from "../types";
 import ClienteModal from "./ClienteModal";
 import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 import {
@@ -105,6 +105,9 @@ export default function Ventas({
   const [customMarkup, setCustomMarkup] = useState<string>("");
   const [metodosPago, setMetodosPago] = useState<OpcionListaConfigurable[]>([]);
   const [metodoPagoInicial, setMetodoPagoInicial] = useState("");
+  const [drops, setDrops] = useState<Drop[]>([]);
+  const [selectedDropId, setSelectedDropId] = useState("");
+  const [dropsError, setDropsError] = useState<string | null>(null);
 
   // Client Selection State
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -189,6 +192,18 @@ export default function Ventas({
   useEffect(() => {
     loadDeliveryCatalogs();
   }, []);
+
+  const loadDrops = async () => {
+    setDropsError(null);
+    try {
+      const items = await firestoreService.getDrops();
+      setDrops(items.filter(item => item.estado === "en_venta"));
+    } catch (error: any) {
+      setDropsError(error?.message || "No se pudieron cargar los drops.");
+    }
+  };
+
+  useEffect(() => { loadDrops(); }, []);
 
   const channelConfig = salesConfig?.canales[canal] || null;
   const appliedMarkup = canal === "mayoreo" ? Number(customMarkup) : Number(channelConfig?.porcentaje);
@@ -442,6 +457,7 @@ export default function Ventas({
         cliente_id: clienteId,
         cliente_nombre: clienteNombre,
         cliente_tipo: clienteTipo,
+        drop_id: selectedDropId || undefined,
         envio_cobrado_cliente: envioCobradoFinal,
         otros_cargos_cliente: otrosCargosFinal,
         concepto_otros_cargos: conceptoOtrosCargosFinal,
@@ -479,6 +495,7 @@ export default function Ventas({
       setUbicacionEntregaId("");
       setRepartidorId("");
       setMetodoPagoInicial("");
+      setSelectedDropId("");
       setIsAjustesOpen(false);
 
       if (onSuccess) {
@@ -903,6 +920,23 @@ export default function Ventas({
 
             {/* Datos opcionales de entrega */}
             <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="sm:col-span-2">
+                <label htmlFor="venta-drop" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                  Drop relacionado (Opcional)
+                </label>
+                <select
+                  id="venta-drop"
+                  value={selectedDropId}
+                  onChange={(event) => setSelectedDropId(event.target.value)}
+                  disabled={Boolean(dropsError)}
+                  className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white disabled:opacity-60"
+                >
+                  <option value="">Sin drop</option>
+                  {drops.map(item => <option key={item.id} value={item.id}>{item.nombre}</option>)}
+                </select>
+                {dropsError && <div className="flex items-center gap-2 mt-1 text-[10px] text-rose-500"><span>{dropsError}</span><button type="button" onClick={loadDrops} className="font-bold underline">Reintentar</button></div>}
+                {!dropsError && drops.length === 0 && <p className="text-[10px] text-zinc-400 mt-1">No hay drops en estado En venta. Puedes administrarlos desde Inventario → Drops.</p>}
+              </div>
               <div className="sm:col-span-2">
                 <label htmlFor="metodo-pago-venta" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
                   Método de pago del importe recibido {totalRecibido > 0 ? "*" : "(Opcional)"}

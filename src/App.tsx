@@ -58,6 +58,7 @@ const Transferencias = lazyWithRetry(() => import("./components/Transferencias")
 const Historial = lazyWithRetry(() => import("./components/Historial"));
 const GestionAlmacenes = lazyWithRetry(() => import("./components/GestionAlmacenes"));
 const GestionProductos = lazyWithRetry(() => import("./components/GestionProductos"));
+const Drops = lazyWithRetry(() => import("./components/Drops"));
 const AnalisisVentas = lazyWithRetry(() => import("./components/AnalisisVentas"));
 const AnalisisClientes = lazyWithRetry(() => import("./components/AnalisisClientes"));
 const Clientes = lazyWithRetry(() => import("./components/Clientes"));
@@ -141,6 +142,9 @@ const getTabFromPath = (path: string): NavigationTab => {
   if (normalized === "/catalogo" || normalized === "/productos" || normalized === "/inventario/productos") {
     return "catalogo";
   }
+  if (normalized === "/inventario/drops" || normalized === "/drops") {
+    return "drops";
+  }
   if (normalized === "/dashboard" || normalized === "/inventario") {
     return "dashboard";
   }
@@ -182,6 +186,8 @@ const getPathFromTab = (tab: NavigationTab): string => {
       return "/inventario/almacenes";
     case "catalogo":
       return "/inventario/productos";
+    case "drops":
+      return "/inventario/drops";
     case "clientes":
       return "/clientes";
     case "finanzas":
@@ -599,6 +605,19 @@ export default function App() {
                       stockList={stockList}
                       onNavigateToMovimiento={(sku) => navigateTo("compras_nueva", { sku })}
                     />
+                  </motion.div>
+                )}
+
+                {/* Drops: seguimiento de compras y ventas por pedido comercial */}
+                {activeTab === "drops" && (
+                  <motion.div
+                    key="drops"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                  >
+                    <Drops />
                   </motion.div>
                 )}
 
