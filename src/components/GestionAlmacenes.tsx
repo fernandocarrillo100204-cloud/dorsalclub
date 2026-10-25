@@ -124,8 +124,18 @@ export default function GestionAlmacenes({
   // Handle Form Submit
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nombre.trim() || !ubicacion.trim()) {
+    const cleanName = nombre.trim();
+    const cleanLocation = ubicacion.trim();
+    if (!cleanName || !cleanLocation) {
       setFormError("Todos los campos son obligatorios.");
+      return;
+    }
+    if (cleanName.length > 100) {
+      setFormError("El nombre del almacén no puede superar 100 caracteres.");
+      return;
+    }
+    if (cleanLocation.length > 500) {
+      setFormError("La ubicación física no puede superar 500 caracteres.");
       return;
     }
 
@@ -136,20 +146,24 @@ export default function GestionAlmacenes({
       if (selectedAlmacen) {
         // Edit mode
         await firestoreService.updateAlmacen(selectedAlmacen.id, {
-          nombre: nombre.trim(),
-          ubicacion: ubicacion.trim()
+          nombre: cleanName,
+          ubicacion: cleanLocation
         });
       } else {
         // Add mode
         await firestoreService.addAlmacen({
-          nombre: nombre.trim(),
-          ubicacion: ubicacion.trim()
+          nombre: cleanName,
+          ubicacion: cleanLocation
         });
       }
       setIsFormOpen(false);
     } catch (err: any) {
       console.error("Error saving warehouse:", err);
-      setFormError(err.message || "Ocurrió un error al guardar el almacén.");
+      const isPermissionError = err?.code === "permission-denied" ||
+        String(err?.message || "").toLowerCase().includes("insufficient permissions");
+      setFormError(isPermissionError
+        ? "Firestore rechazó los datos del almacén. Verifica que el nombre y la ubicación respeten los límites permitidos e inténtalo nuevamente."
+        : err.message || "Ocurrió un error al guardar el almacén.");
     } finally {
       setSubmitLoading(false);
     }
@@ -426,6 +440,7 @@ export default function GestionAlmacenes({
                   <input
                     type="text"
                     required
+                    maxLength={100}
                     placeholder="Ej. Almacén Poniente"
                     value={nombre}
                     onChange={(e) => setNombre(e.target.value)}
@@ -437,14 +452,18 @@ export default function GestionAlmacenes({
                   <label className="text-[11px] font-semibold text-[#172033] dark:text-[#F8FAFC] uppercase tracking-wider">
                     Ubicación Física <span className="text-[#059669] dark:text-emerald-400">*</span>
                   </label>
-                  <input
-                    type="text"
+                  <textarea
                     required
-                    placeholder="Ej. Barcelona, España"
+                    maxLength={500}
+                    rows={3}
+                    placeholder="Dirección completa, referencias o datos necesarios para identificar la ubicación"
                     value={ubicacion}
                     onChange={(e) => setUbicacion(e.target.value)}
-                    className="w-full px-3 py-2 bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#263449] text-[#172033] dark:text-[#F8FAFC] text-xs sm:text-sm rounded-lg focus:outline-none focus:border-[#059669] dark:focus:border-emerald-500 transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                    className="w-full px-3 py-2 bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#263449] text-[#172033] dark:text-[#F8FAFC] text-xs sm:text-sm rounded-lg focus:outline-none focus:border-[#059669] dark:focus:border-emerald-500 transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500 resize-y"
                   />
+                  <div className="text-right text-[10px] text-[#64748B] dark:text-[#94A3B8]">
+                    {ubicacion.length}/500
+                  </div>
                 </div>
 
                 <div className="pt-2 flex items-center justify-end space-x-2">

@@ -670,13 +670,22 @@ export const firestoreService = {
   },
 
   addAlmacen: async (almacen: Omit<Almacen, "id">): Promise<string> => {
+    const nombre = almacen.nombre.trim();
+    const ubicacion = almacen.ubicacion.trim();
+    if (!nombre || nombre.length > 100) {
+      throw new Error("El nombre del almacén es obligatorio y no puede superar 100 caracteres.");
+    }
+    if (!ubicacion || ubicacion.length > 500) {
+      throw new Error("La ubicación física es obligatoria y no puede superar 500 caracteres.");
+    }
+    const normalizedWarehouse = { ...almacen, nombre, ubicacion };
     if (isConfigured && realDb) {
-      const docRef = await addDoc(collection(realDb, "almacenes"), almacen);
+      const docRef = await addDoc(collection(realDb, "almacenes"), normalizedWarehouse);
       return docRef.id;
     }
     const list = getLocalStorageItem<Almacen[]>("almacenes", []);
     const newId = "alm_" + Math.random().toString(36).substr(2, 9);
-    const newItem: Almacen = { id: newId, ...almacen };
+    const newItem: Almacen = { id: newId, ...normalizedWarehouse };
     list.push(newItem);
     setLocalStorageItem("almacenes", list);
     notifyListeners("almacenes", list);
@@ -684,15 +693,28 @@ export const firestoreService = {
   },
 
   updateAlmacen: async (id: string, data: Partial<Omit<Almacen, "id">>): Promise<void> => {
+    const normalizedData = { ...data };
+    if (typeof data.nombre === "string") {
+      normalizedData.nombre = data.nombre.trim();
+      if (!normalizedData.nombre || normalizedData.nombre.length > 100) {
+        throw new Error("El nombre del almacén es obligatorio y no puede superar 100 caracteres.");
+      }
+    }
+    if (typeof data.ubicacion === "string") {
+      normalizedData.ubicacion = data.ubicacion.trim();
+      if (!normalizedData.ubicacion || normalizedData.ubicacion.length > 500) {
+        throw new Error("La ubicación física es obligatoria y no puede superar 500 caracteres.");
+      }
+    }
     if (isConfigured && realDb) {
       const docRef = doc(realDb, "almacenes", id);
-      await setDoc(docRef, data, { merge: true });
+      await setDoc(docRef, normalizedData, { merge: true });
       return;
     }
     const list = getLocalStorageItem<Almacen[]>("almacenes", []);
     const index = list.findIndex(a => a.id === id);
     if (index !== -1) {
-      list[index] = { ...list[index], ...data };
+      list[index] = { ...list[index], ...normalizedData };
       setLocalStorageItem("almacenes", list);
       notifyListeners("almacenes", list);
     }

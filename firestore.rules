@@ -30,7 +30,7 @@ service cloud.firestore {
       allow create, update: if isSignedIn() 
         && isValidId(almacenId)
         && incoming().nombre is string && incoming().nombre.size() > 0 && incoming().nombre.size() <= 100
-        && incoming().ubicacion is string && incoming().ubicacion.size() <= 200;
+        && incoming().ubicacion is string && incoming().ubicacion.size() > 0 && incoming().ubicacion.size() <= 500;
       allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
