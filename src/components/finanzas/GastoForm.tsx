@@ -108,6 +108,20 @@ export default function GastoForm({
       setErrorMessage("El concepto o descripción del gasto es obligatorio.");
       return;
     }
+    if (cleanConcepto.length > 200) {
+      setErrorMessage("El concepto o descripción del gasto no puede superar 200 caracteres.");
+      return;
+    }
+
+    if (categoria.trim().length > 100) {
+      setErrorMessage("La categoría del gasto no puede superar 100 caracteres.");
+      return;
+    }
+
+    if (metodoPago.trim().length > 100) {
+      setErrorMessage("El método de pago no puede superar 100 caracteres.");
+      return;
+    }
 
     if (!categoria) {
       setErrorMessage("Debes seleccionar una categoría para el gasto.");
@@ -292,11 +306,13 @@ export default function GastoForm({
                 id="gasto-concepto"
                 value={concepto}
                 onChange={(e) => setConcepto(e.target.value)}
+                maxLength={200}
                 placeholder="Ej. Envío con Estafeta guía #29482, Compra de cajas y cinta, Publicidad Meta..."
                 className="w-full px-3.5 py-2.5 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] text-[#172033] dark:text-[#F8FAFC] text-sm placeholder-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#059669] focus:border-transparent transition-all"
                 autoFocus={mode === "create"}
               />
             </div>
+            <p className="mt-1 text-right text-[10px] text-[#94A3B8]">{concepto.length}/200</p>
           </div>
 
           {/* Categoría y Monto */}

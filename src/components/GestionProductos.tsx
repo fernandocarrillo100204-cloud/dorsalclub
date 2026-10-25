@@ -438,7 +438,7 @@ export default function GestionProductos({
 
   // Check if all required fields are complete to enable the button
   const isFormValid = useMemo(() => {
-    if (!formNombre.trim()) return false;
+    if (!formNombre.trim() || formNombre.trim().length > 120) return false;
     if (!formMarca.trim()) return false;
     if (!formCategoria.trim()) return false;
     if (!formTipoTalla.trim()) return false;
@@ -466,6 +466,8 @@ export default function GestionProductos({
     const errors: Record<string, string> = {};
     if (!formNombre.trim()) {
       errors.nombre = "El nombre comercial del modelo es obligatorio.";
+    } else if (formNombre.trim().length > 120) {
+      errors.nombre = "El nombre comercial no puede superar 120 caracteres.";
     }
     if (!formMarca.trim()) {
       errors.marca = "Debes seleccionar una marca.";
@@ -1104,6 +1106,7 @@ export default function GestionProductos({
                       type="text"
                       placeholder="Ej. Heavyweight Boxy Tee, Cargo Pants..."
                       value={formNombre}
+                      maxLength={120}
                       onChange={(e) => {
                         setFormNombre(e.target.value);
                         if (formErrors.nombre) setFormErrors(prev => ({ ...prev, nombre: "" }));
@@ -1115,6 +1118,7 @@ export default function GestionProductos({
                     {(formErrors.nombre || (formSubmitted && !formNombre.trim())) && (
                       <p className="text-[11px] text-rose-600 mt-1">{formErrors.nombre || "El nombre comercial del modelo es obligatorio"}</p>
                     )}
+                    <p className="text-[10px] text-zinc-400 mt-1 text-right">{formNombre.length}/120</p>
                   </div>
 
                   {/* Marca */}

@@ -72,6 +72,7 @@ export default function ConfiguracionModuloModal({ isOpen, module, onClose, onSa
   const currentDefinition = definitions.find(item => item.key === activeKey) || definitions[0];
   const isSalesCatalog = module === "ventas" && (activeKey === "ubicaciones" || activeKey === "repartidores");
   const items = isSalesCatalog ? salesLists[activeKey] || [] : config?.[activeKey as ConfigKey] || [];
+  const optionNameMaxLength = module === "finanzas" && (activeKey === "categorias_gasto" || activeKey === "metodos_pago_gasto") ? 100 : undefined;
 
   const saveSalesChannel = async (id: CanalVentaId, field: "porcentaje" | "minimo_piezas" | "anticipo_porcentaje", value: number) => {
     if (!salesConfig) return;
@@ -105,6 +106,10 @@ export default function ConfiguracionModuloModal({ isOpen, module, onClose, onSa
   const add = async () => {
     const nombre = newName.trim();
     if (!nombre) return;
+    if (optionNameMaxLength && nombre.length > optionNameMaxLength) {
+      setError(`La opción no puede superar ${optionNameMaxLength} caracteres.`);
+      return;
+    }
     if (items.some(item => item.nombre.toLowerCase() === nombre.toLowerCase())) {
       setError("Esa opción ya existe.");
       return;
@@ -129,6 +134,11 @@ export default function ConfiguracionModuloModal({ isOpen, module, onClose, onSa
   };
 
   const update = async (item: OpcionListaConfigurable, patch: Partial<OpcionListaConfigurable>) => {
+    const cleanName = patch.nombre?.trim();
+    if (cleanName !== undefined && optionNameMaxLength && cleanName.length > optionNameMaxLength) {
+      setError(`La opción no puede superar ${optionNameMaxLength} caracteres.`);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -137,7 +147,7 @@ export default function ConfiguracionModuloModal({ isOpen, module, onClose, onSa
         else await firestoreService.updateRepartidor(item.id, patch);
         await load();
       } else {
-        await persist(items.map(option => option.id === item.id ? { ...option, ...patch } : option));
+        await persist(items.map(option => option.id === item.id ? { ...option, ...patch, ...(cleanName !== undefined ? { nombre: cleanName } : {}) } : option));
       }
       onSaved?.();
     } catch (err: any) {
@@ -203,14 +213,14 @@ export default function ConfiguracionModuloModal({ isOpen, module, onClose, onSa
             </div>
           ) : <>
           <div className="flex flex-col sm:flex-row gap-2">
-            <input value={newName} onChange={event => setNewName(event.target.value)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); add(); } }} placeholder={`Nueva ${currentDefinition.singular}`} className="flex-1 px-3 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white" />
+            <input value={newName} maxLength={optionNameMaxLength} onChange={event => setNewName(event.target.value)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); add(); } }} placeholder={`Nueva ${currentDefinition.singular}`} className="flex-1 px-3 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white" />
             <button type="button" onClick={add} disabled={saving || !newName.trim()} className="px-4 py-2 rounded-xl bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-xs font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50"><Plus className="w-4 h-4" />Agregar</button>
           </div>
           {error && <div className="text-xs text-rose-600 dark:text-rose-400">{error} <button type="button" onClick={load} className="underline font-semibold">Reintentar</button></div>}
           {loading ? <div className="py-10 text-center text-sm text-zinc-400">Cargando opciones…</div> : <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 divide-y divide-zinc-100 dark:divide-zinc-800">
             {items.length === 0 ? <div className="py-10 text-center text-sm text-zinc-400">Aún no hay opciones registradas.</div> : items.map(item => <div key={item.id} className="flex items-center gap-3 px-4 py-3">
               {module === "ventas" && activeKey === "ubicaciones" ? <MapPin className="w-4 h-4 text-zinc-400" /> : module === "ventas" ? <UserRound className="w-4 h-4 text-zinc-400" /> : null}
-              <div className="flex-1 min-w-0">{editingId === item.id ? <input autoFocus value={editingName} onChange={event => setEditingName(event.target.value)} className="w-full px-2 py-1 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800" /> : <span className={`text-sm font-medium ${item.activa ? "text-zinc-900 dark:text-white" : "text-zinc-400 line-through"}`}>{item.nombre}</span>}</div>
+              <div className="flex-1 min-w-0">{editingId === item.id ? <input autoFocus value={editingName} maxLength={optionNameMaxLength} onChange={event => setEditingName(event.target.value)} className="w-full px-2 py-1 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800" /> : <span className={`text-sm font-medium ${item.activa ? "text-zinc-900 dark:text-white" : "text-zinc-400 line-through"}`}>{item.nombre}</span>}</div>
               <span className={`text-[10px] px-2 py-0.5 rounded-full ${item.activa ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800"}`}>{item.activa ? "Activa" : "Inactiva"}</span>
               {editingId === item.id ? <><button type="button" onClick={() => { const nombre = editingName.trim(); if (nombre) update(item, { nombre }).then(() => setEditingId(null)); }} className="p-1.5 text-emerald-600"><Check className="w-4 h-4" /></button><button type="button" onClick={() => setEditingId(null)} className="p-1.5 text-zinc-400"><X className="w-4 h-4" /></button></> : <><button type="button" onClick={() => { setEditingId(item.id); setEditingName(item.nombre); }} className="p-1.5 text-zinc-500" title="Editar"><Edit3 className="w-4 h-4" /></button><button type="button" onClick={() => update(item, { activa: !item.activa })} className="p-1.5 text-zinc-500" title={item.activa ? "Desactivar" : "Activar"}><Power className="w-4 h-4" /></button>{item.activa && <button type="button" onClick={() => archive(item)} className="p-1.5 text-rose-500" title="Quitar"><Trash2 className="w-4 h-4" /></button>}</>}
             </div>)}
