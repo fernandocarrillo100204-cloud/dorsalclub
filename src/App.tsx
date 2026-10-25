@@ -136,7 +136,7 @@ const getTabFromPath = (path: string): NavigationTab => {
   if (normalized === "/analisis-clientes" || normalized === "/analisis_clientes" || normalized === "/clientes/analisis") {
     return "analisis_clientes";
   }
-  if (normalized === "/almacenes" || normalized === "/inventario/almacenes") {
+  if (normalized === "/almacenes" || normalized === "/inventario/almacenes" || normalized === "/configuracion/almacenes") {
     return "almacenes";
   }
   if (normalized === "/catalogo" || normalized === "/productos" || normalized === "/inventario/productos") {
@@ -183,7 +183,7 @@ const getPathFromTab = (tab: NavigationTab): string => {
     case "historial":
       return "/inventario/movimientos";
     case "almacenes":
-      return "/inventario/almacenes";
+      return "/configuracion/almacenes";
     case "catalogo":
       return "/inventario/productos";
     case "drops":
@@ -421,6 +421,7 @@ export default function App() {
                       onNavigate={(tab) => navigateTo(tab)}
                       onNavigateToNew={() => navigateTo("compras_nueva")}
                       onNavigateToHistory={() => navigateTo("compras")}
+                      onManageWarehouses={() => navigateTo("almacenes")}
                     />
                   </motion.div>
                 )}
@@ -511,6 +512,7 @@ export default function App() {
                       preselectedAlmacenId={preselectedAlmacenId}
                       onSuccess={() => navigateTo("dashboard")}
                       onCancel={() => navigateTo("dashboard")}
+                      onManageWarehouses={() => navigateTo("almacenes")}
                     />
                   </motion.div>
                 )}
@@ -586,6 +588,7 @@ export default function App() {
                       almacenes={almacenes}
                       productos={productos} 
                       stockList={stockList}
+                      onBackToSettings={() => navigateTo("configuracion")}
                     />
                   </motion.div>
                 )}
@@ -686,7 +689,7 @@ export default function App() {
 
                 {activeTab === "configuracion" && (
                   <motion.div key="configuracion" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }} transition={{ duration: 0.25, ease: "easeInOut" }}>
-                    <Configuracion onNavigateToProducts={() => navigateTo("catalogo")} />
+                    <Configuracion onNavigateToProducts={() => navigateTo("catalogo")} onNavigateToWarehouses={() => navigateTo("almacenes")} />
                   </motion.div>
                 )}
               </AnimatePresence>

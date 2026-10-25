@@ -11,7 +11,6 @@ import {
   History, 
   LayoutDashboard, 
   TrendingUp, 
-  Warehouse, 
   Package, 
   LogOut, 
   Menu, 
@@ -63,7 +62,7 @@ const UTILITY_NAV_ITEMS: NavItem[] = [
     id: "configuracion",
     label: "Configuración",
     icon: Settings,
-    matchActive: (curr) => curr === "configuracion"
+    matchActive: (curr) => curr === "configuracion" || curr === "almacenes"
   },
   {
     id: "papelera",
@@ -120,7 +119,7 @@ const NAV_GROUPS: NavGroup[] = [
     id: "inventario",
     label: "Inventario",
     icon: Boxes,
-    matchActive: (curr) => ["dashboard", "catalogo", "drops", "almacenes", "transferencias_nueva", "historial"].includes(curr),
+    matchActive: (curr) => ["dashboard", "catalogo", "drops", "transferencias_nueva", "historial"].includes(curr),
     items: [
       {
         id: "dashboard",
@@ -139,12 +138,6 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Drops",
         icon: Layers,
         matchActive: (curr) => curr === "drops"
-      },
-      {
-        id: "almacenes",
-        label: "Almacenes",
-        icon: Warehouse,
-        matchActive: (curr) => curr === "almacenes"
       },
       {
         id: "transferencias_nueva",

@@ -16,7 +16,8 @@ import {
   Search, 
   X, 
   Check, 
-  AlertCircle
+  AlertCircle,
+  ArrowLeft
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -24,12 +25,14 @@ interface GestionAlmacenesProps {
   almacenes?: Almacen[];
   productos?: Producto[];
   stockList?: StockItem[];
+  onBackToSettings?: () => void;
 }
 
 export default function GestionAlmacenes({ 
   almacenes: propAlmacenes, 
   productos = [], 
-  stockList: propStockList 
+  stockList: propStockList,
+  onBackToSettings
 }: GestionAlmacenesProps) {
   const [internalAlmacenes, setInternalAlmacenes] = useState<Almacen[]>(propAlmacenes || []);
   const [internalStockList, setInternalStockList] = useState<StockItem[]>(propStockList || []);
@@ -196,8 +199,9 @@ export default function GestionAlmacenes({
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-5 gap-3">
         <div>
+          {onBackToSettings && <button type="button" onClick={onBackToSettings} className="mb-2 inline-flex items-center gap-1.5 text-xs font-semibold text-[#64748B] dark:text-[#94A3B8] hover:text-[#172033] dark:hover:text-white"><ArrowLeft className="w-3.5 h-3.5" />Configuración</button>}
           <h1 className="text-2xl sm:text-[28px] font-bold text-[#172033] dark:text-[#F8FAFC] tracking-tight leading-tight">
-            Gestión de Almacenes
+            Configuración de Almacenes
           </h1>
           <p className="text-xs text-[#64748B] dark:text-[#94A3B8] mt-0.5">
             Administra las sedes físicas, ubicaciones y puntos de distribución de la empresa.

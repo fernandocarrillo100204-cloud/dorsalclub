@@ -42,6 +42,7 @@ interface ComprasProps {
   onNavigate?: (tab: "compras" | "compras_nueva") => void;
   onNavigateToNew?: () => void;
   onNavigateToHistory?: () => void;
+  onManageWarehouses?: () => void;
 }
 
 interface NewItemRow {
@@ -66,7 +67,8 @@ export default function Compras({
   isNewView = false,
   onNavigate,
   onNavigateToNew,
-  onNavigateToHistory
+  onNavigateToHistory,
+  onManageWarehouses
 }: ComprasProps) {
   const goToHistory = () => {
     if (onNavigateToHistory) onNavigateToHistory();
@@ -428,7 +430,7 @@ export default function Compras({
               Ingresa múltiples productos y variantes en una sola operación. Se incrementará el stock y registrará el folio de auditoría.
             </p>
           </div>
-          <div className="flex gap-2"><button type="button" onClick={() => setIsSettingsOpen(true)} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"><Settings className="w-4 h-4" />Configurar</button><button type="button" onClick={goToHistory} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-xs">Volver al historial</button></div>
+          <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setIsSettingsOpen(true)} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"><Settings className="w-4 h-4" />Proveedores</button>{onManageWarehouses && <button type="button" onClick={onManageWarehouses} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"><Warehouse className="w-4 h-4" />Almacenes</button>}<button type="button" onClick={goToHistory} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-xs">Volver al historial</button></div>
         </div>
 
         {/* Feedback Messages */}
@@ -845,7 +847,7 @@ export default function Compras({
           </p>
         </div>
 
-        <div className="flex gap-2"><button type="button" onClick={() => setIsSettingsOpen(true)} className="inline-flex items-center gap-2 px-3 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl font-semibold text-xs"><Settings className="w-4 h-4" />Configurar</button><button
+        <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setIsSettingsOpen(true)} className="inline-flex items-center gap-2 px-3 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl font-semibold text-xs"><Settings className="w-4 h-4" />Proveedores</button>{onManageWarehouses && <button type="button" onClick={onManageWarehouses} className="inline-flex items-center gap-2 px-3 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl font-semibold text-xs"><Warehouse className="w-4 h-4" />Almacenes</button>}<button
           onClick={goToNew}
           className="inline-flex items-center space-x-2 px-4 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-white dark:hover:bg-zinc-100 dark:text-zinc-900 rounded-xl font-bold text-xs transition-all shadow-sm self-start sm:self-auto"
         >

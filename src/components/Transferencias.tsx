@@ -13,7 +13,8 @@ import {
   Package,
   Layers,
   Warehouse,
-  ArrowRight
+  ArrowRight,
+  Settings
 } from "lucide-react";
 
 interface TransferenciasProps {
@@ -23,6 +24,7 @@ interface TransferenciasProps {
   preselectedAlmacenId?: string;
   onSuccess?: () => void;
   onCancel?: () => void;
+  onManageWarehouses?: () => void;
 }
 
 export default function Transferencias({
@@ -31,7 +33,8 @@ export default function Transferencias({
   preselectedSku = "",
   preselectedAlmacenId = "",
   onSuccess,
-  onCancel
+  onCancel,
+  onManageWarehouses
 }: TransferenciasProps) {
   const [sku, setSku] = useState(preselectedSku);
   const [almacenOrigenId, setAlmacenOrigenId] = useState<string>(preselectedAlmacenId);
@@ -156,14 +159,15 @@ export default function Transferencias({
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 space-y-6" id="transferencias-page">
       {/* Header */}
-      <div className="pb-4 border-b border-zinc-200 dark:border-zinc-800">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
+      <div className="pb-4 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div><h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
           <ArrowRightLeft className="w-6 h-6 text-sky-500" />
           Transferencia entre Almacenes
         </h1>
         <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
           Traspasa unidades de producto entre sucursales de forma atómica con trazabilidad completa de origen y destino.
-        </p>
+        </p></div>
+        {onManageWarehouses && <button type="button" onClick={onManageWarehouses} className="shrink-0 inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"><Settings className="w-4 h-4" />Configurar almacenes</button>}
       </div>
 
       {/* Feedback Messages */}
