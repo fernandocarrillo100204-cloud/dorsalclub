@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 86873)
-Total output lines: 7511
-
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -2259,7 +2256,2932 @@ export const firestoreService = {
         })) : [];
         return {
           id: snapshot.id,
-          folio: Str…36873 tokens truncated…a.folio,
+          folio: String(data.folio || snapshot.id),
+          fecha: toDate(data.fecha),
+          fecha_str: String(data.fecha_str || getLocalDateString(data.fecha)),
+          items: Array.isArray(data.items) ? data.items : [],
+          total_unidades: Number(data.total_unidades) || 0,
+          subtotal: Number(data.subtotal) || 0,
+          envio_cobrado_cliente: Number(data.envio_cobrado_cliente) || 0,
+          otros_cargos_cliente: Number(data.otros_cargos_cliente) || 0,
+          concepto_otros_cargos: data.concepto_otros_cargos || undefined,
+          total: Number(data.total) || 0,
+          costo_mercancia: Number(data.costo_mercancia) || 0,
+          costo_envio_venta: Number(data.costo_envio_venta) || 0,
+          otros_costos_venta: Number(data.otros_costos_venta) || 0,
+          concepto_otros_costos: data.concepto_otros_costos || undefined,
+          costos_totales: Number(data.costos_totales) || 0,
+          cliente_id: data.cliente_id || undefined,
+          cliente_nombre: String(data.cliente_nombre || "Venta sin cliente / Mostrador"),
+          cliente_tipo: data.cliente_tipo || undefined,
+          drop_id: data.drop_id || undefined,
+          drop_nombre: data.drop_nombre || undefined,
+          canal_venta: data.canal_venta || "stock",
+          canal_venta_nombre: String(data.canal_venta_nombre || "Venta directa"),
+          porcentaje_precio: Number(data.porcentaje_precio) || 0,
+          afecta_stock: data.afecta_stock !== false,
+          anticipo_porcentaje: Number(data.anticipo_porcentaje) || 0,
+          recibido: Number(data.recibido) || 0,
+          saldo: Number(data.saldo) || 0,
+          estado_pago: data.estado_pago || "pendiente",
+          estado_pedido: data.estado_pedido || undefined,
+          fecha_estimada: data.fecha_estimada || undefined,
+          comentarios_pedido: data.comentarios_pedido || undefined,
+          entregado_at: data.entregado_at ? toDate(data.entregado_at) : undefined,
+          pagos,
+          metodo_pago_inicial: String(data.metodo_pago_inicial || ""),
+          comentarios: data.comentarios || undefined,
+          ubicacion_entrega_id: data.ubicacion_entrega_id || undefined,
+          ubicacion_entrega_nombre: data.ubicacion_entrega_nombre || undefined,
+          repartidor_id: data.repartidor_id || undefined,
+          repartidor_nombre: data.repartidor_nombre || undefined,
+          creado_por: String(data.creado_por || ""),
+          creado_at: toDate(data.creado_at || data.fecha),
+          actualizado_at: toDate(data.actualizado_at || data.fecha),
+          estado: data.estado || "activo",
+          motivo_anulacion: data.motivo_anulacion || undefined,
+          anulado_at: data.anulado_at ? toDate(data.anulado_at) : undefined,
+          anulado_por: data.anulado_por || undefined,
+          en_papelera: data.en_papelera === true,
+          monto_reembolsado: Number(data.monto_reembolsado) || 0,
+          motivo_devolucion: data.motivo_devolucion || undefined,
+          devuelto_at: data.devuelto_at ? toDate(data.devuelto_at) : undefined,
+          devuelto_por: data.devuelto_por || undefined
+        } as Venta;
+      }).filter(item => item.en_papelera !== true);
+      return { items, lastDoc: selected.length ? selected[selected.length - 1] : null, hasMore };
+    }
+    const all = getLocalStorageItem<Venta[]>("ventas_maestras", []).filter(item => item.en_papelera !== true);
+    const start = typeof options.lastDoc === "number" ? options.lastDoc : 0;
+    const items = all.slice(start, start + pageSize);
+    return { items, lastDoc: start + items.length, hasMore: start + items.length < all.length };
+  },
+
+  getPedidosVenta: async (): Promise<PedidoVenta[]> => {
+    let movimientos: Array<Movimiento & { id?: string }> = [];
+    const ventasMaestras: Venta[] = [];
+
+    if (isConfigured && realDb) {
+      let cursor: any = null;
+      let moreMasters = true;
+      while (moreMasters) {
+        const page = await firestoreService.getVentasMaestrasPaginated({ pageSize: 200, lastDoc: cursor });
+        ventasMaestras.push(...page.items.filter(item => item.afecta_stock === false));
+        cursor = page.lastDoc;
+        moreMasters = page.hasMore;
+      }
+      const [salesSnap, trackingSnap] = await Promise.all([
+        getDocs(query(collection(realDb, "movimientos"), where("tipo", "==", "salida"), orderBy("fecha", "desc"), limit(500))),
+        getDocs(query(collection(realDb, "movimientos"), where("tipo", "==", "ajuste"), orderBy("fecha", "desc"), limit(250)))
+      ]);
+      movimientos = [...salesSnap.docs, ...trackingSnap.docs].map(item => ({ id: item.id, ...item.data() } as Movimiento));
+    } else {
+      movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+      ventasMaestras.push(...getLocalStorageItem<Venta[]>("ventas_maestras", []).filter(item => item.afecta_stock === false));
+    }
+
+    const masterIds = new Set(ventasMaestras.map(item => item.id));
+
+    const grupos = new Map<string, Movimiento[]>();
+    const eventos = new Map<string, Movimiento[]>();
+    movimientos.forEach(movimiento => {
+      if (movimiento.venta_relacionada_id) {
+        const actuales = eventos.get(movimiento.venta_relacionada_id) || [];
+        actuales.push(movimiento);
+        eventos.set(movimiento.venta_relacionada_id, actuales);
+        return;
+      }
+      if (!movimiento.venta_id || masterIds.has(movimiento.venta_id) || movimiento.afecta_stock !== false) return;
+      if (movimiento.canal_venta !== "bajo_pedido" && movimiento.canal_venta !== "mayoreo") return;
+      if ((movimiento.estado || "activo") === "anulado" || movimiento.en_papelera === true) return;
+      const actuales = grupos.get(movimiento.venta_id) || [];
+      actuales.push(movimiento);
+      grupos.set(movimiento.venta_id, actuales);
+    });
+
+    const toDate = (value: any): Date => {
+      if (value instanceof Date) return value;
+      if (typeof value?.toDate === "function") return value.toDate();
+      if (typeof value?.seconds === "number") return new Date(value.seconds * 1000);
+      return new Date(value || Date.now());
+    };
+
+    const legacyOrders = Array.from(grupos.entries()).map(([ventaId, partidas]) => {
+      const ordered = [...partidas].sort((a, b) => (a.venta_partida || 0) - (b.venta_partida || 0));
+      const principal = ordered[0];
+      const orderEvents = (eventos.get(ventaId) || []).sort((a, b) => toDate(a.fecha).getTime() - toDate(b.fecha).getTime());
+      const payments = orderEvents.filter(item => item.subtipo === "abono_venta");
+      const lastTracking = [...orderEvents].reverse().find(item => item.subtipo === "seguimiento_pedido");
+      const total = Number(principal.venta_total_cobrado) || ordered.reduce((sum, item) => sum + (Number(item.total_cobrado) || Number(item.total_venta) || 0), 0);
+      const initialReceived = Math.max(0, Number(principal.ingreso_reconocido) || Number(principal.venta_total_recibido) || 0);
+      const recibido = Math.min(total, initialReceived + payments.reduce((sum, item) => sum + Math.max(0, Number(item.ingreso_reconocido) || 0), 0));
+      const saldo = Math.max(0, Math.round((total - recibido + Number.EPSILON) * 100) / 100);
+      const estado = lastTracking?.pedido_estado === "entregado" || principal.pedido_estado === "entregado"
+        ? "entregado"
+        : saldo <= 0 ? "pagado" : "pedido";
+      return {
+        venta_id: ventaId,
+        es_consolidado: false,
+        folio: principal.folio,
+        cliente_id: principal.cliente_id,
+        cliente_nombre: principal.cliente_nombre || "Cliente sin nombre",
+        canal_venta: principal.canal_venta as "bajo_pedido" | "mayoreo",
+        canal_venta_nombre: principal.canal_venta_nombre || (principal.canal_venta === "mayoreo" ? "Mayoreo" : "Bajo pedido"),
+        fecha: toDate(principal.fecha),
+        total,
+        recibido,
+        saldo,
+        estado,
+        fecha_estimada: lastTracking?.pedido_fecha_estimada || principal.pedido_fecha_estimada,
+        comentarios: lastTracking?.pedido_comentarios ?? principal.pedido_comentarios ?? principal.comentarios_venta,
+        ubicacion_entrega_nombre: principal.ubicacion_entrega_nombre,
+        repartidor_nombre: principal.repartidor_nombre,
+        items: ordered.map(item => ({
+          sku: item.sku,
+          cantidad: Number(item.cantidad) || 0,
+          precio_unitario: Number(item.precio_unitario_venta) || 0,
+          total: Number(item.total_venta) || 0
+        }))
+      } satisfies PedidoVenta;
+    });
+
+    const masterOrders: PedidoVenta[] = ventasMaestras
+      .filter(item => item.estado !== "anulado" && item.estado !== "devuelto" && item.en_papelera !== true && (item.canal_venta === "bajo_pedido" || item.canal_venta === "mayoreo"))
+      .map(item => ({
+        venta_id: item.id,
+        es_consolidado: true,
+        folio: item.folio,
+        cliente_id: item.cliente_id,
+        cliente_nombre: item.cliente_nombre,
+        canal_venta: item.canal_venta as "bajo_pedido" | "mayoreo",
+        canal_venta_nombre: item.canal_venta_nombre,
+        fecha: item.fecha instanceof Date ? item.fecha : new Date((item.fecha as any).seconds * 1000),
+        total: item.total,
+        recibido: item.recibido,
+        saldo: item.saldo,
+        estado: item.estado_pedido === "entregado" ? "entregado" : item.saldo <= 0 ? "pagado" : "pedido",
+        fecha_estimada: item.fecha_estimada,
+        comentarios: item.comentarios_pedido || item.comentarios,
+        ubicacion_entrega_nombre: item.ubicacion_entrega_nombre,
+        repartidor_nombre: item.repartidor_nombre,
+        items: item.items.map(line => ({ sku: line.sku, cantidad: line.cantidad, precio_unitario: line.precio_unitario, total: line.total })),
+        pagos: item.pagos
+      }));
+
+    return [...masterOrders, ...legacyOrders].sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
+  },
+
+  registrarPagoPedido: async (ventaId: string, monto: number, metodoPago: string): Promise<void> => {
+    const cleanAmount = Math.round((Number(monto) + Number.EPSILON) * 100) / 100;
+    if (!Number.isFinite(cleanAmount) || cleanAmount <= 0) throw new Error("El pago debe ser mayor a cero.");
+    const cleanMethod = (metodoPago || "").trim();
+    if (!cleanMethod) throw new Error("Selecciona el método de pago.");
+    const user = authService.getCurrentUser();
+    const now = new Date();
+    const periodoKey = getPeriodoKey(now);
+
+    if (isConfigured && realDb) {
+      const masterRef = doc(realDb, "ventas", ventaId);
+      const masterSnap = await getDoc(masterRef);
+      if (masterSnap.exists()) {
+        const paymentRef = doc(collection(realDb, "movimientos"));
+        const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+        await runTransaction(realDb, async transaction => {
+          const currentSale = await transaction.get(masterRef);
+          const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+          if (!currentSale.exists()) throw new Error("El pedido ya no existe.");
+          const data = currentSale.data();
+          if (data.estado === "anulado" || data.estado === "devuelto" || data.en_papelera === true) throw new Error("El pedido está cancelado, devuelto o ya no está disponible.");
+          const total = Math.max(0, Number(data.total) || 0);
+          const currentReceived = Math.max(0, Number(data.recibido) || 0);
+          const currentBalance = Math.max(0, Math.round((total - currentReceived + Number.EPSILON) * 100) / 100);
+          if (currentBalance <= 0) throw new Error("Este pedido ya está pagado.");
+          if (cleanAmount > currentBalance) throw new Error(`El pago no puede superar el saldo de $${currentBalance.toFixed(2)}.`);
+          const timestamp = Timestamp.now();
+          const nuevoRecibido = Math.round((currentReceived + cleanAmount + Number.EPSILON) * 100) / 100;
+          const nuevoSaldo = Math.max(0, Math.round((total - nuevoRecibido + Number.EPSILON) * 100) / 100);
+          const payment: PagoVenta = { id: paymentRef.id, monto: cleanAmount, metodo_pago: cleanMethod, fecha: timestamp as any, usuario: user?.email || "Sistema", estado: "activo" };
+          const pagos = Array.isArray(data.pagos) ? [...data.pagos, payment] : [payment];
+          transaction.update(masterRef, {
+            pagos,
+            recibido: nuevoRecibido,
+            saldo: nuevoSaldo,
+            estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo",
+            estado_pedido: nuevoSaldo === 0 ? "pagado" : "pedido",
+            actualizado_at: timestamp
+          });
+          transaction.set(paymentRef, {
+            folio: `Abono-${data.folio || ventaId}`,
+            venta_relacionada_id: ventaId,
+            subtipo: "abono_venta",
+            sku: "ABONO",
+            almacen_id: "bajo_pedido",
+            tipo: "salida",
+            cantidad: 1,
+            referencia: `Pago de ${data.folio || ventaId}`,
+            usuario: user?.email || "Sistema",
+            fecha: timestamp,
+            estado: "activo",
+            cliente_id: data.cliente_id || "",
+            cliente_nombre: data.cliente_nombre || "Cliente",
+            canal_venta: data.canal_venta,
+            canal_venta_nombre: data.canal_venta_nombre,
+            afecta_stock: false,
+            venta_total_recibido: cleanAmount,
+            venta_saldo_pendiente: nuevoSaldo,
+            ingreso_reconocido: cleanAmount,
+            venta_subtotal: Number(data.subtotal) || 0,
+            venta_total_cobrado: total,
+            envio_cobrado_cliente: Number(data.envio_cobrado_cliente) || 0,
+            otros_cargos_cliente: Number(data.otros_cargos_cliente) || 0,
+            total_venta: 0,
+            total_cobrado: cleanAmount,
+            metodo_pago: cleanMethod,
+            estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo"
+          });
+          if (periodRef && periodoKey) transaction.set(periodRef, computeNewPeriodIndexData(periodSnap?.exists() ? periodSnap.data() : null, periodoKey, 1, 0, 0), { merge: true });
+        });
+        clearFinanzasCache();
+        clearPeriodosFinancierosCache();
+        return;
+      }
+      const saleQuery = query(collection(realDb, "movimientos"), where("venta_id", "==", ventaId));
+      const paymentsQuery = query(collection(realDb, "movimientos"), where("venta_relacionada_id", "==", ventaId));
+      const [saleSnap, paymentsSnap] = await Promise.all([getDocs(saleQuery), getDocs(paymentsQuery)]);
+      const saleRefs = saleSnap.docs.map(item => item.ref);
+      const paymentRefs = paymentsSnap.docs.filter(item => item.data().subtipo === "abono_venta").map(item => item.ref);
+      if (saleRefs.length === 0) throw new Error("El pedido ya no existe.");
+      const paymentRef = doc(collection(realDb, "movimientos"));
+      const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+
+      await runTransaction(realDb, async transaction => {
+        const currentSnaps = [];
+        for (const ref of saleRefs) currentSnaps.push(await transaction.get(ref));
+        const currentPayments = [];
+        for (const ref of paymentRefs) currentPayments.push(await transaction.get(ref));
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+        const active = currentSnaps.filter(item => item.exists() && (item.data().estado || "activo") !== "anulado");
+        if (active.length === 0) throw new Error("El pedido está cancelado o ya no está disponible.");
+        const principal = active.find(item => item.data().venta_partida === 1) || active[0];
+        const data = principal.data();
+        const total = Math.max(0, Number(data.venta_total_cobrado) || 0);
+        const initialReceived = Math.max(0, Number(data.ingreso_reconocido) || Number(data.venta_total_recibido) || 0);
+        const previousPayments = currentPayments.reduce((sum, item) => sum + (item.exists() ? Math.max(0, Number(item.data().ingreso_reconocido) || 0) : 0), 0);
+        const saldoActual = Math.max(0, Math.round((total - initialReceived - previousPayments + Number.EPSILON) * 100) / 100);
+        if (saldoActual <= 0) throw new Error("Este pedido ya está pagado.");
+        if (cleanAmount > saldoActual) throw new Error(`El pago no puede superar el saldo de $${saldoActual.toFixed(2)}.`);
+        const nuevoSaldo = Math.max(0, Math.round((saldoActual - cleanAmount + Number.EPSILON) * 100) / 100);
+        const timestamp = Timestamp.now();
+
+        transaction.set(paymentRef, {
+          folio: `Abono-${data.folio || ventaId}`,
+          venta_relacionada_id: ventaId,
+          subtipo: "abono_venta",
+          sku: "ABONO",
+          almacen_id: "bajo_pedido",
+          tipo: "salida",
+          cantidad: 1,
+          referencia: `Pago de ${data.folio || ventaId}`,
+          usuario: user?.email || "Sistema",
+          fecha: timestamp,
+          estado: "activo",
+          cliente_id: data.cliente_id || "",
+          cliente_nombre: data.cliente_nombre || "Cliente",
+          canal_venta: data.canal_venta,
+          canal_venta_nombre: data.canal_venta_nombre,
+          afecta_stock: false,
+          venta_total_recibido: cleanAmount,
+          venta_saldo_pendiente: nuevoSaldo,
+          ingreso_reconocido: cleanAmount,
+          venta_subtotal: Number(data.venta_subtotal) || 0,
+          venta_total_cobrado: total,
+          envio_cobrado_cliente: Number(data.envio_cobrado_cliente) || 0,
+          otros_cargos_cliente: Number(data.otros_cargos_cliente) || 0,
+          metodo_pago: cleanMethod,
+          total_venta: 0,
+          total_cobrado: cleanAmount,
+          estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo"
+        });
+
+        if (periodRef && periodoKey) {
+          transaction.set(periodRef, computeNewPeriodIndexData(periodSnap?.exists() ? periodSnap.data() : null, periodoKey, 1, 0, 0), { merge: true });
+        }
+      });
+    } else {
+      const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+      const masterSales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+      const masterIndex = masterSales.findIndex(item => item.id === ventaId);
+      if (masterIndex >= 0) {
+        const sale = masterSales[masterIndex];
+        if (sale.estado === "anulado" || sale.estado === "devuelto" || sale.en_papelera) throw new Error("El pedido está cancelado, devuelto o ya no está disponible.");
+        if (cleanAmount > sale.saldo) throw new Error(`El pago no puede superar el saldo de $${sale.saldo.toFixed(2)}.`);
+        const paymentId = `abono_${Math.random().toString(36).slice(2, 11)}`;
+        const nuevoRecibido = Math.round((sale.recibido + cleanAmount + Number.EPSILON) * 100) / 100;
+        const nuevoSaldo = Math.max(0, Math.round((sale.total - nuevoRecibido + Number.EPSILON) * 100) / 100);
+        masterSales[masterIndex] = { ...sale, recibido: nuevoRecibido, saldo: nuevoSaldo, estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo", estado_pedido: nuevoSaldo === 0 ? "pagado" : "pedido", actualizado_at: now, pagos: [...sale.pagos, { id: paymentId, monto: cleanAmount, metodo_pago: cleanMethod, fecha: now, usuario: user?.email || "Sistema", estado: "activo" }] };
+        movimientos.push({ id: paymentId, folio: `Abono-${sale.folio}`, venta_relacionada_id: ventaId, subtipo: "abono_venta", sku: "ABONO", almacen_id: "bajo_pedido", tipo: "salida", cantidad: 1, referencia: `Pago de ${sale.folio}`, usuario: user?.email || "Sistema", fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, venta_total_recibido: cleanAmount, venta_saldo_pendiente: nuevoSaldo, ingreso_reconocido: cleanAmount, venta_subtotal: sale.subtotal, venta_total_cobrado: sale.total, envio_cobrado_cliente: sale.envio_cobrado_cliente, otros_cargos_cliente: sale.otros_cargos_cliente, total_venta: 0, total_cobrado: cleanAmount, estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo" });
+        setLocalStorageItem("ventas_maestras", masterSales);
+        setLocalStorageItem("movimientos", movimientos);
+        notifyListeners("movimientos", movimientos);
+        clearFinanzasCache(); clearPeriodosFinancierosCache();
+        return;
+      }
+      const targets = movimientos.filter(item => item.venta_id === ventaId && (item.estado || "activo") !== "anulado");
+      if (targets.length === 0) throw new Error("El pedido ya no existe.");
+      const principal = targets.find(item => item.venta_partida === 1) || targets[0];
+      const total = Math.max(0, Number(principal.venta_total_cobrado) || 0);
+      const initialReceived = Math.max(0, Number(principal.ingreso_reconocido) || Number(principal.venta_total_recibido) || 0);
+      const previousPayments = movimientos.filter(item => item.venta_relacionada_id === ventaId && item.subtipo === "abono_venta").reduce((sum, item) => sum + Math.max(0, Number(item.ingreso_reconocido) || 0), 0);
+      const saldoActual = Math.max(0, Math.round((total - initialReceived - previousPayments + Number.EPSILON) * 100) / 100);
+      if (saldoActual <= 0) throw new Error("Este pedido ya está pagado.");
+      if (cleanAmount > saldoActual) throw new Error(`El pago no puede superar el saldo de $${saldoActual.toFixed(2)}.`);
+      const nuevoSaldo = Math.max(0, Math.round((saldoActual - cleanAmount + Number.EPSILON) * 100) / 100);
+      movimientos.push({
+        id: `abono_${Math.random().toString(36).slice(2, 11)}`,
+        folio: `Abono-${principal.folio}`,
+        venta_relacionada_id: ventaId,
+        subtipo: "abono_venta",
+        sku: "ABONO",
+        almacen_id: "bajo_pedido",
+        tipo: "salida",
+        cantidad: 1,
+        referencia: `Pago de ${principal.folio}`,
+        usuario: user?.email || "Sistema",
+        fecha: now,
+        estado: "activo",
+        cliente_id: principal.cliente_id,
+        cliente_nombre: principal.cliente_nombre,
+        canal_venta: principal.canal_venta,
+        canal_venta_nombre: principal.canal_venta_nombre,
+        afecta_stock: false,
+        venta_total_recibido: cleanAmount,
+        venta_saldo_pendiente: nuevoSaldo,
+        ingreso_reconocido: cleanAmount,
+        venta_subtotal: Number(principal.venta_subtotal) || 0,
+        venta_total_cobrado: total,
+        envio_cobrado_cliente: Number(principal.envio_cobrado_cliente) || 0,
+        otros_cargos_cliente: Number(principal.otros_cargos_cliente) || 0,
+        total_venta: 0,
+        total_cobrado: cleanAmount,
+        estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo"
+      });
+      setLocalStorageItem("movimientos", movimientos);
+      notifyListeners("movimientos", movimientos);
+    }
+    clearFinanzasCache();
+    clearPeriodosFinancierosCache();
+  },
+
+  actualizarSeguimientoPedido: async (ventaId: string, data: { fecha_estimada?: string; comentarios?: string; marcar_entregado?: boolean }): Promise<void> => {
+    const now = new Date();
+    if (isConfigured && realDb) {
+      const masterRef = doc(realDb, "ventas", ventaId);
+      const masterSnap = await getDoc(masterRef);
+      if (masterSnap.exists()) {
+        await runTransaction(realDb, async transaction => {
+          const current = await transaction.get(masterRef);
+          if (!current.exists()) throw new Error("El pedido ya no existe.");
+          const currentData = current.data();
+          if (currentData.estado === "anulado" || currentData.estado === "devuelto" || currentData.en_papelera === true) {
+            throw new Error("El pedido está cancelado, devuelto o ya no está disponible.");
+          }
+          const saldo = Math.max(0, Number(currentData.saldo) || 0);
+          if (data.marcar_entregado && saldo > 0.009) {
+            throw new Error("Liquida el saldo antes de marcar el pedido como entregado.");
+          }
+          const changes: Record<string, unknown> = { actualizado_at: Timestamp.now() };
+          if (data.fecha_estimada !== undefined) changes.fecha_estimada = data.fecha_estimada;
+          if (data.comentarios !== undefined) changes.comentarios_pedido = data.comentarios.trim();
+          if (data.marcar_entregado) {
+            changes.estado_pedido = "entregado";
+            changes.entregado_at = Timestamp.now();
+          }
+          transaction.update(masterRef, changes);
+        });
+        return;
+      }
+      const [saleSnap, eventSnap] = await Promise.all([
+        getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", ventaId))),
+        getDocs(query(collection(realDb, "movimientos"), where("venta_relacionada_id", "==", ventaId)))
+      ]);
+      if (saleSnap.empty) throw new Error("El pedido ya no existe.");
+      const principal = saleSnap.docs.find(item => item.data().venta_partida === 1) || saleSnap.docs[0];
+      const total = Math.max(0, Number(principal.data().venta_total_cobrado) || 0);
+      const initialReceived = Math.max(0, Number(principal.data().ingreso_reconocido) || Number(principal.data().venta_total_recibido) || 0);
+      const payments = eventSnap.docs.filter(item => item.data().subtipo === "abono_venta").reduce((sum, item) => sum + Math.max(0, Number(item.data().ingreso_reconocido) || 0), 0);
+      if (data.marcar_entregado && total - initialReceived - payments > 0.009) throw new Error("Liquida el saldo antes de marcar el pedido como entregado.");
+      await addDoc(collection(realDb, "movimientos"), {
+        folio: `Seguimiento-${principal.data().folio || ventaId}`,
+        venta_relacionada_id: ventaId,
+        subtipo: "seguimiento_pedido",
+        sku: "SEGUIMIENTO",
+        almacen_id: "bajo_pedido",
+        tipo: "ajuste",
+        cantidad: 1,
+        referencia: `Seguimiento de ${principal.data().folio || ventaId}`,
+        usuario: authService.getCurrentUser()?.email || "Sistema",
+        fecha: Timestamp.now(),
+        estado: "activo",
+        ...(data.fecha_estimada !== undefined ? { pedido_fecha_estimada: data.fecha_estimada } : {}),
+        ...(data.comentarios !== undefined ? { pedido_comentarios: data.comentarios.trim() } : {}),
+        ...(data.marcar_entregado ? { pedido_estado: "entregado", pedido_entregado_at: Timestamp.now() } : {})
+      });
+      return;
+    }
+    const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const masterSales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+    const masterIndex = masterSales.findIndex(item => item.id === ventaId);
+    if (masterIndex >= 0) {
+      const sale = masterSales[masterIndex];
+      if (sale.estado === "anulado" || sale.estado === "devuelto" || sale.en_papelera) throw new Error("El pedido está cancelado, devuelto o ya no está disponible.");
+      if (data.marcar_entregado && sale.saldo > 0.009) throw new Error("Liquida el saldo antes de marcar el pedido como entregado.");
+      masterSales[masterIndex] = {
+        ...sale,
+        ...(data.fecha_estimada !== undefined ? { fecha_estimada: data.fecha_estimada } : {}),
+        ...(data.comentarios !== undefined ? { comentarios_pedido: data.comentarios.trim() } : {}),
+        ...(data.marcar_entregado ? { estado_pedido: "entregado" as const, entregado_at: now } : {}),
+        actualizado_at: now
+      };
+      setLocalStorageItem("ventas_maestras", masterSales);
+      return;
+    }
+    const targets = movimientos.filter(item => item.venta_id === ventaId);
+    if (targets.length === 0) throw new Error("El pedido ya no existe.");
+    const principal = targets.find(item => item.venta_partida === 1) || targets[0];
+    const total = Math.max(0, Number(principal.venta_total_cobrado) || 0);
+    const initialReceived = Math.max(0, Number(principal.ingreso_reconocido) || Number(principal.venta_total_recibido) || 0);
+    const payments = movimientos.filter(item => item.venta_relacionada_id === ventaId && item.subtipo === "abono_venta").reduce((sum, item) => sum + Math.max(0, Number(item.ingreso_reconocido) || 0), 0);
+    if (data.marcar_entregado && total - initialReceived - payments > 0.009) throw new Error("Liquida el saldo antes de marcar el pedido como entregado.");
+    movimientos.push({
+      id: `seguimiento_${Math.random().toString(36).slice(2, 11)}`,
+      folio: `Seguimiento-${principal.folio}`,
+      venta_relacionada_id: ventaId,
+      subtipo: "seguimiento_pedido",
+      sku: "SEGUIMIENTO",
+      almacen_id: "bajo_pedido",
+      tipo: "ajuste",
+      cantidad: 1,
+      referencia: `Seguimiento de ${principal.folio}`,
+      usuario: authService.getCurrentUser()?.email || "Sistema",
+      fecha: now,
+      estado: "activo",
+      ...(data.fecha_estimada !== undefined ? { pedido_fecha_estimada: data.fecha_estimada } : {}),
+      ...(data.comentarios !== undefined ? { pedido_comentarios: data.comentarios.trim() } : {}),
+      ...(data.marcar_entregado ? { pedido_estado: "entregado", pedido_entregado_at: now } : {})
+    });
+    setLocalStorageItem("movimientos", movimientos);
+    notifyListeners("movimientos", movimientos);
+  },
+
+  devolverVentaCompleta: async (ventaId: string, motivo: string): Promise<void> => {
+    const cleanReason = motivo.trim();
+    if (!cleanReason) throw new Error("Escribe el motivo de la devolución.");
+    const userEmail = authService.getCurrentUser()?.email || "Sistema";
+    const now = new Date();
+    const periodoKey = getPeriodoKey(now);
+
+    if (isConfigured && realDb) {
+      const saleRef = doc(realDb, "ventas", ventaId);
+      const refundRef = doc(collection(realDb, "movimientos"));
+      const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+      await runTransaction(realDb, async transaction => {
+        const saleSnap = await transaction.get(saleRef);
+        if (!saleSnap.exists()) throw new Error("La venta no existe o es anterior al historial consolidado.");
+        const sale = saleSnap.data();
+        if (sale.estado === "anulado") throw new Error("Una venta anulada no se puede devolver.");
+        if (sale.estado === "devuelto") throw new Error("Esta venta ya fue devuelta.");
+        if (sale.en_papelera === true) throw new Error("Restaura la venta antes de devolverla.");
+        const items = Array.isArray(sale.items) ? sale.items : [];
+        if (items.length === 0) throw new Error("La venta no contiene partidas válidas.");
+
+        const stockEntries = sale.afecta_stock !== false ? items.map((item: any) => {
+          const sku = String(item.sku || "").trim().toUpperCase();
+          const warehouseId = String(item.almacen_id || "").trim();
+          const key = `${sku}_${warehouseId}`;
+          return { sku, warehouseId, key, quantity: Number(item.cantidad) || 0, ref: doc(realDb!, "stock", key) };
+        }) : [];
+        const summaryEntries = items.map((item: any) => {
+          const sku = String(item.sku || "").trim().toUpperCase();
+          const warehouseId = String(item.almacen_id || "").trim();
+          const key = `${String(sale.fecha_str || getLocalDateString(sale.fecha))}_${sku}_${warehouseId}`;
+          return { quantity: Number(item.cantidad) || 0, ref: doc(realDb!, "resumen_ventas", key) };
+        });
+        const stockSnaps: any[] = [];
+        for (const entry of stockEntries) stockSnaps.push(await transaction.get(entry.ref));
+        const summarySnaps: any[] = [];
+        for (const entry of summaryEntries) summarySnaps.push(await transaction.get(entry.ref));
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+        const timestamp = Timestamp.now();
+
+        stockEntries.forEach((entry: any, index: number) => {
+          const current = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
+          transaction.set(entry.ref, { id: entry.key, sku: entry.sku, almacen_id: entry.warehouseId, cantidad: current + entry.quantity, actualizado: timestamp }, { merge: true });
+        });
+        summaryEntries.forEach((entry: any, index: number) => {
+          if (!summarySnaps[index].exists()) return;
+          const current = Number(summarySnaps[index].data()?.cantidad) || 0;
+          const transactions = Number(summarySnaps[index].data()?.total_transacciones) || 0;
+          transaction.set(entry.ref, { cantidad: Math.max(0, current - entry.quantity), total_transacciones: Math.max(0, transactions - 1), actualizado: timestamp }, { merge: true });
+        });
+
+        const refundAmount = Math.max(0, Number(sale.recibido) || 0);
+        transaction.update(saleRef, {
+          estado: "devuelto",
+          monto_reembolsado: refundAmount,
+          motivo_devolucion: cleanReason,
+          devuelto_at: timestamp,
+          devuelto_por: userEmail,
+          saldo: 0,
+          actualizado_at: timestamp
+        });
+        if (refundAmount > 0) {
+          transaction.set(refundRef, {
+            folio: `Reembolso-${sale.folio || ventaId}`,
+            venta_relacionada_id: ventaId,
+            subtipo: "reembolso_venta",
+            sku: "REEMBOLSO",
+            almacen_id: "devoluciones",
+            tipo: "salida",
+            cantidad: 1,
+            unidades_devueltas: Number(sale.total_unidades) || 0,
+            referencia: `Devolución de ${sale.folio || ventaId}: ${cleanReason}`,
+            usuario: userEmail,
+            fecha: timestamp,
+            estado: "activo",
+            cliente_id: sale.cliente_id || "",
+            cliente_nombre: sale.cliente_nombre || "Cliente",
+            canal_venta: sale.canal_venta,
+            canal_venta_nombre: sale.canal_venta_nombre,
+            afecta_stock: false,
+            venta_total_recibido: -refundAmount,
+            ingreso_reconocido: -refundAmount,
+            venta_subtotal: Number(sale.subtotal) || 0,
+            venta_total_cobrado: Number(sale.total) || 0,
+            envio_cobrado_cliente: Number(sale.envio_cobrado_cliente) || 0,
+            otros_cargos_cliente: Number(sale.otros_cargos_cliente) || 0,
+            total_venta: -refundAmount,
+            total_cobrado: -refundAmount,
+            metodo_pago: sale.metodo_pago_inicial || "Método original"
+          });
+          if (periodRef && periodoKey) transaction.set(periodRef, computeNewPeriodIndexData(periodSnap?.exists() ? periodSnap.data() : null, periodoKey, 1, 0, 0), { merge: true });
+        }
+      });
+      clearFinanzasCache(); clearPeriodosFinancierosCache();
+      return;
+    }
+
+    const sales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+    const index = sales.findIndex(item => item.id === ventaId);
+    if (index === -1) throw new Error("La venta no existe o es anterior al historial consolidado.");
+    const sale = sales[index];
+    if (sale.estado === "anulado" || sale.estado === "devuelto") throw new Error("Esta venta no está disponible para devolución.");
+    const stock = getLocalStorageItem<Record<string, StockItem>>("stock", {});
+    const summaries = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
+    if (sale.afecta_stock) sale.items.forEach(item => {
+      const key = `${item.sku}_${item.almacen_id}`;
+      stock[key] = { ...(stock[key] || { id: key, sku: item.sku, almacen_id: item.almacen_id }), cantidad: (stock[key]?.cantidad || 0) + item.cantidad, actualizado: now } as StockItem;
+    });
+    sale.items.forEach(item => {
+      const key = `${sale.fecha_str}_${item.sku}_${item.almacen_id}`;
+      if (summaries[key]) summaries[key] = { ...summaries[key], cantidad: Math.max(0, summaries[key].cantidad - item.cantidad), total_transacciones: Math.max(0, summaries[key].total_transacciones - 1), actualizado: now };
+    });
+    sales[index] = { ...sale, estado: "devuelto", monto_reembolsado: sale.recibido, motivo_devolucion: cleanReason, devuelto_at: now, devuelto_por: userEmail, saldo: 0, actualizado_at: now };
+    const movements = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    if (sale.recibido > 0) movements.push({ id: `refund_${Math.random().toString(36).slice(2, 11)}`, folio: `Reembolso-${sale.folio}`, venta_relacionada_id: ventaId, subtipo: "reembolso_venta", sku: "REEMBOLSO", almacen_id: "devoluciones", tipo: "salida", cantidad: 1, unidades_devueltas: sale.total_unidades, referencia: `Devolución de ${sale.folio}: ${cleanReason}`, usuario: userEmail, fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, venta_total_recibido: -sale.recibido, ingreso_reconocido: -sale.recibido, venta_subtotal: sale.subtotal, venta_total_cobrado: sale.total, envio_cobrado_cliente: sale.envio_cobrado_cliente, otros_cargos_cliente: sale.otros_cargos_cliente, total_venta: -sale.recibido, total_cobrado: -sale.recibido, metodo_pago: sale.metodo_pago_inicial });
+    setLocalStorageItem("ventas_maestras", sales); setLocalStorageItem("stock", stock); setLocalStorageItem("resumen_ventas", summaries); setLocalStorageItem("movimientos", movements);
+    notifyListeners("stock", stock); notifyListeners("movimientos", movements); clearFinanzasCache(); clearPeriodosFinancierosCache();
+  },
+
+  ensureProductExists: async (sku: string, nombre: string, categoria = "General", stockMinimo = 5, unidad = "uds"): Promise<Producto> => {
+    const cleanSku = sku.trim().toUpperCase();
+    const productData: Producto = { sku: cleanSku, nombre, categoria, stock_minimo: stockMinimo, unidad };
+    if (isConfigured && realDb) {
+      const docRef = doc(realDb, "productos", cleanSku);
+      const docSnap = await getDoc(docRef);
+      if (!docSnap.exists()) {
+        await setDoc(docRef, { nombre, categoria, stock_minimo: stockMinimo, unidad });
+      }
+      return productData;
+    }
+    const prods = getLocalStorageItem<Producto[]>("productos", []);
+    const existing = prods.find(p => p.sku === cleanSku);
+    if (!existing) {
+      prods.push(productData);
+      setLocalStorageItem("productos", prods);
+    }
+    return existing || productData;
+  },
+
+  // --- ATOMIC REAL-TIME STOCK ---
+  getStockRealtime: (onUpdate: (stock: StockItem[]) => void, onError?: (error: any) => void): (() => void) => {
+    if (isConfigured && realDb) {
+      return onSnapshot(
+        collection(realDb, "stock"),
+        (snap) => {
+          const list: StockItem[] = [];
+          snap.forEach(d => {
+            const data = d.data();
+            list.push({
+              id: d.id,
+              sku: data.sku,
+              almacen_id: data.almacen_id,
+              cantidad: Number(data.cantidad) || 0,
+              actualizado: data.actualizado ? (data.actualizado as Timestamp).toDate() : new Date()
+            });
+          });
+          onUpdate(list);
+        },
+        (error) => {
+          console.error("Error en listener de stock:", error);
+          onUpdate([]);
+          if (onError) onError(error);
+        }
+      );
+    }
+
+    const update = () => {
+      const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
+      onUpdate(Object.values(stockMap));
+    };
+
+    update();
+    listeners.stock.push(update);
+    return () => {
+      listeners.stock = listeners.stock.filter(cb => cb !== update);
+    };
+  },
+
+  getFolioPrefix: (tipo: Movimiento["tipo"]): string => {
+    switch (tipo) {
+      case "entrada":
+        return "Entrada-";
+      case "salida":
+        return "Salida-";
+      case "transferencia":
+        return "Transferencia-";
+      case "ajuste":
+        return "Ajuste-";
+      default:
+        return "Movimiento-";
+    }
+  },
+
+  getNextLocalFolio: (tipo: Movimiento["tipo"]): string => {
+    const prefix = firestoreService.getFolioPrefix(tipo);
+    const counters = getLocalStorageItem<Record<string, number>>("contadores_movimientos", {
+      entrada: 0,
+      salida: 0,
+      transferencia: 0,
+      ajuste: 0
+    });
+
+    const currentCount = counters[tipo] || 0;
+    const nextNumber = currentCount + 1;
+    counters[tipo] = nextNumber;
+    setLocalStorageItem("contadores_movimientos", counters);
+
+    return `${prefix}${nextNumber}`;
+  },
+
+  // --- REGISTRO ATÓMICO DE MOVIMIENTO VÍA RUNTRANSACTION ---
+  registerMovimientoTransaction: async (mov: Omit<Movimiento, "fecha" | "usuario">): Promise<{ id: string; folio: string }> => {
+    const user = authService.getCurrentUser();
+    const usuarioEmail = user ? user.email : "sistema@empresa.com";
+    const prefix = firestoreService.getFolioPrefix(mov.tipo);
+    const cleanSku = mov.sku.trim().toUpperCase();
+    const originAlmId = mov.almacen_id.trim();
+    const destAlmId = mov.almacen_destino_id ? mov.almacen_destino_id.trim() : undefined;
+    const moveQty = Number(mov.cantidad);
+
+    if (isNaN(moveQty) || moveQty <= 0) {
+      throw new Error("La cantidad debe ser un número positivo mayor a cero.");
+    }
+
+    if (!cleanSku) {
+      throw new Error("El SKU del producto es obligatorio.");
+    }
+
+    if (!originAlmId) {
+      throw new Error("El almacén de origen es obligatorio.");
+    }
+
+    // Fecha local YYYY-MM-DD para resúmenes de ventas
+    const now = new Date();
+    const todayStr = getLocalDateString(now);
+
+    if (isConfigured && realDb) {
+      // EN MODO FIREBASE: Ejecución 100% transaccional en la nube.
+      // Si falla, el error se propaga hacia arriba y NUNCA se escribe en localStorage.
+      const counterDocRef = doc(realDb, "contadores", mov.tipo);
+      const movRef = doc(collection(realDb, "movimientos"));
+      const docId = movRef.id;
+
+      const originStockKey = `${cleanSku}_${originAlmId}`;
+      const originStockRef = doc(realDb, "stock", originStockKey);
+
+      const destStockKey = destAlmId ? `${cleanSku}_${destAlmId}` : null;
+      const destStockRef = destStockKey ? doc(realDb, "stock", destStockKey) : null;
+
+      // Resumen de ventas para salidas
+      const summaryKey = `${todayStr}_${cleanSku}_${originAlmId}`;
+      const resumenDocRef = mov.tipo === "salida" ? doc(realDb, "resumen_ventas", summaryKey) : null;
+
+      // Índice de periodos financieros para ventas
+      const periodoKey = mov.tipo === "salida" ? getPeriodoKey(now) : null;
+      const periodRef = (mov.tipo === "salida" && periodoKey) ? doc(realDb, "periodos_financieros", periodoKey) : null;
+
+      let generatedFolio = "";
+
+      await runTransaction(realDb, async (transaction) => {
+        // 1. Lectura del contador de folios
+        const counterSnap = await transaction.get(counterDocRef);
+        let nextNumber = 1;
+        if (counterSnap.exists()) {
+          const data = counterSnap.data();
+          if (typeof data?.ultimo_consecutivo === "number") {
+            nextNumber = data.ultimo_consecutivo + 1;
+          }
+        }
+        generatedFolio = `${prefix}${nextNumber}`;
+
+        // 2. Lectura del stock de origen
+        const originStockSnap = await transaction.get(originStockRef);
+        const currentOriginQty = originStockSnap.exists() ? (Number(originStockSnap.data()?.cantidad) || 0) : 0;
+
+        let newOriginQty = currentOriginQty;
+        let newDestQty = 0;
+
+        // 3. Procesamiento y validación de stock
+        if (mov.tipo === "entrada") {
+          newOriginQty = currentOriginQty + moveQty;
+        } else if (mov.tipo === "salida") {
+          if (currentOriginQty < moveQty) {
+            throw new Error(`Stock insuficiente en el almacén seleccionado. Stock disponible: ${currentOriginQty} uds, solicitado: ${moveQty} uds.`);
+          }
+          newOriginQty = currentOriginQty - moveQty;
+        } else if (mov.tipo === "transferencia") {
+          if (!destStockRef || !destAlmId) {
+            throw new Error("El almacén de destino es obligatorio para realizar una transferencia.");
+          }
+          if (originAlmId === destAlmId) {
+            throw new Error("El almacén de origen y destino no pueden ser iguales.");
+          }
+          if (currentOriginQty < moveQty) {
+            throw new Error(`Stock insuficiente en el almacén de origen. Stock disponible: ${currentOriginQty} uds, solicitado: ${moveQty} uds.`);
+          }
+
+          const destStockSnap = await transaction.get(destStockRef);
+          const currentDestQty = destStockSnap.exists() ? (Number(destStockSnap.data()?.cantidad) || 0) : 0;
+
+          newOriginQty = currentOriginQty - moveQty;
+          newDestQty = currentDestQty + moveQty;
+
+          // Escritura de stock en destino
+          transaction.set(destStockRef, {
+            id: destStockKey,
+            sku: cleanSku,
+            almacen_id: destAlmId,
+            cantidad: newDestQty,
+            actualizado: Timestamp.now()
+          }, { merge: true });
+        }
+
+        // 4. Lectura de resumen de ventas e índice de periodos si es salida
+        let prevResumenQty = 0;
+        let prevResumenTotal = 0;
+        if (mov.tipo === "salida" && resumenDocRef) {
+          const resumenSnap = await transaction.get(resumenDocRef);
+          prevResumenQty = resumenSnap.exists() ? (Number(resumenSnap.data()?.cantidad) || 0) : 0;
+          prevResumenTotal = resumenSnap.exists() ? (Number(resumenSnap.data()?.total_transacciones) || 0) : 0;
+        }
+
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+
+        if (mov.tipo === "salida" && resumenDocRef) {
+          transaction.set(resumenDocRef, {
+            id: summaryKey,
+            fecha_str: todayStr,
+            fecha: Timestamp.now(),
+            sku: cleanSku,
+            almacen_id: originAlmId,
+            cantidad: prevResumenQty + moveQty,
+            total_transacciones: prevResumenTotal + 1,
+            actualizado: Timestamp.now()
+          }, { merge: true });
+        }
+
+        // 5. Escritura de stock en origen
+        transaction.set(originStockRef, {
+          id: originStockKey,
+          sku: cleanSku,
+          almacen_id: originAlmId,
+          cantidad: newOriginQty,
+          actualizado: Timestamp.now()
+        }, { merge: true });
+
+        // 6. Actualización del contador secuencial
+        transaction.set(counterDocRef, {
+          tipo: mov.tipo,
+          ultimo_consecutivo: nextNumber,
+          actualizado: Timestamp.now()
+        }, { merge: true });
+
+        // 7. Escritura del documento de movimiento
+        transaction.set(movRef, {
+          folio: generatedFolio,
+          sku: cleanSku,
+          almacen_id: originAlmId,
+          tipo: mov.tipo,
+          cantidad: moveQty,
+          referencia: mov.referencia,
+          usuario: usuarioEmail,
+          fecha: Timestamp.now(),
+          estado: "activo",
+          ...(mov.compra_id ? { compra_id: mov.compra_id } : {}),
+          ...(mov.lote_id ? { lote_id: mov.lote_id } : {}),
+          ...(typeof mov.costo_unitario === "number" ? { costo_unitario: mov.costo_unitario } : {}),
+          ...(mov.cliente_id ? { cliente_id: mov.cliente_id } : {}),
+          ...(mov.cliente_nombre ? { cliente_nombre: mov.cliente_nombre } : {}),
+          ...(mov.cliente_tipo ? { cliente_tipo: mov.cliente_tipo } : {}),
+          ...(typeof mov.precio_unitario_venta === "number" ? { precio_unitario_venta: mov.precio_unitario_venta } : {}),
+          ...(typeof mov.total_venta === "number" ? { total_venta: mov.total_venta } : {}),
+          ...(typeof mov.envio_cobrado_cliente === "number" ? { envio_cobrado_cliente: mov.envio_cobrado_cliente } : {}),
+          ...(typeof mov.otros_cargos_cliente === "number" ? { otros_cargos_cliente: mov.otros_cargos_cliente } : {}),
+          ...(mov.concepto_otros_cargos ? { concepto_otros_cargos: mov.concepto_otros_cargos } : {}),
+          ...(typeof mov.costo_envio_venta === "number" ? { costo_envio_venta: mov.costo_envio_venta } : {}),
+          ...(typeof mov.otros_costos_venta === "number" ? { otros_costos_venta: mov.otros_costos_venta } : {}),
+          ...(mov.concepto_otros_costos ? { concepto_otros_costos: mov.concepto_otros_costos } : {}),
+          ...(typeof mov.total_cobrado === "number" ? { total_cobrado: mov.total_cobrado } : {}),
+          ...(typeof mov.total_costos_venta === "number" ? { total_costos_venta: mov.total_costos_venta } : {}),
+          ...(mov.comentarios_venta ? { comentarios_venta: mov.comentarios_venta } : {}),
+          ...(destAlmId ? { almacen_destino_id: destAlmId } : {})
+        });
+
+        // 8. Actualización atómica del índice de periodos financieros si es venta
+        if (periodRef && periodoKey) {
+          const updatedPeriod = computeNewPeriodIndexData(
+            periodSnap?.exists() ? periodSnap.data() : null,
+            periodoKey,
+            1,
+            0,
+            0
+          );
+          transaction.set(periodRef, updatedPeriod, { merge: true });
+        }
+      });
+
+      clearFinanzasCache();
+      clearPeriodosFinancierosCache();
+      return { id: docId, folio: generatedFolio };
+    }
+
+    // --- MODO EMULADOR LOCAL (SOLO CUANDO FIREBASE NO ESTÁ CONFIGURADO) ---
+    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
+    const originKey = `${cleanSku}_${originAlmId}`;
+    const currentOrigin = stockMap[originKey]?.cantidad || 0;
+
+    if (mov.tipo === "salida" && currentOrigin < moveQty) {
+      throw new Error(`Stock insuficiente en el almacén seleccionado. Stock disponible: ${currentOrigin} uds, solicitado: ${moveQty} uds.`);
+    }
+
+    if (mov.tipo === "transferencia") {
+      if (!destAlmId) throw new Error("El almacén de destino es obligatorio para transferencias.");
+      if (originAlmId === destAlmId) throw new Error("El almacén de origen y destino no pueden ser iguales.");
+      if (currentOrigin < moveQty) {
+        throw new Error(`Stock insuficiente en el almacén de origen. Stock disponible: ${currentOrigin} uds, solicitado: ${moveQty} uds.`);
+      }
+    }
+
+    const generatedFolio = firestoreService.getNextLocalFolio(mov.tipo);
+    const docId = "mov_" + Math.random().toString(36).substr(2, 9);
+
+    if (mov.tipo === "entrada") {
+      stockMap[originKey] = {
+        id: originKey,
+        sku: cleanSku,
+        almacen_id: originAlmId,
+        cantidad: currentOrigin + moveQty,
+        actualizado: new Date()
+      };
+    } else if (mov.tipo === "salida") {
+      stockMap[originKey] = {
+        id: originKey,
+        sku: cleanSku,
+        almacen_id: originAlmId,
+        cantidad: currentOrigin - moveQty,
+        actualizado: new Date()
+      };
+
+      // Actualizar resumen incremental local
+      const summaryMap = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
+      const summaryKey = `${todayStr}_${cleanSku}_${originAlmId}`;
+      const prev = summaryMap[summaryKey];
+      summaryMap[summaryKey] = {
+        id: summaryKey,
+        fecha_str: todayStr,
+        fecha: new Date(),
+        sku: cleanSku,
+        almacen_id: originAlmId,
+        cantidad: (prev?.cantidad || 0) + moveQty,
+        total_transacciones: (prev?.total_transacciones || 0) + 1,
+        actualizado: new Date()
+      };
+      setLocalStorageItem("resumen_ventas", summaryMap);
+    } else if (mov.tipo === "transferencia" && destAlmId) {
+      const destKey = `${cleanSku}_${destAlmId}`;
+      const currentDest = stockMap[destKey]?.cantidad || 0;
+
+      stockMap[originKey] = {
+        id: originKey,
+        sku: cleanSku,
+        almacen_id: originAlmId,
+        cantidad: currentOrigin - moveQty,
+        actualizado: new Date()
+      };
+
+      stockMap[destKey] = {
+        id: destKey,
+        sku: cleanSku,
+        almacen_id: destAlmId,
+        cantidad: currentDest + moveQty,
+        actualizado: new Date()
+      };
+    }
+
+    setLocalStorageItem("stock", stockMap);
+    notifyListeners("stock", stockMap);
+
+    const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const nuevoMovimiento: Movimiento = {
+      id: docId,
+      folio: generatedFolio,
+      sku: cleanSku,
+      almacen_id: originAlmId,
+      tipo: mov.tipo,
+      cantidad: moveQty,
+      referencia: mov.referencia,
+      usuario: usuarioEmail,
+      fecha: new Date(),
+      estado: "activo",
+      ...(mov.compra_id ? { compra_id: mov.compra_id } : {}),
+      ...(mov.lote_id ? { lote_id: mov.lote_id } : {}),
+      ...(typeof mov.costo_unitario === "number" ? { costo_unitario: mov.costo_unitario } : {}),
+      ...(mov.cliente_id ? { cliente_id: mov.cliente_id } : {}),
+      ...(mov.cliente_nombre ? { cliente_nombre: mov.cliente_nombre } : {}),
+      ...(mov.cliente_tipo ? { cliente_tipo: mov.cliente_tipo } : {}),
+      ...(typeof mov.precio_unitario_venta === "number" ? { precio_unitario_venta: mov.precio_unitario_venta } : {}),
+      ...(typeof mov.total_venta === "number" ? { total_venta: mov.total_venta } : {}),
+      ...(typeof mov.envio_cobrado_cliente === "number" ? { envio_cobrado_cliente: mov.envio_cobrado_cliente } : {}),
+      ...(typeof mov.otros_cargos_cliente === "number" ? { otros_cargos_cliente: mov.otros_cargos_cliente } : {}),
+      ...(mov.concepto_otros_cargos ? { concepto_otros_cargos: mov.concepto_otros_cargos } : {}),
+      ...(typeof mov.costo_envio_venta === "number" ? { costo_envio_venta: mov.costo_envio_venta } : {}),
+      ...(typeof mov.otros_costos_venta === "number" ? { otros_costos_venta: mov.otros_costos_venta } : {}),
+      ...(mov.concepto_otros_costos ? { concepto_otros_costos: mov.concepto_otros_costos } : {}),
+      ...(typeof mov.total_cobrado === "number" ? { total_cobrado: mov.total_cobrado } : {}),
+      ...(typeof mov.total_costos_venta === "number" ? { total_costos_venta: mov.total_costos_venta } : {}),
+      ...(mov.comentarios_venta ? { comentarios_venta: mov.comentarios_venta } : {}),
+      ...(destAlmId ? { almacen_destino_id: destAlmId } : {})
+    };
+
+    movimientos.push(nuevoMovimiento);
+    setLocalStorageItem("movimientos", movimientos);
+    notifyListeners("movimientos", movimientos);
+
+    clearFinanzasCache();
+    clearPeriodosFinancierosCache();
+    return { id: docId, folio: generatedFolio };
+  },
+
+  // --- ANULACIÓN ATÓMICA DE UNA VENTA CON VARIAS PARTIDAS ---
+  anularVentaAgrupada: async (ventaId: string, motivo = "Anulado por el usuario"): Promise<void> => {
+    const user = authService.getCurrentUser();
+    const usuarioEmail = user ? user.email : "sistema@empresa.com";
+
+    if (isConfigured && realDb) {
+      const ventaQuery = query(
+        collection(realDb, "movimientos"),
+        where("venta_id", "==", ventaId)
+      );
+      const relatedQuery = query(collection(realDb, "movimientos"), where("venta_relacionada_id", "==", ventaId));
+      const [ventaSnapshot, relatedSnapshot] = await Promise.all([getDocs(ventaQuery), getDocs(relatedQuery)]);
+      if (ventaSnapshot.empty) {
+        throw new Error("La venta que intentas anular no existe en el sistema.");
+      }
+
+      const movementRefs = [...ventaSnapshot.docs, ...relatedSnapshot.docs].map((movementDoc) => movementDoc.ref);
+      const masterRef = doc(realDb, "ventas", ventaId);
+
+      await runTransaction(realDb, async (transaction) => {
+        const movementSnaps: any[] = [];
+        for (const movementRef of movementRefs) {
+          movementSnaps.push(await transaction.get(movementRef));
+        }
+        const masterSnap = await transaction.get(masterRef);
+
+        const movementData = movementSnaps
+          .map((snapshot, index) => ({ snapshot, ref: movementRefs[index] }))
+          .filter(({ snapshot }) => snapshot.exists())
+          .map(({ snapshot, ref }) => ({ ref, data: snapshot.data() }));
+        const activeMovements = movementData.filter(({ data }) => data.estado !== "anulado");
+        const hadPreviouslyCancelledItems = movementData.some(({ data }) => data.estado === "anulado");
+
+        if (activeMovements.length === 0) {
+          throw new Error("Esta venta ya ha sido anulada previamente.");
+        }
+        if (activeMovements.filter(({ data }) => data.venta_id === ventaId).some(({ data }) => data.tipo !== "salida")) {
+          throw new Error("La agrupación contiene movimientos incompatibles y no puede anularse como venta.");
+        }
+
+        const saleItemMovements = activeMovements.filter(({ data }) => data.venta_id === ventaId && !data.subtipo);
+        const principalMovement = saleItemMovements.find(({ data }) => data.venta_partida === 1)?.data || saleItemMovements[0]?.data;
+        const receivedAmount = masterSnap.exists()
+          ? Math.max(0, Number(masterSnap.data().recibido) || 0)
+          : Math.max(0, Number(principalMovement?.ingreso_reconocido) || Number(principalMovement?.venta_total_recibido) || 0)
+            + activeMovements
+              .filter(({ data }) => data.venta_relacionada_id === ventaId && data.subtipo === "abono_venta")
+              .reduce((sum, { data }) => sum + Math.max(0, Number(data.ingreso_reconocido) || 0), 0);
+        const orderStatus = masterSnap.exists()
+          ? masterSnap.data().estado_pedido
+          : activeMovements.some(({ data }) => data.venta_relacionada_id === ventaId && data.subtipo === "seguimiento_pedido" && data.pedido_estado === "entregado")
+            || principalMovement?.pedido_estado === "entregado"
+            ? "entregado"
+            : principalMovement?.pedido_estado;
+
+        if (requiresSaleRefund(receivedAmount, orderStatus)) {
+          throw new Error("Esta venta ya recibió dinero o fue entregada. Registra una devolución para reintegrar el inventario y dejar el reembolso en Finanzas.");
+        }
+        const inventoryMovements = saleItemMovements.filter(({ data }) => data.afecta_stock !== false);
+        const stockEntries = inventoryMovements.map(({ data }) => {
+          const sku = String(data.sku || "").trim().toUpperCase();
+          const almacenId = String(data.almacen_id || "").trim();
+          const key = `${sku}_${almacenId}`;
+          return { sku, almacenId, key, ref: doc(realDb!, "stock", key), cantidad: Number(data.cantidad) || 0 };
+        });
+        const summaryEntries = saleItemMovements.map(({ data }) => {
+          const sku = String(data.sku || "").trim().toUpperCase();
+          const almacenId = String(data.almacen_id || "").trim();
+          const fechaStr = getLocalDateString(data.fecha);
+          const key = `${fechaStr}_${sku}_${almacenId}`;
+          return { key, ref: doc(realDb!, "resumen_ventas", key), cantidad: Number(data.cantidad) || 0 };
+        });
+        const periodoKey = getPeriodoKey(saleItemMovements[0]?.data.fecha);
+        const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+
+        const stockSnaps: any[] = [];
+        for (const entry of stockEntries) stockSnaps.push(await transaction.get(entry.ref));
+        const summarySnaps: any[] = [];
+        for (const entry of summaryEntries) summarySnaps.push(await transaction.get(entry.ref));
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+
+        if (masterSnap.exists() && masterSnap.data().estado === "devuelto") {
+          throw new Error("Una venta devuelta no puede anularse nuevamente.");
+        }
+
+        const cancellationTimestamp = Timestamp.now();
+        activeMovements.forEach(({ ref }) => {
+          transaction.update(ref, {
+            estado: "anulado",
+            anulado_at: cancellationTimestamp,
+            anulado_por: usuarioEmail,
+            motivo_anulacion: motivo
+          });
+        });
+        if (masterSnap.exists()) {
+          transaction.update(masterRef, {
+            estado: "anulado",
+            anulado_at: cancellationTimestamp,
+            anulado_por: usuarioEmail,
+            motivo_anulacion: motivo,
+            actualizado_at: cancellationTimestamp
+          });
+        }
+
+        stockEntries.forEach((entry, index) => {
+          const currentQty = stockSnaps[index].exists()
+            ? Number(stockSnaps[index].data()?.cantidad) || 0
+            : 0;
+          transaction.set(entry.ref, {
+            id: entry.key,
+            sku: entry.sku,
+            almacen_id: entry.almacenId,
+            cantidad: currentQty + entry.cantidad,
+            actualizado: cancellationTimestamp
+          }, { merge: true });
+
+        });
+
+        summaryEntries.forEach((entry, index) => {
+          if (!summarySnaps[index].exists()) return;
+          const previousQty = Number(summarySnaps[index].data()?.cantidad) || 0;
+          const previousTransactions = Number(summarySnaps[index].data()?.total_transacciones) || 0;
+          transaction.set(entry.ref, {
+            cantidad: Math.max(0, previousQty - entry.cantidad),
+            total_transacciones: Math.max(0, previousTransactions - 1),
+            actualizado: cancellationTimestamp
+          }, { merge: true });
+        });
+
+        if (periodRef && periodoKey && !hadPreviouslyCancelledItems) {
+          const updatedPeriod = computeNewPeriodIndexData(
+            periodSnap?.exists() ? periodSnap.data() : null,
+            periodoKey,
+            -1,
+            0,
+            0
+          );
+          transaction.set(periodRef, updatedPeriod, { merge: true });
+        }
+      });
+
+      clearFinanzasCache();
+      clearPeriodosFinancierosCache();
+      return;
+    }
+
+    const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const existingMasterSale = getLocalStorageItem<Venta[]>("ventas_maestras", []).find(item => item.id === ventaId);
+    if (existingMasterSale?.estado === "devuelto") throw new Error("Una venta devuelta no puede anularse nuevamente.");
+    const groupedIndexes = movimientos
+      .map((movement, index) => ({ movement, index }))
+      .filter(({ movement }) => movement.venta_id === ventaId || movement.venta_relacionada_id === ventaId);
+    const activeItems = groupedIndexes.filter(({ movement }) => movement.estado !== "anulado");
+
+    if (groupedIndexes.length === 0) throw new Error("La venta no existe en el sistema.");
+    if (activeItems.length === 0) throw new Error("Esta venta ya ha sido anulada previamente.");
+
+    const saleItems = activeItems.filter(({ movement }) => movement.venta_id === ventaId && !movement.subtipo);
+    const principalMovement = saleItems.find(({ movement }) => movement.venta_partida === 1)?.movement || saleItems[0]?.movement;
+    const receivedAmount = existingMasterSale
+      ? Math.max(0, Number(existingMasterSale.recibido) || 0)
+      : Math.max(0, Number(principalMovement?.ingreso_reconocido) || Number(principalMovement?.venta_total_recibido) || 0)
+        + activeItems
+          .filter(({ movement }) => movement.venta_relacionada_id === ventaId && movement.subtipo === "abono_venta")
+          .reduce((sum, { movement }) => sum + Math.max(0, Number(movement.ingreso_reconocido) || 0), 0);
+    const orderStatus = existingMasterSale?.estado_pedido === "entregado"
+      || activeItems.some(({ movement }) => movement.venta_relacionada_id === ventaId && movement.subtipo === "seguimiento_pedido" && movement.pedido_estado === "entregado")
+      || principalMovement?.pedido_estado === "entregado"
+      ? "entregado"
+      : existingMasterSale?.estado_pedido || principalMovement?.pedido_estado;
+    if (requiresSaleRefund(receivedAmount, orderStatus)) {
+      throw new Error("Esta venta ya recibió dinero o fue entregada. Registra una devolución para reintegrar el inventario y dejar el reembolso en Finanzas.");
+    }
+
+    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
+    const summaryMap = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
+    const cancellationDate = new Date();
+
+    activeItems.forEach(({ movement, index }) => {
+      const sku = movement.sku.trim().toUpperCase();
+      const isSaleItem = movement.venta_id === ventaId && !movement.subtipo;
+      if (isSaleItem && movement.afecta_stock !== false) {
+        const stockKey = `${sku}_${movement.almacen_id}`;
+        const currentQty = stockMap[stockKey]?.cantidad || 0;
+        stockMap[stockKey] = {
+          id: stockKey,
+          sku,
+          almacen_id: movement.almacen_id,
+          cantidad: currentQty + (Number(movement.cantidad) || 0),
+          actualizado: cancellationDate
+        };
+
+      }
+
+      const summaryKey = `${getLocalDateString(movement.fecha)}_${sku}_${movement.almacen_id}`;
+      if (isSaleItem && summaryMap[summaryKey]) {
+        summaryMap[summaryKey] = {
+          ...summaryMap[summaryKey],
+          cantidad: Math.max(0, summaryMap[summaryKey].cantidad - (Number(movement.cantidad) || 0)),
+          total_transacciones: Math.max(0, summaryMap[summaryKey].total_transacciones - 1),
+          actualizado: cancellationDate
+        };
+      }
+
+      movimientos[index] = {
+        ...movement,
+        estado: "anulado",
+        anulado_at: cancellationDate,
+        anulado_por: usuarioEmail,
+        motivo_anulacion: motivo
+      };
+    });
+
+    const masterSales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+    const masterIndex = masterSales.findIndex(item => item.id === ventaId);
+    if (masterIndex >= 0) {
+      masterSales[masterIndex] = {
+        ...masterSales[masterIndex],
+        estado: "anulado",
+        anulado_at: cancellationDate,
+        anulado_por: usuarioEmail,
+        motivo_anulacion: motivo,
+        actualizado_at: cancellationDate
+      };
+      setLocalStorageItem("ventas_maestras", masterSales);
+    }
+
+    setLocalStorageItem("stock", stockMap);
+    setLocalStorageItem("resumen_ventas", summaryMap);
+    setLocalStorageItem("movimientos", movimientos);
+    notifyListeners("stock", stockMap);
+    notifyListeners("movimientos", movimientos);
+    clearFinanzasCache();
+    clearPeriodosFinancierosCache();
+  },
+
+  // --- ANULACIÓN ATÓMICA DE MOVIMIENTO VÍA RUNTRANSACTION ---
+  anularMovimiento: async (id: string, motivo = "Anulado por el usuario"): Promise<void> => {
+    const user = authService.getCurrentUser();
+    const usuarioEmail = user ? user.email : "sistema@empresa.com";
+
+    if (isConfigured && realDb) {
+      // EN MODO FIREBASE: Si falla o no hay stock para revertir, lanza el error y no toca localStorage
+      const movRef = doc(realDb, "movimientos", id);
+      const initialMovementSnap = await getDoc(movRef);
+      if (!initialMovementSnap.exists()) {
+        throw new Error("El movimiento que intentas anular no existe en el sistema.");
+      }
+      const initialMovementData = initialMovementSnap.data();
+      if (initialMovementData.venta_id && Number(initialMovementData.venta_total_partidas) > 1) {
+        return firestoreService.anularVentaAgrupada(initialMovementData.venta_id, motivo);
+      }
+
+      await runTransaction(realDb, async (transaction) => {
+        // 1. Leer el movimiento
+        const movSnap = await transaction.get(movRef);
+        if (!movSnap.exists()) {
+          throw new Error("El movimiento que intentas anular no existe en el sistema.");
+        }
+
+        const movData = movSnap.data();
+
+        // 2. Validar que exista y no esté ya anulado
+        if (movData.estado === "anulado") {
+          throw new Error("Este movimiento ya ha sido anulado previamente. No se puede anular dos veces.");
+        }
+
+        const sku = (movData.sku || "").trim().toUpperCase();
+        const originAlmId = movData.almacen_id;
+        const destAlmId = movData.almacen_destino_id;
+        const qty = Number(movData.cantidad) || 0;
+        const tipo = movData.tipo;
+
+        // 3. Construir las referencias necesarias según su tipo
+        const originStockKey = `${sku}_${originAlmId}`;
+        const originStockRef = doc(realDb, "stock", originStockKey);
+
+        const destStockKey = (tipo === "transferencia" && destAlmId) ? `${sku}_${destAlmId}` : null;
+        const destStockRef = destStockKey ? doc(realDb, "stock", destStockKey) : null;
+
+        const dateStr = tipo === "salida" ? getLocalDateString(movData.fecha) : null;
+        const summaryKey = (tipo === "salida" && dateStr) ? `${dateStr}_${sku}_${originAlmId}` : null;
+        const resumenDocRef = summaryKey ? doc(realDb, "resumen_ventas", summaryKey) : null;
+
+        const periodoKey = tipo === "salida" ? getPeriodoKey(movData.fecha) : null;
+        const periodRef = (tipo === "salida" && periodoKey) ? doc(realDb, "periodos_financieros", periodoKey) : null;
+
+        // 4. Leer el stock de origen
+        const originSnap = await transaction.get(originStockRef);
+        const currentOrigin = originSnap.exists() ? (Number(originSnap.data()?.cantidad) || 0) : 0;
+
+        // 5. Si es transferencia, leer el stock de destino
+        let destSnap: any = null;
+        if (tipo === "transferencia") {
+          if (!destAlmId || !destStockRef) {
+            throw new Error("Datos de transferencia incompletos: falta almacén de destino.");
+          }
+          destSnap = await transaction.get(destStockRef);
+        }
+
+        // 6. Si es una venta, leer resumen_ventas
+        let resumenSnap: any = null;
+        if (tipo === "salida" && resumenDocRef) {
+          resumenSnap = await transaction.get(resumenDocRef);
+        }
+
+        // 7. Si es una venta, leer el documento correspondiente de periodos_financieros
+        let periodSnap: any = null;
+        if (tipo === "salida" && periodRef) {
+          periodSnap = await transaction.get(periodRef);
+        }
+
+        // 8. Completar todas las validaciones antes de cualquier escritura
+        if (tipo === "entrada") {
+          if (currentOrigin < qty) {
+            throw new Error(`No se puede anular la entrada: el stock actual (${currentOrigin} uds) en el almacén es menor a la cantidad a revertir (${qty} uds).`);
+          }
+        } else if (tipo === "transferencia") {
+          const currentDest = destSnap && destSnap.exists() ? (Number(destSnap.data()?.cantidad) || 0) : 0;
+          if (currentDest < qty) {
+            throw new Error(`No se puede anular la transferencia: el almacén de destino no tiene suficiente stock (${currentDest} uds) para devolver las ${qty} uds.`);
+          }
+        }
+
+        // 9. Solamente después comenzar escrituras (cero lecturas a partir de aquí):
+
+        // 9.1 Actualización de stock
+        if (tipo === "entrada") {
+          transaction.set(originStockRef, {
+            id: originStockKey,
+            sku,
+            almacen_id: originAlmId,
+            cantidad: currentOrigin - qty,
+            actualizado: Timestamp.now()
+          }, { merge: true });
+        } else if (tipo === "salida") {
+          transaction.set(originStockRef, {
+            id: originStockKey,
+            sku,
+            almacen_id: originAlmId,
+            cantidad: currentOrigin + qty,
+            actualizado: Timestamp.now()
+          }, { merge: true });
+        } else if (tipo === "transferencia") {
+          const currentDest = destSnap && destSnap.exists() ? (Number(destSnap.data()?.cantidad) || 0) : 0;
+          transaction.set(originStockRef, {
+            id: originStockKey,
+            sku,
+            almacen_id: originAlmId,
+            cantidad: currentOrigin + qty,
+            actualizado: Timestamp.now()
+          }, { merge: true });
+
+          transaction.set(destStockRef!, {
+            id: destStockKey!,
+            sku,
+            almacen_id: destAlmId,
+            cantidad: currentDest - qty,
+            actualizado: Timestamp.now()
+          }, { merge: true });
+        }
+
+        // 9.2 Actualización de resumen_ventas
+        if (tipo === "salida" && resumenDocRef && resumenSnap && resumenSnap.exists()) {
+          const prevQty = Number(resumenSnap.data()?.cantidad) || 0;
+          const prevTotal = Number(resumenSnap.data()?.total_transacciones) || 0;
+          transaction.set(resumenDocRef, {
+            cantidad: Math.max(0, prevQty - qty),
+            total_transacciones: Math.max(0, prevTotal - 1),
+            actualizado: Timestamp.now()
+          }, { merge: true });
+        }
+
+        // 9.3 Decremento del índice financiero
+        if (tipo === "salida" && periodRef && periodoKey) {
+          const updatedPeriod = computeNewPeriodIndexData(
+            periodSnap?.exists() ? periodSnap.data() : null,
+            periodoKey,
+            -1,
+            0,
+            0
+          );
+          transaction.set(periodRef, updatedPeriod, { merge: true });
+        }
+
+        // 9.4 Actualización del movimiento a estado anulado
+        transaction.update(movRef, {
+          estado: "anulado",
+          anulado_at: Timestamp.now(),
+          anulado_por: usuarioEmail,
+          motivo_anulacion: motivo
+        });
+      });
+
+      clearFinanzasCache();
+      clearPeriodosFinancierosCache();
+      return;
+    }
+
+    // --- MODO EMULADOR LOCAL ---
+    const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const movIndex = movimientos.findIndex(m => m.id === id);
+
+    if (movIndex === -1) {
+      throw new Error("El movimiento no existe en el sistema.");
+    }
+
+    const mov = movimientos[movIndex];
+    if (mov.estado === "anulado") {
+      throw new Error("Este movimiento ya ha sido anulado previamente. No se puede anular dos veces.");
+    }
+    if (mov.venta_id && Number(mov.venta_total_partidas) > 1) {
+      return firestoreService.anularVentaAgrupada(mov.venta_id, motivo);
+    }
+
+    const sku = (mov.sku || "").trim().toUpperCase();
+    const qty = Number(mov.cantidad) || 0;
+    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
+    const originKey = `${sku}_${mov.almacen_id}`;
+    const currentOrigin = stockMap[originKey]?.cantidad || 0;
+
+    if (mov.tipo === "entrada") {
+      if (currentOrigin < qty) {
+        throw new Error(`No se puede anular la entrada: el stock actual (${currentOrigin} uds) en el almacén es menor a la cantidad a revertir (${qty} uds).`);
+      }
+      stockMap[originKey] = {
+        id: originKey,
+        sku,
+        almacen_id: mov.almacen_id,
+        cantidad: currentOrigin - qty,
+        actualizado: new Date()
+      };
+    } else if (mov.tipo === "salida") {
+      stockMap[originKey] = {
+        id: originKey,
+        sku,
+        almacen_id: mov.almacen_id,
+        cantidad: currentOrigin + qty,
+        actualizado: new Date()
+      };
+
+      // Descontar del resumen incremental
+      const summaryMap = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
+      const dateStr = getLocalDateString(mov.fecha);
+      const summaryKey = `${dateStr}_${sku}_${mov.almacen_id}`;
+      if (summaryMap[summaryKey]) {
+        const prev = summaryMap[summaryKey];
+        summaryMap[summaryKey] = {
+          ...prev,
+          cantidad: Math.max(0, prev.cantidad - qty),
+          total_transacciones: Math.max(0, prev.total_transacciones - 1),
+          actualizado: new Date()
+        };
+        setLocalStorageItem("resumen_ventas", summaryMap);
+      }
+    } else if (mov.tipo === "transferencia" && mov.almacen_destino_id) {
+      const destKey = `${sku}_${mov.almacen_destino_id}`;
+      const currentDest = stockMap[destKey]?.cantidad || 0;
+
+      if (currentDest < qty) {
+        throw new Error(`No se puede anular la transferencia: el almacén de destino no tiene suficiente stock (${currentDest} uds) para devolver las ${qty} uds.`);
+      }
+
+      stockMap[originKey] = {
+        id: originKey,
+        sku,
+        almacen_id: mov.almacen_id,
+        cantidad: currentOrigin + qty,
+        actualizado: new Date()
+      };
+
+      stockMap[destKey] = {
+        id: destKey,
+        sku,
+        almacen_id: mov.almacen_destino_id,
+        cantidad: currentDest - qty,
+        actualizado: new Date()
+      };
+    }
+
+    setLocalStorageItem("stock", stockMap);
+    notifyListeners("stock", stockMap);
+
+    movimientos[movIndex] = {
+      ...mov,
+      estado: "anulado",
+      anulado_at: new Date(),
+      anulado_por: usuarioEmail,
+      motivo_anulacion: motivo
+    };
+
+    setLocalStorageItem("movimientos", movimientos);
+    notifyListeners("movimientos", movimientos);
+    clearFinanzasCache();
+    clearPeriodosFinancierosCache();
+  },
+
+  deleteMovimiento: async (id: string): Promise<void> => {
+    await firestoreService.anularMovimiento(id, "Anulación directa de registro");
+  },
+
+  enviarMovimientoPapelera: async (id: string): Promise<void> => {
+    if (!id) throw new Error("ID de movimiento no proporcionado.");
+    if (isConfigured && realDb) {
+      const initial = await getDoc(doc(realDb, "movimientos", id));
+      if (!initial.exists()) throw new Error("El movimiento no existe.");
+      const initialData = initial.data();
+      if (initialData.compra_id) return firestoreService.enviarCompraPapelera(initialData.compra_id);
+      const masterSaleSnap = initialData.venta_id ? await getDoc(doc(realDb, "ventas", initialData.venta_id)) : null;
+      const isReturnedSale = masterSaleSnap?.exists() && masterSaleSnap.data().estado === "devuelto";
+      const snapshots = initialData.venta_id
+        ? (await Promise.all([
+            getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", initialData.venta_id))),
+            getDocs(query(collection(realDb, "movimientos"), where("venta_relacionada_id", "==", initialData.venta_id)))
+          ])).flatMap(result => result.docs)
+        : [initial];
+      const periodoDescontado = !isReturnedSale && snapshots.length > 0
+        && snapshots.every(snapshot => snapshot.data().estado !== "anulado")
+        && snapshots.some(snapshot => snapshot.data().tipo === "salida");
+      if (!isReturnedSale && initialData.estado !== "anulado") await firestoreService.anularMovimiento(id, "Movimiento enviado a Papelera");
+      const batch = writeBatch(realDb);
+      snapshots.forEach(snapshot => batch.set(snapshot.ref, {
+        en_papelera: true,
+        desactivado_at: Timestamp.now(),
+        estado_antes_papelera: isReturnedSale || snapshot.data().estado === "anulado" ? "anulado" : "activo",
+        periodo_descontado_papelera: periodoDescontado
+      }, { merge: true }));
+      if (initialData.venta_id) {
+        batch.set(doc(realDb, "ventas", initialData.venta_id), {
+          en_papelera: true,
+          desactivado_at: Timestamp.now(),
+          estado_antes_papelera: masterSaleSnap?.exists() ? masterSaleSnap.data().estado || "activo" : "activo"
+        }, { merge: true });
+      }
+      await batch.commit();
+      return;
+    }
+    const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const selected = movimientos.find(movimiento => movimiento.id === id);
+    if (!selected) throw new Error("El movimiento no existe.");
+    if (selected.compra_id) return firestoreService.enviarCompraPapelera(selected.compra_id);
+    const localMasterSales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+    const localMasterSale = selected.venta_id ? localMasterSales.find(item => item.id === selected.venta_id) : undefined;
+    const isReturnedSale = localMasterSale?.estado === "devuelto";
+    const previousTargets = movimientos.filter(movimiento => movimiento.id === id || (selected.venta_id && (movimiento.venta_id === selected.venta_id || movimiento.venta_relacionada_id === selected.venta_id)));
+    const previousState = new Map<string | undefined, "activo" | "anulado">(
+      previousTargets.map(movimiento => [movimiento.id, movimiento.estado === "anulado" ? "anulado" : "activo"])
+    );
+    const periodoDescontado = !isReturnedSale && previousTargets.length > 0 && previousTargets.every(movimiento => movimiento.estado !== "anulado") && previousTargets.some(movimiento => movimiento.tipo === "salida");
+    if (!isReturnedSale && selected.estado !== "anulado") await firestoreService.anularMovimiento(id, "Movimiento enviado a Papelera");
+    const updated = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const now = new Date();
+    updated.forEach((movimiento, index) => {
+      if (movimiento.id === id || (selected.venta_id && (movimiento.venta_id === selected.venta_id || movimiento.venta_relacionada_id === selected.venta_id))) updated[index] = {
+        ...movimiento,
+        en_papelera: true,
+        desactivado_at: now,
+        estado_antes_papelera: isReturnedSale ? "anulado" : previousState.get(movimiento.id) || "activo",
+        periodo_descontado_papelera: periodoDescontado
+      };
+    });
+    setLocalStorageItem("movimientos", updated);
+    if (selected.venta_id) {
+      const masterSales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+      const masterIndex = masterSales.findIndex(item => item.id === selected.venta_id);
+      if (masterIndex >= 0) {
+        masterSales[masterIndex] = { ...masterSales[masterIndex], en_papelera: true, desactivado_at: now, estado_antes_papelera: localMasterSale?.estado || "activo" };
+        setLocalStorageItem("ventas_maestras", masterSales);
+      }
+    }
+    notifyListeners("movimientos", updated);
+  },
+
+  enviarVentaPapelera: async (ventaId: string): Promise<void> => {
+    if (!ventaId) throw new Error("ID de venta no proporcionado.");
+    if (isConfigured && realDb) {
+      const snapshot = await getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", ventaId), limit(1)));
+      if (snapshot.empty) throw new Error("No se encontraron las partidas de la venta.");
+      return firestoreService.enviarMovimientoPapelera(snapshot.docs[0].id);
+    }
+    const movement = getLocalStorageItem<Movimiento[]>("movimientos", []).find(item => item.venta_id === ventaId);
+    if (!movement?.id) throw new Error("No se encontraron las partidas de la venta.");
+    return firestoreService.enviarMovimientoPapelera(movement.id);
+  },
+
+  restaurarMovimientoPapelera: async (id: string): Promise<void> => {
+    if (!id) throw new Error("ID de movimiento no proporcionado.");
+    if (isConfigured && realDb) {
+      const initial = await getDoc(doc(realDb, "movimientos", id));
+      if (!initial.exists()) throw new Error("El movimiento no existe.");
+      const initialData = initial.data();
+      if (initialData.compra_id) return firestoreService.restaurarCompraPapelera(initialData.compra_id);
+      const refs = initialData.venta_id
+        ? (await Promise.all([
+            getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", initialData.venta_id))),
+            getDocs(query(collection(realDb, "movimientos"), where("venta_relacionada_id", "==", initialData.venta_id)))
+          ])).flatMap(result => result.docs.map(item => item.ref))
+        : [doc(realDb, "movimientos", id)];
+      const masterRef = initialData.venta_id ? doc(realDb, "ventas", initialData.venta_id) : null;
+
+      await runTransaction(realDb, async transaction => {
+        const movementSnaps: any[] = [];
+        for (const ref of refs) movementSnaps.push(await transaction.get(ref));
+        const masterSnap = masterRef ? await transaction.get(masterRef) : null;
+        const activeTargets = movementSnaps.filter(snapshot => snapshot.exists() && snapshot.data().en_papelera === true);
+        if (activeTargets.length === 0) throw new Error("El movimiento ya está activo.");
+        const restorableTargets = activeTargets.filter(snapshot => snapshot.data().estado_antes_papelera !== "anulado");
+
+        const stockDeltas = new Map<string, { sku: string; almacenId: string; delta: number; ref: any }>();
+        const addDelta = (sku: string, almacenId: string, delta: number) => {
+          const key = `${sku}_${almacenId}`;
+          const current = stockDeltas.get(key);
+          stockDeltas.set(key, { sku, almacenId, delta: (current?.delta || 0) + delta, ref: doc(realDb!, "stock", key) });
+        };
+        restorableTargets.forEach(snapshot => {
+          const data = snapshot.data();
+          const sku = String(data.sku || "").trim().toUpperCase();
+          const qty = Number(data.cantidad) || 0;
+          if (data.tipo === "salida" && data.afecta_stock !== false) addDelta(sku, data.almacen_id, -qty);
+          if (data.tipo === "entrada") addDelta(sku, data.almacen_id, qty);
+          if (data.tipo === "transferencia") {
+            addDelta(sku, data.almacen_id, -qty);
+            if (!data.almacen_destino_id) throw new Error("La transferencia no tiene almacén de destino.");
+            addDelta(sku, data.almacen_destino_id, qty);
+          }
+        });
+        const stockEntries = [...stockDeltas.values()];
+        const stockSnaps: any[] = [];
+        for (const entry of stockEntries) stockSnaps.push(await transaction.get(entry.ref));
+        stockEntries.forEach((entry, index) => {
+          const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
+          if (currentQty + entry.delta < 0) throw new Error(`No hay stock suficiente de ${entry.sku} para reactivar la operación.`);
+        });
+
+        const saleTargets = restorableTargets.filter(snapshot => snapshot.data().tipo === "salida" && !snapshot.data().subtipo && String(snapshot.data().sku || "").toUpperCase() !== "ABONO");
+        const summaryEntries = saleTargets.map(snapshot => {
+          const data = snapshot.data();
+          const sku = String(data.sku || "").trim().toUpperCase();
+          const key = `${getLocalDateString(data.fecha)}_${sku}_${data.almacen_id}`;
+          return { ref: doc(realDb!, "resumen_ventas", key), sku, almacenId: data.almacen_id, fecha: data.fecha, fechaStr: getLocalDateString(data.fecha), qty: Number(data.cantidad) || 0 };
+        });
+        const summarySnaps: any[] = [];
+        for (const entry of summaryEntries) summarySnaps.push(await transaction.get(entry.ref));
+        const restorePeriodCount = saleTargets.some(snapshot => snapshot.data().periodo_descontado_papelera === true);
+        const periodoKey = restorePeriodCount ? getPeriodoKey(saleTargets[0].data().fecha) : null;
+        const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+        const now = Timestamp.now();
+
+        stockEntries.forEach((entry, index) => {
+          const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
+          transaction.set(entry.ref, { id: `${entry.sku}_${entry.almacenId}`, sku: entry.sku, almacen_id: entry.almacenId, cantidad: currentQty + entry.delta, actualizado: now }, { merge: true });
+        });
+        summaryEntries.forEach((entry, index) => {
+          const currentQty = summarySnaps[index].exists() ? Number(summarySnaps[index].data()?.cantidad) || 0 : 0;
+          const currentTransactions = summarySnaps[index].exists() ? Number(summarySnaps[index].data()?.total_transacciones) || 0 : 0;
+          transaction.set(entry.ref, { fecha_str: entry.fechaStr, fecha: entry.fecha, sku: entry.sku, almacen_id: entry.almacenId, cantidad: currentQty + entry.qty, total_transacciones: currentTransactions + 1, actualizado: now }, { merge: true });
+        });
+        activeTargets.forEach(snapshot => {
+          const wasCancelled = snapshot.data().estado_antes_papelera === "anulado";
+          transaction.update(snapshot.ref, wasCancelled
+            ? { en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField(), periodo_descontado_papelera: deleteField() }
+            : { estado: "activo", anulado_at: deleteField(), anulado_por: deleteField(), motivo_anulacion: deleteField(), en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField(), periodo_descontado_papelera: deleteField() });
+        });
+        if (masterRef && masterSnap?.exists()) {
+          const previousMasterState = masterSnap.data().estado_antes_papelera || masterSnap.data().estado;
+          transaction.update(masterRef, previousMasterState === "anulado" || previousMasterState === "devuelto"
+            ? { en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField(), actualizado_at: now }
+            : { estado: "activo", en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField(), anulado_at: deleteField(), anulado_por: deleteField(), motivo_anulacion: deleteField(), actualizado_at: now });
+        }
+        if (periodRef && periodoKey) transaction.set(periodRef, computeNewPeriodIndexData(periodSnap?.exists() ? periodSnap.data() : null, periodoKey, 1, 0, 0), { merge: true });
+      });
+      clearFinanzasCache(); clearPeriodosFinancierosCache();
+      return;
+    }
+
+    const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const selected = movimientos.find(movimiento => movimiento.id === id);
+    if (!selected) throw new Error("El movimiento no existe.");
+    if (selected.compra_id) return firestoreService.restaurarCompraPapelera(selected.compra_id);
+    const targets = movimientos.filter(movimiento => movimiento.id === id || (selected.venta_id && (movimiento.venta_id === selected.venta_id || movimiento.venta_relacionada_id === selected.venta_id)));
+    const restorableTargets = targets.filter(movimiento => movimiento.estado_antes_papelera !== "anulado");
+    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
+    const summaryMap = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
+    restorableTargets.forEach(movimiento => {
+      const sku = movimiento.sku.trim().toUpperCase();
+      const qty = Number(movimiento.cantidad) || 0;
+      const originKey = `${sku}_${movimiento.almacen_id}`;
+      const originQty = stockMap[originKey]?.cantidad || 0;
+      if (((movimiento.tipo === "salida" && movimiento.afecta_stock !== false) || movimiento.tipo === "transferencia") && originQty < qty) throw new Error(`No hay stock suficiente de ${sku} para restaurar la operación.`);
+    });
+    const now = new Date();
+    targets.forEach(target => {
+      const index = movimientos.findIndex(movimiento => movimiento.id === target.id);
+      const wasCancelled = target.estado_antes_papelera === "anulado";
+      if (wasCancelled) {
+        const restoredCancelled = { ...target, en_papelera: false };
+        delete restoredCancelled.desactivado_at; delete restoredCancelled.estado_antes_papelera; delete restoredCancelled.periodo_descontado_papelera;
+        movimientos[index] = restoredCancelled;
+        return;
+      }
+      const sku = target.sku.trim().toUpperCase();
+      const qty = Number(target.cantidad) || 0;
+      const originKey = `${sku}_${target.almacen_id}`;
+      const originQty = stockMap[originKey]?.cantidad || 0;
+      if (target.tipo === "salida" && target.afecta_stock !== false) stockMap[originKey] = { ...(stockMap[originKey] || { id: originKey, sku, almacen_id: target.almacen_id }), cantidad: originQty - qty, actualizado: now } as StockItem;
+      if (target.tipo === "entrada") stockMap[originKey] = { ...(stockMap[originKey] || { id: originKey, sku, almacen_id: target.almacen_id }), cantidad: originQty + qty, actualizado: now } as StockItem;
+      if (target.tipo === "transferencia" && target.almacen_destino_id) {
+        const destKey = `${sku}_${target.almacen_destino_id}`;
+        stockMap[originKey] = { ...stockMap[originKey], cantidad: originQty - qty, actualizado: now };
+        stockMap[destKey] = { ...(stockMap[destKey] || { id: destKey, sku, almacen_id: target.almacen_destino_id }), cantidad: (stockMap[destKey]?.cantidad || 0) + qty, actualizado: now } as StockItem;
+      }
+      if (target.tipo === "salida" && !target.subtipo) {
+        const summaryKey = `${getLocalDateString(target.fecha)}_${sku}_${target.almacen_id}`;
+        const previous = summaryMap[summaryKey];
+        summaryMap[summaryKey] = { id: summaryKey, fecha_str: getLocalDateString(target.fecha), fecha: target.fecha, sku, almacen_id: target.almacen_id, cantidad: (previous?.cantidad || 0) + qty, total_transacciones: (previous?.total_transacciones || 0) + 1, actualizado: now };
+      }
+      const restored = { ...target, estado: "activo" as const, en_papelera: false };
+      delete restored.anulado_at; delete restored.anulado_por; delete restored.motivo_anulacion; delete restored.desactivado_at; delete restored.estado_antes_papelera; delete restored.periodo_descontado_papelera;
+      movimientos[index] = restored;
+    });
+    setLocalStorageItem("stock", stockMap); setLocalStorageItem("resumen_ventas", summaryMap); setLocalStorageItem("movimientos", movimientos);
+    if (selected.venta_id) {
+      const masterSales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+      const masterIndex = masterSales.findIndex(item => item.id === selected.venta_id);
+      if (masterIndex >= 0) {
+        const previousState = masterSales[masterIndex].estado_antes_papelera || masterSales[masterIndex].estado;
+        const preservedState = previousState === "anulado" || previousState === "devuelto";
+        masterSales[masterIndex] = { ...masterSales[masterIndex], estado: preservedState ? previousState : "activo", en_papelera: false, actualizado_at: now };
+        delete masterSales[masterIndex].estado_antes_papelera;
+        delete masterSales[masterIndex].desactivado_at;
+        if (!preservedState) {
+          delete masterSales[masterIndex].anulado_at; delete masterSales[masterIndex].anulado_por; delete masterSales[masterIndex].motivo_anulacion;
+        }
+        setLocalStorageItem("ventas_maestras", masterSales);
+      }
+    }
+    notifyListeners("stock", stockMap); notifyListeners("movimientos", movimientos);
+    clearFinanzasCache(); clearPeriodosFinancierosCache();
+  },
+
+  // --- HISTORIAL PAGINADO DE AUDITORÍA (50 EN 50) ---
+  getMovimientosPaginated: async (options: {
+    pageSize?: number;
+    lastDoc?: any;
+    skuFilter?: string;
+    warehouseFilter?: string;
+    tipoFilter?: string;
+    estadoFilter?: string;
+  } = {}): Promise<{
+    items: Movimiento[];
+    lastDoc: any;
+    hasMore: boolean;
+    totalLoaded: number;
+  }> => {
+    const pageSize = options.pageSize || 50;
+
+    if (isConfigured && realDb) {
+      try {
+        let qConstraints: any[] = [orderBy("fecha", "desc"), limit(pageSize + 1)];
+
+        if (options.skuFilter) {
+          qConstraints.unshift(where("sku", "==", options.skuFilter.trim().toUpperCase()));
+        }
+        if (options.warehouseFilter && options.warehouseFilter !== "all") {
+          qConstraints.unshift(where("almacen_id", "==", options.warehouseFilter));
+        }
+        if (options.tipoFilter && options.tipoFilter !== "all") {
+          qConstraints.unshift(where("tipo", "==", options.tipoFilter));
+        }
+        if (options.estadoFilter && options.estadoFilter !== "all") {
+          qConstraints.unshift(where("estado", "==", options.estadoFilter));
+        }
+
+        if (options.lastDoc) {
+          qConstraints.push(startAfter(options.lastDoc));
+        }
+
+        const q = query(collection(realDb, "movimientos"), ...qConstraints);
+        const snap = await getDocs(q);
+
+        const docs = snap.docs;
+        const hasMore = docs.length > pageSize;
+        const itemsToProcess = hasMore ? docs.slice(0, pageSize) : docs;
+        const nextLastDoc = itemsToProcess.length > 0 ? itemsToProcess[itemsToProcess.length - 1] : null;
+
+        const list: Movimiento[] = itemsToProcess.filter(d => d.data().en_papelera !== true).map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            folio: data.folio,
+            venta_id: data.venta_id,
+            venta_relacionada_id: data.venta_relacionada_id || undefined,
+            subtipo: data.subtipo || undefined,
+            venta_partida: typeof data.venta_partida === "number" ? data.venta_partida : undefined,
+            venta_total_partidas: typeof data.venta_total_partidas === "number" ? data.venta_total_partidas : undefined,
+            venta_subtotal: typeof data.venta_subtotal === "number" ? data.venta_subtotal : undefined,
+            venta_total_cobrado: typeof data.venta_total_cobrado === "number" ? data.venta_total_cobrado : undefined,
+            venta_total_costos: typeof data.venta_total_costos === "number" ? data.venta_total_costos : undefined,
+            canal_venta: data.canal_venta || undefined,
+            canal_venta_nombre: data.canal_venta_nombre || undefined,
+            porcentaje_precio: typeof data.porcentaje_precio === "number" ? data.porcentaje_precio : undefined,
+            afecta_stock: typeof data.afecta_stock === "boolean" ? data.afecta_stock : undefined,
+            anticipo_porcentaje: typeof data.anticipo_porcentaje === "number" ? data.anticipo_porcentaje : undefined,
+            venta_total_recibido: typeof data.venta_total_recibido === "number" ? data.venta_total_recibido : undefined,
+            venta_saldo_pendiente: typeof data.venta_saldo_pendiente === "number" ? data.venta_saldo_pendiente : undefined,
+            ingreso_reconocido: typeof data.ingreso_reconocido === "number" ? data.ingreso_reconocido : undefined,
+            unidades_devueltas: typeof data.unidades_devueltas === "number" ? data.unidades_devueltas : undefined,
+            estado_pago: data.estado_pago || undefined,
+            sku: data.sku,
+            almacen_id: data.almacen_id,
+            tipo: data.tipo,
+            cantidad: data.cantidad,
+            referencia: data.referencia,
+            usuario: data.usuario,
+            fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
+            almacen_destino_id: data.almacen_destino_id,
+            compra_id: data.compra_id,
+            lote_id: data.lote_id,
+            costo_unitario: typeof data.costo_unitario === "number" ? data.costo_unitario : undefined,
+            cliente_id: data.cliente_id,
+            cliente_nombre: data.cliente_nombre,
+            cliente_tipo: data.cliente_tipo,
+            precio_unitario_venta: typeof data.precio_unitario_venta === "number" ? data.precio_unitario_venta : undefined,
+            total_venta: typeof data.total_venta === "number" ? data.total_venta : undefined,
+            envio_cobrado_cliente: typeof data.envio_cobrado_cliente === "number" ? data.envio_cobrado_cliente : undefined,
+            otros_cargos_cliente: typeof data.otros_cargos_cliente === "number" ? data.otros_cargos_cliente : undefined,
+            concepto_otros_cargos: data.concepto_otros_cargos || undefined,
+            costo_envio_venta: typeof data.costo_envio_venta === "number" ? data.costo_envio_venta : undefined,
+            otros_costos_venta: typeof data.otros_costos_venta === "number" ? data.otros_costos_venta : undefined,
+            concepto_otros_costos: data.concepto_otros_costos || undefined,
+            total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
+            total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
+            comentarios_venta: data.comentarios_venta || undefined,
+            ubicacion_entrega_id: data.ubicacion_entrega_id || undefined,
+            ubicacion_entrega_nombre: data.ubicacion_entrega_nombre || undefined,
+            repartidor_id: data.repartidor_id || undefined,
+            repartidor_nombre: data.repartidor_nombre || undefined,
+            estado: data.estado || "activo",
+            anulado_at: data.anulado_at ? (data.anulado_at as Timestamp).toDate() : undefined,
+            anulado_por: data.anulado_por,
+            motivo_anulacion: data.motivo_anulacion,
+            en_papelera: data.en_papelera === true
+          };
+        });
+
+        return {
+          items: list,
+          lastDoc: nextLastDoc,
+          hasMore,
+          totalLoaded: list.length
+        };
+      } catch (err: any) {
+        if (err?.code === "failed-precondition" || String(err?.message || "").toLowerCase().includes("index")) {
+          throw new Error("Falta un índice de Firestore para aplicar estos filtros. Créalo desde el enlace del error en la consola y vuelve a intentarlo cuando esté habilitado.");
+        }
+        throw err;
+      }
+    }
+
+    // Modo local
+    let movs = getLocalStorageItem<Movimiento[]>("movimientos", []).filter(movimiento => movimiento.en_papelera !== true);
+    movs = movs.map(m => ({
+      ...m,
+      fecha: typeof m.fecha === "string" ? new Date(m.fecha) : m.fecha,
+      estado: m.estado || "activo",
+      anulado_at: m.anulado_at ? (typeof m.anulado_at === "string" ? new Date(m.anulado_at) : m.anulado_at) : undefined
+    }));
+
+    movs.sort((a, b) => {
+      const timeA = a.fecha instanceof Date ? a.fecha.getTime() : new Date((a.fecha as any).seconds * 1000).getTime();
+      const timeB = b.fecha instanceof Date ? b.fecha.getTime() : new Date((b.fecha as any).seconds * 1000).getTime();
+      return timeB - timeA;
+    });
+
+    if (options.skuFilter) {
+      const s = options.skuFilter.trim().toLowerCase();
+      movs = movs.filter(m => 
+        m.sku.toLowerCase().includes(s) || 
+        (m.folio && m.folio.toLowerCase().includes(s)) ||
+        (m.referencia && m.referencia.toLowerCase().includes(s)) ||
+        (m.cliente_nombre && m.cliente_nombre.toLowerCase().includes(s)) ||
+        (m.comentarios_venta && m.comentarios_venta.toLowerCase().includes(s)) ||
+        (m.ubicacion_entrega_nombre && m.ubicacion_entrega_nombre.toLowerCase().includes(s)) ||
+        (m.repartidor_nombre && m.repartidor_nombre.toLowerCase().includes(s))
+      );
+    }
+    if (options.warehouseFilter && options.warehouseFilter !== "all") {
+      movs = movs.filter(m => m.almacen_id === options.warehouseFilter || m.almacen_destino_id === options.warehouseFilter);
+    }
+    if (options.tipoFilter && options.tipoFilter !== "all") {
+      movs = movs.filter(m => m.tipo === options.tipoFilter);
+    }
+    if (options.estadoFilter && options.estadoFilter !== "all") {
+      movs = movs.filter(m => (m.estado || "activo") === options.estadoFilter);
+    }
+
+    const startIndex = typeof options.lastDoc === "number" ? options.lastDoc : 0;
+    const pageItems = movs.slice(startIndex, startIndex + pageSize);
+    const nextIndex = startIndex + pageItems.length;
+    const hasMore = nextIndex < movs.length;
+
+    return {
+      items: pageItems,
+      lastDoc: nextIndex,
+      hasMore,
+      totalLoaded: pageItems.length
+    };
+  },
+
+  getMovimientos: async (skuFilter?: string): Promise<Movimiento[]> => {
+    const res = await firestoreService.getMovimientosPaginated({ pageSize: 100, skuFilter });
+    return res.items;
+  },
+
+  // --- CONSULTA PAGINADA DE MOVIMIENTOS POR CLIENTE (50 EN 50 CON STARTAFTER) ---
+  getMovimientosByClientePaginated: async (options: {
+    clienteId: string;
+    pageSize?: number;
+    lastDoc?: any;
+  }): Promise<{
+    items: Movimiento[];
+    lastDoc: any;
+    hasMore: boolean;
+  }> => {
+    const pageSize = options.pageSize || 50;
+
+    if (isConfigured && realDb) {
+      try {
+        const constraints: any[] = [
+          where("cliente_id", "==", options.clienteId),
+          where("tipo", "==", "salida"),
+          orderBy("fecha", "desc"),
+          limit(pageSize + 1)
+        ];
+
+        if (options.lastDoc) {
+          constraints.push(startAfter(options.lastDoc));
+        }
+
+        const q = query(collection(realDb, "movimientos"), ...constraints);
+        const snap = await getDocs(q);
+        const docs = snap.docs;
+        const hasMore = docs.length > pageSize;
+        const itemsToProcess = hasMore ? docs.slice(0, pageSize) : docs;
+        const nextLastDoc = itemsToProcess.length > 0 ? itemsToProcess[itemsToProcess.length - 1] : null;
+
+        const items: Movimiento[] = itemsToProcess.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            folio: data.folio,
+            venta_id: data.venta_id,
+            venta_relacionada_id: data.venta_relacionada_id || undefined,
+            subtipo: data.subtipo || undefined,
+            venta_partida: typeof data.venta_partida === "number" ? data.venta_partida : undefined,
+            venta_total_partidas: typeof data.venta_total_partidas === "number" ? data.venta_total_partidas : undefined,
+            venta_subtotal: typeof data.venta_subtotal === "number" ? data.venta_subtotal : undefined,
+            venta_total_cobrado: typeof data.venta_total_cobrado === "number" ? data.venta_total_cobrado : undefined,
+            venta_total_costos: typeof data.venta_total_costos === "number" ? data.venta_total_costos : undefined,
+            canal_venta: data.canal_venta || undefined,
+            canal_venta_nombre: data.canal_venta_nombre || undefined,
+            porcentaje_precio: typeof data.porcentaje_precio === "number" ? data.porcentaje_precio : undefined,
+            afecta_stock: typeof data.afecta_stock === "boolean" ? data.afecta_stock : undefined,
+            anticipo_porcentaje: typeof data.anticipo_porcentaje === "number" ? data.anticipo_porcentaje : undefined,
+            venta_total_recibido: typeof data.venta_total_recibido === "number" ? data.venta_total_recibido : undefined,
+            venta_saldo_pendiente: typeof data.venta_saldo_pendiente === "number" ? data.venta_saldo_pendiente : undefined,
+            ingreso_reconocido: typeof data.ingreso_reconocido === "number" ? data.ingreso_reconocido : undefined,
+            unidades_devueltas: typeof data.unidades_devueltas === "number" ? data.unidades_devueltas : undefined,
+            estado_pago: data.estado_pago || undefined,
+            sku: data.sku,
+            almacen_id: data.almacen_id,
+            tipo: data.tipo,
+            cantidad: Number(data.cantidad) || 0,
+            referencia: data.referencia || "",
+            usuario: data.usuario || "",
+            fecha: data.fecha ? (data.fecha.toDate ? data.fecha.toDate() : new Date(data.fecha)) : new Date(),
+            almacen_destino_id: data.almacen_destino_id,
+            compra_id: data.compra_id,
+            lote_id: data.lote_id,
+            costo_unitario: typeof data.costo_unitario === "number" ? data.costo_unitario : undefined,
+            cliente_id: data.cliente_id,
+            cliente_nombre: data.cliente_nombre,
+            cliente_tipo: data.cliente_tipo,
+            precio_unitario_venta: typeof data.precio_unitario_venta === "number" ? data.precio_unitario_venta : undefined,
+            total_venta: typeof data.total_venta === "number" ? data.total_venta : undefined,
+            envio_cobrado_cliente: typeof data.envio_cobrado_cliente === "number" ? data.envio_cobrado_cliente : undefined,
+            otros_cargos_cliente: typeof data.otros_cargos_cliente === "number" ? data.otros_cargos_cliente : undefined,
+            concepto_otros_cargos: data.concepto_otros_cargos || undefined,
+            costo_envio_venta: typeof data.costo_envio_venta === "number" ? data.costo_envio_venta : undefined,
+            otros_costos_venta: typeof data.otros_costos_venta === "number" ? data.otros_costos_venta : undefined,
+            concepto_otros_costos: data.concepto_otros_costos || undefined,
+            total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
+            total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
+            comentarios_venta: data.comentarios_venta || undefined,
+            ubicacion_entrega_id: data.ubicacion_entrega_id || undefined,
+            ubicacion_entrega_nombre: data.ubicacion_entrega_nombre || undefined,
+            repartidor_id: data.repartidor_id || undefined,
+            repartidor_nombre: data.repartidor_nombre || undefined,
+            estado: data.estado || "activo",
+            anulado_at: data.anulado_at ? (data.anulado_at.toDate ? data.anulado_at.toDate() : new Date(data.anulado_at)) : undefined,
+            anulado_por: data.anulado_por,
+            motivo_anulacion: data.motivo_anulacion,
+            en_papelera: data.en_papelera === true
+          };
+        });
+
+        return {
+          items,
+          lastDoc: nextLastDoc,
+          hasMore
+        };
+      } catch (err: any) {
+        console.error("Error en consulta indexada de movimientos por cliente:", err);
+        throw err;
+      }
+    }
+
+    // Modo local
+    let movs = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    movs = movs.filter(m => m.cliente_id === options.clienteId && m.tipo === "salida");
+    movs = movs.map(m => ({
+      ...m,
+      fecha: typeof m.fecha === "string" ? new Date(m.fecha) : (m.fecha as any)?.toDate ? (m.fecha as any).toDate() : m.fecha,
+      estado: m.estado || "activo",
+      anulado_at: m.anulado_at ? (typeof m.anulado_at === "string" ? new Date(m.anulado_at) : (m.anulado_at as any)?.toDate ? (m.anulado_at as any).toDate() : m.anulado_at) : undefined
+    }));
+    movs.sort((a, b) => {
+      const timeA = a.fecha instanceof Date ? a.fecha.getTime() : new Date((a.fecha as any).seconds * 1000).getTime();
+      const timeB = b.fecha instanceof Date ? b.fecha.getTime() : new Date((b.fecha as any).seconds * 1000).getTime();
+      return timeB - timeA;
+    });
+
+    const startIndex = typeof options.lastDoc === "number" ? options.lastDoc : 0;
+    const pageItems = movs.slice(startIndex, startIndex + pageSize);
+    const nextIndex = startIndex + pageItems.length;
+    const hasMore = nextIndex < movs.length;
+
+    return {
+      items: pageItems,
+      lastDoc: nextIndex,
+      hasMore
+    };
+  },
+
+  // --- CONSULTA OPTIMIZADA DE RESÚMENES INCREMENTALES DE VENTAS ---
+  getResumenVentasByDateRange: async (startDate: Date, endDate: Date): Promise<ResumenVentaDiaria[]> => {
+    const startStr = getLocalDateString(startDate);
+    const endStr = getLocalDateString(endDate);
+
+    if (isConfigured && realDb) {
+      const q = query(
+        collection(realDb, "resumen_ventas"),
+        where("fecha_str", ">=", startStr),
+        where("fecha_str", "<=", endStr)
+      );
+
+      const snap = await getDocs(q);
+      const list: ResumenVentaDiaria[] = [];
+
+      snap.forEach(d => {
+        const data = d.data();
+        if (Number(data.cantidad) > 0) {
+          list.push({
+            id: d.id,
+            fecha_str: data.fecha_str,
+            fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
+            sku: data.sku,
+            almacen_id: data.almacen_id,
+            cantidad: Number(data.cantidad) || 0,
+            total_transacciones: Number(data.total_transacciones) || 1,
+            actualizado: data.actualizado ? (data.actualizado as Timestamp).toDate() : undefined
+          });
+        }
+      });
+
+      return list;
+    }
+
+    // Modo emulador local
+    const summaryMap = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
+    return Object.values(summaryMap).filter(item => {
+      const f = item.fecha_str;
+      return f >= startStr && f <= endStr && item.cantidad > 0;
+    });
+  },
+
+  getVentasMaestrasByDateRange: async (startDate: Date, endDate: Date): Promise<Venta[]> => {
+    const startMs = startDate.getTime();
+    const endMs = endDate.getTime();
+    const toDate = (value: any): Date => value?.toDate
+      ? value.toDate()
+      : value instanceof Date
+        ? value
+        : value?.seconds
+          ? new Date(value.seconds * 1000)
+          : new Date(value || Date.now());
+
+    if (isConfigured && realDb) {
+      const snap = await getDocs(query(
+        collection(realDb, "ventas"),
+        where("fecha", ">=", Timestamp.fromDate(startDate)),
+        where("fecha", "<=", Timestamp.fromDate(endDate)),
+        orderBy("fecha", "desc")
+      ));
+      return snap.docs.map(snapshot => {
+        const data = snapshot.data();
+        return {
+          ...data,
+          id: snapshot.id,
+          folio: String(data.folio || snapshot.id),
+          fecha: toDate(data.fecha),
+          items: Array.isArray(data.items) ? data.items : [],
+          estado: data.estado || "activo",
+          en_papelera: data.en_papelera === true
+        } as Venta;
+      });
+    }
+
+    return getLocalStorageItem<Venta[]>("ventas_maestras", []).filter(sale => {
+      const saleTime = toDate(sale.fecha).getTime();
+      return saleTime >= startMs && saleTime <= endMs;
+    });
+  },
+
+  // Fallback para consultas directas de movimientos de salida si fuera necesario
+  getVentasByDateRange: async (startDate: Date, endDate: Date): Promise<Movimiento[]> => {
+    const startMs = startDate.getTime();
+    const endMs = endDate.getTime();
+
+    if (isConfigured && realDb) {
+      const startTimestamp = Timestamp.fromDate(startDate);
+      const endTimestamp = Timestamp.fromDate(endDate);
+
+      try {
+        const q = query(
+          collection(realDb, "movimientos"),
+          where("tipo", "==", "salida"),
+          where("fecha", ">=", startTimestamp),
+          where("fecha", "<=", endTimestamp),
+          orderBy("fecha", "desc")
+        );
+
+        const snap = await getDocs(q);
+        const list: Movimiento[] = [];
+
+        snap.forEach(d => {
+          const data = d.data();
+          if ((data.estado || "activo") === "anulado" || data.en_papelera === true) return;
+
+          const docDate = data.fecha
+            ? (data.fecha as Timestamp).toDate
+              ? (data.fecha as Timestamp).toDate()
+              : new Date(typeof data.fecha === "string" ? data.fecha : (data.fecha as any).seconds * 1000)
+            : new Date();
+
+          list.push({
+            id: d.id,
+            folio: data.folio,
+            venta_id: data.venta_id,
+            venta_partida: typeof data.venta_partida === "number" ? data.venta_partida : undefined,
+            venta_total_partidas: typeof data.venta_total_partidas === "number" ? data.venta_total_partidas : undefined,
+            venta_subtotal: typeof data.venta_subtotal === "number" ? data.venta_subtotal : undefined,
+            venta_total_cobrado: typeof data.venta_total_cobrado === "number" ? data.venta_total_cobrado : undefined,
+            venta_total_costos: typeof data.venta_total_costos === "number" ? data.venta_total_costos : undefined,
+            canal_venta: data.canal_venta || undefined,
+            canal_venta_nombre: data.canal_venta_nombre || undefined,
+            porcentaje_precio: typeof data.porcentaje_precio === "number" ? data.porcentaje_precio : undefined,
+            afecta_stock: typeof data.afecta_stock === "boolean" ? data.afecta_stock : undefined,
+            anticipo_porcentaje: typeof data.anticipo_porcentaje === "number" ? data.anticipo_porcentaje : undefined,
+            venta_total_recibido: typeof data.venta_total_recibido === "number" ? data.venta_total_recibido : undefined,
+            venta_saldo_pendiente: typeof data.venta_saldo_pendiente === "number" ? data.venta_saldo_pendiente : undefined,
+            ingreso_reconocido: typeof data.ingreso_reconocido === "number" ? data.ingreso_reconocido : undefined,
+            subtipo: data.subtipo || undefined,
+            venta_relacionada_id: data.venta_relacionada_id || undefined,
+            estado_pago: data.estado_pago || undefined,
+            sku: data.sku,
+            almacen_id: data.almacen_id,
+            tipo: "salida",
+            cantidad: Number(data.cantidad) || 0,
+            referencia: data.referencia,
+            usuario: data.usuario,
+            fecha: docDate,
+            cliente_id: data.cliente_id,
+            cliente_nombre: data.cliente_nombre,
+            cliente_tipo: data.cliente_tipo,
+            precio_unitario_venta: typeof data.precio_unitario_venta === "number" ? data.precio_unitario_venta : undefined,
+            total_venta: typeof data.total_venta === "number" ? data.total_venta : undefined,
+            envio_cobrado_cliente: typeof data.envio_cobrado_cliente === "number" ? data.envio_cobrado_cliente : undefined,
+            otros_cargos_cliente: typeof data.otros_cargos_cliente === "number" ? data.otros_cargos_cliente : undefined,
+            concepto_otros_cargos: data.concepto_otros_cargos || undefined,
+            costo_envio_venta: typeof data.costo_envio_venta === "number" ? data.costo_envio_venta : undefined,
+            otros_costos_venta: typeof data.otros_costos_venta === "number" ? data.otros_costos_venta : undefined,
+            concepto_otros_costos: data.concepto_otros_costos || undefined,
+            total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
+            total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
+            comentarios_venta: data.comentarios_venta || undefined,
+            ubicacion_entrega_id: data.ubicacion_entrega_id || undefined,
+            ubicacion_entrega_nombre: data.ubicacion_entrega_nombre || undefined,
+            repartidor_id: data.repartidor_id || undefined,
+            repartidor_nombre: data.repartidor_nombre || undefined,
+            estado: data.estado || "activo"
+          });
+        });
+
+        return list;
+      } catch (err: any) {
+        console.error("Error al consultar ventas por rango de fechas en Firestore:", err);
+        const isIndexErr =
+          err?.code === "failed-precondition" ||
+          (err?.message && (err.message.includes("index") || err.message.includes("indexes")));
+
+        if (isIndexErr) {
+          throw new Error(
+            "El índice de Firestore necesario para consultar este periodo no está disponible todavía. Revisa la sección Índices de Firebase y vuelve a intentarlo cuando aparezca como habilitado."
+          );
+        }
+        throw err;
+      }
+    }
+
+    const movs = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    return movs.filter(m => {
+      if (m.tipo !== "salida" || (m.estado || "activo") === "anulado" || m.en_papelera === true) return false;
+      const mDate = m.fecha instanceof Date ? m.fecha : new Date(typeof m.fecha === "string" ? m.fecha : (m.fecha as any).seconds * 1000);
+      const time = mDate.getTime();
+      return time >= startMs && time <= endMs;
+    }).map(m => ({
+      ...m,
+      fecha: m.fecha instanceof Date ? m.fecha : new Date(typeof m.fecha === "string" ? m.fecha : (m.fecha as any).seconds * 1000),
+      estado: m.estado || "activo"
+    }));
+  },
+
+  // --- MÓDULO DE COMPRAS (REGISTRO POR LOTE ATÓMICO) ---
+  registerCompraTransaction: async (compraData: {
+    proveedor: string;
+    fecha?: Date;
+    almacen_id: string;
+    items: CompraItem[];
+    costo_envio?: number;
+    comisiones?: number;
+    descuentos?: number;
+    referencia?: string;
+    notas?: string;
+    drop_id?: string;
+  }): Promise<{ id: string; folio: string; movimientosCount: number }> => {
+    const user = authService.getCurrentUser();
+    const usuarioEmail = user ? user.email : "sistema@empresa.com";
+
+    const proveedorClean = (compraData.proveedor || "").trim();
+    if (!proveedorClean) {
+      throw new Error("El nombre o razón social del proveedor es obligatorio.");
+    }
+
+    const almacenId = (compraData.almacen_id || "").trim();
+    if (!almacenId) {
+      throw new Error("El almacén de recepción es obligatorio.");
+    }
+
+    if (!compraData.items || compraData.items.length === 0) {
+      throw new Error("Debe incluir al menos un producto/variante en la compra.");
+    }
+
+    const validItems: CompraItem[] = [];
+    const purchaseSkus = new Set<string>();
+    let totalUnidades = 0;
+    let subtotal = 0;
+
+    for (const item of compraData.items) {
+      const cleanSku = (item.sku || "").trim().toUpperCase();
+      const qty = Number(item.cantidad);
+      const unitCost = Number(item.costo_unitario);
+
+      if (!cleanSku) {
+        throw new Error("Cada partida debe tener un SKU válido.");
+      }
+      if (isNaN(qty) || qty <= 0) {
+        throw new Error(`La cantidad para el SKU ${cleanSku} debe ser mayor a cero.`);
+      }
+      if (isNaN(unitCost) || unitCost < 0) {
+        throw new Error(`El costo unitario para el SKU ${cleanSku} no puede ser negativo.`);
+      }
+      if (purchaseSkus.has(cleanSku)) {
+        throw new Error(`El SKU ${cleanSku} está repetido. Unifica su cantidad en una sola partida.`);
+      }
+      purchaseSkus.add(cleanSku);
+
+      const itemSubtotal = qty * unitCost;
+      totalUnidades += qty;
+      subtotal += itemSubtotal;
+
+      validItems.push({
+        sku: cleanSku,
+        nombre_producto: item.nombre_producto || "",
+        variante_label: item.variante_label || "",
+        cantidad: qty,
+        costo_unitario: unitCost,
+        subtotal: itemSubtotal
+      });
+    }
+
+    const costoEnvio = Number(compraData.costo_envio) || 0;
+    const comisiones = Number(compraData.comisiones) || 0;
+    const descuentos = Number(compraData.descuentos) || 0;
+    const totalCompra = Math.max(0, subtotal + costoEnvio + comisiones - descuentos);
+
+    const purchaseDate = compraData.fecha instanceof Date ? compraData.fecha : new Date();
+    const fechaStr = getLocalDateString(purchaseDate);
+    const dropId = (compraData.drop_id || "").trim();
+
+    if (isConfigured && realDb) {
+      const compraCounterRef = doc(realDb, "contadores", "compra");
+      const entradaCounterRef = doc(realDb, "contadores", "entrada");
+      const compraDocRef = doc(collection(realDb, "compras"));
+      const compraDocId = compraDocRef.id;
+
+      const periodoKey = getPeriodoKey(purchaseDate);
+      const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+      const dropRef = dropId ? doc(realDb, "drops", dropId) : null;
+
+      let generatedCompraFolio = "";
+      let dropNombre = "";
+
+      await runTransaction(realDb, async (transaction) => {
+        // 1. Obtener consecutivo de compras
+        const compraCounterSnap = await transaction.get(compraCounterRef);
+        let nextCompraNumber = 1;
+        if (compraCounterSnap.exists()) {
+          const data = compraCounterSnap.data();
+          if (typeof data?.ultimo_consecutivo === "number") {
+            nextCompraNumber = data.ultimo_consecutivo + 1;
+          }
+        }
+        generatedCompraFolio = `COMP-${nextCompraNumber}`;
+
+        // 2. Obtener consecutivo de entradas
+        const entradaCounterSnap = await transaction.get(entradaCounterRef);
+        let nextEntradaNumber = 1;
+        if (entradaCounterSnap.exists()) {
+          const data = entradaCounterSnap.data();
+          if (typeof data?.ultimo_consecutivo === "number") {
+            nextEntradaNumber = data.ultimo_consecutivo + 1;
+          }
+        }
+
+        // 2.5 Lectura de stock de todas las partidas y del índice de periodos financieros
+        const stockSnaps: any[] = [];
+        for (let i = 0; i < validItems.length; i++) {
+          const item = validItems[i];
+          const stockKey = `${item.sku}_${almacenId}`;
+          const stockRef = doc(realDb, "stock", stockKey);
+          const snap = await transaction.get(stockRef);
+          stockSnaps.push({ stockKey, stockRef, snap, item });
+        }
+
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+        const dropSnap = dropRef ? await transaction.get(dropRef) : null;
+        if (dropRef) {
+          if (!dropSnap?.exists() || dropSnap.data()?.en_papelera === true) {
+            throw new Error("El drop seleccionado ya no está disponible.");
+          }
+          if (dropSnap.data()?.estado === "cerrado") {
+            throw new Error("No puedes registrar compras en un drop cerrado.");
+          }
+          dropNombre = String(dropSnap.data()?.nombre || "").trim();
+        }
+
+        // 3. Procesar stock y movimientos de cada partida
+        for (let i = 0; i < stockSnaps.length; i++) {
+          const { stockKey, stockRef, snap, item } = stockSnaps[i];
+          const currentQty = snap.exists() ? (Number(snap.data()?.cantidad) || 0) : 0;
+          const newQty = currentQty + item.cantidad;
+
+          // Actualizar stock
+          transaction.set(stockRef, {
+            id: stockKey,
+            sku: item.sku,
+            almacen_id: almacenId,
+            cantidad: newQty,
+            actualizado: Timestamp.now()
+          }, { merge: true });
+
+          transaction.set(doc(realDb, "productos", item.sku), {
+            precio_costo: item.costo_unitario,
+            actualizado_at: Timestamp.now()
+          }, { merge: true });
+
+          // Registrar movimiento de auditoría interna
+          const movFolio = `Entrada-${nextEntradaNumber + i}`;
+          const movRef = doc(collection(realDb, "movimientos"));
+          const refText = compraData.referencia 
+            ? `${compraData.referencia} (Compra ${generatedCompraFolio})` 
+            : `Compra ${generatedCompraFolio} - Proveedor: ${proveedorClean}`;
+
+          transaction.set(movRef, {
+            folio: movFolio,
+            sku: item.sku,
+            almacen_id: almacenId,
+            tipo: "entrada",
+            cantidad: item.cantidad,
+            referencia: refText,
+            usuario: usuarioEmail,
+            fecha: Timestamp.fromDate(purchaseDate),
+            compra_id: compraDocId,
+            ...(dropId ? { drop_id: dropId, drop_nombre: dropNombre } : {}),
+            lote_id: generatedCompraFolio,
+            costo_unitario: item.costo_unitario,
+            estado: "activo"
+          });
+        }
+
+        // 4. Actualizar contadores
+        transaction.set(compraCounterRef, {
+          tipo: "compra",
+          ultimo_consecutivo: nextCompraNumber,
+          actualizado: Timestamp.now()
+        }, { merge: true });
+
+        transaction.set(entradaCounterRef, {
+          tipo: "entrada",
+          ultimo_consecutivo: nextEntradaNumber + validItems.length - 1,
+          actualizado: Timestamp.now()
+        }, { merge: true });
+
+        // 5. Guardar documento maestro de Compra
+        transaction.set(compraDocRef, {
+          folio: generatedCompraFolio,
+          proveedor: proveedorClean,
+          fecha: Timestamp.fromDate(purchaseDate),
+          fecha_str: fechaStr,
+          almacen_id: almacenId,
+          ...(dropId ? { drop_id: dropId, drop_nombre: dropNombre } : {}),
+          items: validItems,
+          total_unidades: totalUnidades,
+          subtotal: subtotal,
+          costo_envio: costoEnvio,
+          comisiones: comisiones,
+          descuentos: descuentos,
+          total: totalCompra,
+          referencia: compraData.referencia || "",
+          notas: compraData.notas || "",
+          creado_por: usuarioEmail,
+          creado_at: Timestamp.now(),
+          estado: "completada"
+        });
+
+        // 6. Actualización atómica de periodos_financieros
+        if (periodRef && periodoKey) {
+          const updatedPeriod = computeNewPeriodIndexData(
+            periodSnap?.exists() ? periodSnap.data() : null,
+            periodoKey,
+            0,
+            1,
+            0
+          );
+          transaction.set(periodRef, updatedPeriod, { merge: true });
+        }
+      });
+
+      clearFinanzasCache();
+      clearPeriodosFinancierosCache();
+      return {
+        id: compraDocId,
+        folio: generatedCompraFolio,
+        movimientosCount: validItems.length
+      };
+    }
+
+    // --- MODO LOCAL / EMULADOR ---
+    let localDropNombre = "";
+    if (dropId) {
+      const localDrop = getLocalStorageItem<Drop[]>("drops", []).find(item => item.id === dropId && item.en_papelera !== true);
+      if (!localDrop) throw new Error("El drop seleccionado ya no está disponible.");
+      if (localDrop.estado === "cerrado") throw new Error("No puedes registrar compras en un drop cerrado.");
+      localDropNombre = localDrop.nombre;
+    }
+
+    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
+    const comprasList = getLocalStorageItem<Compra[]>("compras", []);
+    const productosList = getLocalStorageItem<Producto[]>("productos", []);
+    const movimientosList = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const counters = getLocalStorageItem<Record<string, number>>("contadores_movimientos", {
+      entrada: 0,
+      salida: 0,
+      transferencia: 0,
+      ajuste: 0,
+      compra: 0
+    });
+
+    const nextCompraNum = (counters.compra || 0) + 1;
+    counters.compra = nextCompraNum;
+    const generatedCompraFolio = `COMP-${nextCompraNum}`;
+    const compraDocId = "comp_" + Math.random().toString(36).substr(2, 9);
+
+    for (const item of validItems) {
+      const stockKey = `${item.sku}_${almacenId}`;
+      const currentQty = stockMap[stockKey]?.cantidad || 0;
+      stockMap[stockKey] = {
+        id: stockKey,
+        sku: item.sku,
+        almacen_id: almacenId,
+        cantidad: currentQty + item.cantidad,
+        actualizado: new Date()
+      };
+
+      const nextEntradaNum = (counters.entrada || 0) + 1;
+      counters.entrada = nextEntradaNum;
+      const movFolio = `Entrada-${nextEntradaNum}`;
+      const refText = compraData.referencia 
+        ? `${compraData.referencia} (Compra ${generatedCompraFolio})` 
+        : `Compra ${generatedCompraFolio} - Proveedor: ${proveedorClean}`;
+
+      movimientosList.push({
+        id: "mov_" + Math.random().toString(36).substr(2, 9),
+        folio: movFolio,
+        sku: item.sku,
+        almacen_id: almacenId,
+        tipo: "entrada",
+        cantidad: item.cantidad,
+        referencia: refText,
+        usuario: usuarioEmail,
+        fecha: purchaseDate,
+        compra_id: compraDocId,
+        ...(dropId ? { drop_id: dropId, drop_nombre: localDropNombre } : {}),
+        lote_id: generatedCompraFolio,
+        costo_unitario: item.costo_unitario,
+        estado: "activo"
+      });
+      const productIndex = productosList.findIndex(producto => producto.sku === item.sku);
+      if (productIndex >= 0) productosList[productIndex] = { ...productosList[productIndex], precio_costo: item.costo_unitario, actualizado_at: new Date() };
+    }
+
+    setLocalStorageItem("contadores_movimientos", counters);
+    setLocalStorageItem("stock", stockMap);
+    notifyListeners("stock", stockMap);
+    setLocalStorageItem("movimientos", movimientosList);
+    setLocalStorageItem("productos", productosList);
+    notifyListeners("productos", productosList);
+    notifyListeners("movimientos", movimientosList);
+
+    const nuevaCompra: Compra = {
+      id: compraDocId,
+      folio: generatedCompraFolio,
+      proveedor: proveedorClean,
+      fecha: purchaseDate,
+      fecha_str: fechaStr,
+      almacen_id: almacenId,
+      drop_id: dropId || undefined,
+      drop_nombre: dropId ? localDropNombre : undefined,
+      items: validItems,
+      total_unidades: totalUnidades,
+      subtotal: subtotal,
+      costo_envio: costoEnvio,
+      comisiones: comisiones,
+      descuentos: descuentos,
+      total: totalCompra,
+      referencia: compraData.referencia || "",
+      notas: compraData.notas || "",
+      creado_por: usuarioEmail,
+      creado_at: new Date(),
+      estado: "completada"
+    };
+
+    comprasList.unshift(nuevaCompra);
+    setLocalStorageItem("compras", comprasList);
+    notifyListeners("compras", comprasList);
+
+    clearFinanzasCache();
+    clearPeriodosFinancierosCache();
+    return {
+      id: compraDocId,
+      folio: generatedCompraFolio,
+      movimientosCount: validItems.length
+    };
+  },
+
+  enviarCompraPapelera: async (compraId: string): Promise<void> => {
+    if (!compraId) throw new Error("ID de compra no proporcionado.");
+    const user = authService.getCurrentUser();
+    const usuarioEmail = user?.email || "sistema@empresa.com";
+
+    if (isConfigured && realDb) {
+      const compraRef = doc(realDb, "compras", compraId);
+      const movementsSnap = await getDocs(query(collection(realDb, "movimientos"), where("compra_id", "==", compraId)));
+      const movementRefs = movementsSnap.docs.map(item => item.ref);
+
+      await runTransaction(realDb, async transaction => {
+        const compraSnap = await transaction.get(compraRef);
+        if (!compraSnap.exists()) throw new Error("La compra no existe.");
+        if (compraSnap.data().estado === "anulada") throw new Error("La compra ya está anulada.");
+
+        const movementSnaps: any[] = [];
+        for (const movementRef of movementRefs) movementSnaps.push(await transaction.get(movementRef));
+
+        const quantitiesByStock = new Map<string, { sku: string; almacenId: string; cantidad: number; ref: any }>();
+        movementSnaps.forEach(snapshot => {
+          if (!snapshot.exists() || snapshot.data().estado === "anulado") return;
+          const data = snapshot.data();
+          const sku = String(data.sku || "").trim().toUpperCase();
+          const almacenId = String(data.almacen_id || "");
+          const key = `${sku}_${almacenId}`;
+          const current = quantitiesByStock.get(key);
+          quantitiesByStock.set(key, {
+            sku,
+            almacenId,
+            cantidad: (current?.cantidad || 0) + (Number(data.cantidad) || 0),
+            ref: doc(realDb!, "stock", key)
+          });
+        });
+
+        const stockEntries = [...quantitiesByStock.values()];
+        const stockSnaps: any[] = [];
+        for (const entry of stockEntries) stockSnaps.push(await transaction.get(entry.ref));
+
+        const periodoKey = getPeriodoKey(compraSnap.data().fecha);
+        const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+
+        stockEntries.forEach((entry, index) => {
+          const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
+          if (currentQty < entry.cantidad) {
+            throw new Error(
+              `No se puede enviar esta compra a la Papelera porque parte de ${entry.sku} ya fue vendida, transferida o ajustada. ` +
+              `Hay ${currentQty} unidades disponibles y se necesitan ${entry.cantidad} para revertir la compra. ` +
+              `Primero cancela o revierte los movimientos posteriores relacionados.`
+            );
+          }
+        });
+
+        const now = Timestamp.now();
+        stockEntries.forEach((entry, index) => {
+          const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
+          transaction.set(entry.ref, {
+            id: `${entry.sku}_${entry.almacenId}`,
+            sku: entry.sku,
+            almacen_id: entry.almacenId,
+            cantidad: currentQty - entry.cantidad,
+            actualizado: now
+          }, { merge: true });
+        });
+        movementSnaps.forEach(snapshot => {
+          if (!snapshot.exists()) return;
+          const wasCancelled = snapshot.data().estado === "anulado";
+          transaction.update(snapshot.ref, wasCancelled
+            ? {
+                en_papelera: true,
+                desactivado_at: now,
+                estado_antes_papelera: "anulado"
+              }
+            : {
+                estado: "anulado",
+                anulado_at: now,
+                anulado_por: usuarioEmail,
+                motivo_anulacion: "Compra enviada a Papelera",
+                en_papelera: true,
+                desactivado_at: now,
+                estado_antes_papelera: "activo"
+              }
+          );
+        });
+        transaction.set(compraRef, {
+          estado: "anulada",
+          en_papelera: true,
+          desactivado_at: now,
+          anulado_por: usuarioEmail
+        }, { merge: true });
+
+        if (periodRef && periodoKey) {
+          transaction.set(periodRef, computeNewPeriodIndexData(
+            periodSnap?.exists() ? periodSnap.data() : null,
+            periodoKey,
+            0,
+            -1,
+            0
+          ), { merge: true });
+        }
+      });
+
+      clearFinanzasCache();
+      clearPeriodosFinancierosCache();
+      return;
+    }
+
+    const compras = getLocalStorageItem<Compra[]>("compras", []);
+    const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
+    const compraIndex = compras.findIndex(compra => compra.id === compraId);
+    if (compraIndex === -1) throw new Error("La compra no existe.");
+    if (compras[compraIndex].estado === "anulada") throw new Error("La compra ya está anulada.");
+    const linked = movimientos.filter(movimiento => movimiento.compra_id === compraId && movimiento.estado !== "anulado");
+    const totals = new Map<string, number>();
+    linked.forEach(movimiento => {
+      const key = `${movimiento.sku.trim().toUpperCase()}_${movimiento.almacen_id}`;
+      totals.set(key, (totals.get(key) || 0) + (Number(movimiento.cantidad) || 0));
+    });
+    totals.forEach((cantidad, key) => {
+      if ((stockMap[key]?.cantidad || 0) < cantidad) throw new Error(`No hay stock suficiente para revertir ${key}.`);
+    });
+    const now = new Date();
+    totals.forEach((cantidad, key) => {
+      stockMap[key] = { ...stockMap[key], cantidad: (stockMap[key]?.cantidad || 0) - cantidad, actualizado: now };
+    });
+    movimientos.forEach((movimiento, index) => {
+      if (movimiento.compra_id === compraId) movimientos[index] = { ...movimiento, estado_antes_papelera: movimiento.estado === "anulado" ? "anulado" : "activo", estado: "anulado", anulado_at: now, anulado_por: usuarioEmail, motivo_anulacion: "Compra enviada a Papelera", en_papelera: true, desactivado_at: now };
+    });
+    compras[compraIndex] = { ...compras[compraIndex], estado: "anulada", en_papelera: true, desactivado_at: now };
+    setLocalStorageItem("stock", stockMap);
+    setLocalStorageItem("movimientos", movimientos);
+    setLocalStorageItem("compras", compras);
+    notifyListeners("stock", stockMap);
+    notifyListeners("movimientos", movimientos);
+    notifyListeners("compras", compras);
+    clearFinanzasCache();
+    clearPeriodosFinancierosCache();
+  },
+
+  restaurarCompraPapelera: async (compraId: string): Promise<void> => {
+    if (!compraId) throw new Error("ID de compra no proporcionado.");
+    if (isConfigured && realDb) {
+      const compraRef = doc(realDb, "compras", compraId);
+      const movementsSnap = await getDocs(query(collection(realDb, "movimientos"), where("compra_id", "==", compraId)));
+      const movementRefs = movementsSnap.docs.map(item => item.ref);
+      await runTransaction(realDb, async transaction => {
+        const compraSnap = await transaction.get(compraRef);
+        if (!compraSnap.exists()) throw new Error("La compra no existe.");
+        if (compraSnap.data().en_papelera !== true) throw new Error("La compra ya está activa.");
+        const movementSnaps: any[] = [];
+        for (const movementRef of movementRefs) movementSnaps.push(await transaction.get(movementRef));
+        const quantitiesByStock = new Map<string, { sku: string; almacenId: string; cantidad: number; ref: any }>();
+        movementSnaps.forEach(snapshot => {
+          if (!snapshot.exists()) return;
+          const data = snapshot.data();
+          if (data.estado_antes_papelera === "anulado") return;
+          const sku = String(data.sku || "").trim().toUpperCase();
+          const almacenId = String(data.almacen_id || "");
+          const key = `${sku}_${almacenId}`;
+          const current = quantitiesByStock.get(key);
+          quantitiesByStock.set(key, { sku, almacenId, cantidad: (current?.cantidad || 0) + (Number(data.cantidad) || 0), ref: doc(realDb!, "stock", key) });
+        });
+        const stockEntries = [...quantitiesByStock.values()];
+        const stockSnaps: any[] = [];
+        for (const entry of stockEntries) stockSnaps.push(await transaction.get(entry.ref));
+        const periodoKey = getPeriodoKey(compraSnap.data().fecha);
+        const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+        const now = Timestamp.now();
+        stockEntries.forEach((entry, index) => {
+          const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
+          transaction.set(entry.ref, { id: `${entry.sku}_${entry.almacenId}`, sku: entry.sku, almacen_id: entry.almacenId, cantidad: currentQty + entry.cantidad, actualizado: now }, { merge: true });
+        });
+        movementSnaps.forEach(snapshot => {
+          if (!snapshot.exists()) return;
+          const wasCancelled = snapshot.data().estado_antes_papelera === "anulado";
+          transaction.update(snapshot.ref, wasCancelled
+            ? { en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField() }
+            : { estado: "activo", anulado_at: deleteField(), anulado_por: deleteField(), motivo_anulacion: deleteField(), en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField() });
+        });
+        transaction.set(compraRef, { estado: "completada", en_papelera: false, desactivado_at: deleteField(), anulado_por: deleteField() }, { merge: true });
+        if (periodRef && periodoKey) transaction.set(periodRef, computeNewPeriodIndexData(periodSnap?.exists() ? periodSnap.data() : null, periodoKey, 0, 1, 0), { merge: true });
+      });
+      clearFinanzasCache();
+      clearPeriodosFinancierosCache();
+      return;
+    }
+    const compras = getLocalStorageItem<Compra[]>("compras", []);
+    const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
+    const compraIndex = compras.findIndex(compra => compra.id === compraId);
+    if (compraIndex === -1) throw new Error("La compra no existe.");
+    const now = new Date();
+    movimientos.forEach((movimiento, index) => {
+      if (movimiento.compra_id !== compraId) return;
+      const wasCancelled = movimiento.estado_antes_papelera === "anulado";
+      if (!wasCancelled) {
+        const key = `${movimiento.sku.trim().toUpperCase()}_${movimiento.almacen_id}`;
+        stockMap[key] = { ...(stockMap[key] || { id: key, sku: movimiento.sku, almacen_id: movimiento.almacen_id }), cantidad: (stockMap[key]?.cantidad || 0) + (Number(movimiento.cantidad) || 0), actualizado: now } as StockItem;
+      }
+      const restored = { ...movimiento, estado: wasCancelled ? "anulado" as const : "activo" as const, en_papelera: false };
+      if (!wasCancelled) { delete restored.anulado_at; delete restored.anulado_por; delete restored.motivo_anulacion; }
+      delete restored.desactivado_at; delete restored.estado_antes_papelera;
+      movimientos[index] = restored;
+    });
+    const restoredCompra = { ...compras[compraIndex], estado: "completada" as const, en_papelera: false };
+    delete restoredCompra.desactivado_at;
+    compras[compraIndex] = restoredCompra;
+    setLocalStorageItem("stock", stockMap); setLocalStorageItem("movimientos", movimientos); setLocalStorageItem("compras", compras);
+    notifyListeners("stock", stockMap); notifyListeners("movimientos", movimientos); notifyListeners("compras", compras);
+    clearFinanzasCache(); clearPeriodosFinancierosCache();
+  },
+
+  getComprasRealtime: (onUpdate: (compras: Compra[]) => void, onError?: (error: any) => void): (() => void) => {
+    if (isConfigured && realDb) {
+      const q = query(collection(realDb, "compras"), orderBy("fecha", "desc"), limit(100));
+      return onSnapshot(
+        q,
+        (snap) => {
+          const list: Compra[] = [];
+          snap.forEach(d => {
+            const data = d.data();
+            if (data.en_papelera === true) return;
+            list.push({
+              id: d.id,
+              folio: data.folio,
+              proveedor: data.proveedor,
+              fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
+              fecha_str: data.fecha_str,
+              almacen_id: data.almacen_id,
+              items: data.items || [],
+              total_unidades: Number(data.total_unidades) || 0,
+              subtotal: Number(data.subtotal) || 0,
+              costo_envio: Number(data.costo_envio) || 0,
+              comisiones: Number(data.comisiones) || 0,
+              descuentos: Number(data.descuentos) || 0,
+              total: Number(data.total) || 0,
+              referencia: data.referencia || "",
+              notas: data.notas || "",
+              creado_por: data.creado_por || "",
+              creado_at: data.creado_at ? (data.creado_at as Timestamp).toDate() : new Date(),
+              estado: data.estado || "completada"
+            });
+          });
+          onUpdate(list);
+        },
+        (error) => {
+          console.error("Error en listener de compras:", error);
+          onUpdate([]);
+          if (onError) onError(error);
+        }
+      );
+    }
+
+    const update = () => {
+      const list = getLocalStorageItem<Compra[]>("compras", []);
+      const parsed = list.filter(c => c.en_papelera !== true).map(c => ({
+        ...c,
+        fecha: c.fecha instanceof Date ? c.fecha : new Date(typeof c.fecha === "string" ? c.fecha : (c.fecha as any).seconds * 1000),
+        creado_at: c.creado_at instanceof Date ? c.creado_at : new Date(typeof c.creado_at === "string" ? c.creado_at : (c.creado_at as any).seconds * 1000)
+      }));
+      parsed.sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
+      onUpdate(parsed);
+    };
+
+    update();
+    listeners.compras.push(update);
+    return () => {
+      listeners.compras = listeners.compras.filter(cb => cb !== update);
+    };
+  },
+
+  getCompras: async (): Promise<Compra[]> => {
+    if (isConfigured && realDb) {
+      const q = query(collection(realDb, "compras"), orderBy("fecha", "desc"), limit(100));
+      const snap = await getDocs(q);
+      const list: Compra[] = [];
+      snap.forEach(d => {
+        const data = d.data();
+        if (data.en_papelera === true) return;
+        list.push({
+          id: d.id,
+          folio: data.folio,
+          proveedor: data.proveedor,
+          fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
+          fecha_str: data.fecha_str,
+          almacen_id: data.almacen_id,
+          drop_id: data.drop_id || undefined,
+          drop_nombre: data.drop_nombre || undefined,
+          items: data.items || [],
+          total_unidades: Number(data.total_unidades) || 0,
+          subtotal: Number(data.subtotal) || 0,
+          costo_envio: Number(data.costo_envio) || 0,
+          comisiones: Number(data.comisiones) || 0,
+          descuentos: Number(data.descuentos) || 0,
+          total: Number(data.total) || 0,
+          referencia: data.referencia || "",
+          notas: data.notas || "",
+          creado_por: data.creado_por || "",
+          creado_at: data.creado_at ? (data.creado_at as Timestamp).toDate() : new Date(),
+          estado: data.estado || "completada"
+        });
+      });
+      return list;
+    }
+
+    const list = getLocalStorageItem<Compra[]>("compras", []);
+    return list.filter(c => c.en_papelera !== true).map(c => ({
+      ...c,
+      fecha: c.fecha instanceof Date ? c.fecha : new Date(typeof c.fecha === "string" ? c.fecha : (c.fecha as any).seconds * 1000),
+      creado_at: c.creado_at instanceof Date ? c.creado_at : new Date(typeof c.creado_at === "string" ? c.creado_at : (c.creado_at as any).seconds * 1000)
+    })).sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
+  },
+
+  getComprasPaginated: async (options: {
+    pageSize?: number;
+    lastDoc?: any;
+    warehouseFilter?: string;
+    searchTerm?: string;
+  } = {}): Promise<{
+    items: Compra[];
+    lastDoc: any;
+    hasMore: boolean;
+    totalLoaded: number;
+  }> => {
+    const pageSize = options.pageSize || 50;
+
+    if (isConfigured && realDb) {
+      try {
+        let qConstraints: any[] = [orderBy("fecha", "desc"), limit(pageSize + 1)];
+
+        if (options.warehouseFilter && options.warehouseFilter !== "all") {
+          qConstraints.unshift(where("almacen_id", "==", options.warehouseFilter));
+        }
+
+        if (options.lastDoc) {
+          qConstraints.push(startAfter(options.lastDoc));
+        }
+
+        const q = query(collection(realDb, "compras"), ...qConstraints);
+        const snap = await getDocs(q);
+
+        const docs = snap.docs;
+        const hasMore = docs.length > pageSize;
+        const itemsToProcess = hasMore ? docs.slice(0, pageSize) : docs;
+        const nextLastDoc = itemsToProcess.length > 0 ? itemsToProcess[itemsToProcess.length - 1] : null;
+
+        const list: Compra[] = itemsToProcess.filter(d => d.data().en_papelera !== true).map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            folio: data.folio,
             proveedor: data.proveedor,
             fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
             fecha_str: data.fecha_str,
