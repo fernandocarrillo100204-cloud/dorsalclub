@@ -96,6 +96,13 @@ service cloud.firestore {
             'en_papelera', 'desactivado_at', 'estado_antes_papelera', 'periodo_descontado_papelera'
           ])
         )
+        ||
+        (
+          incoming().diff(existing()).affectedKeys().hasOnly(['drop_id', 'drop_nombre'])
+          && incoming().diff(existing()).affectedKeys().hasAny(['drop_id', 'drop_nombre'])
+          && (!('drop_id' in incoming()) || (incoming().drop_id is string && incoming().drop_id.size() > 0 && incoming().drop_id.size() <= 128))
+          && (!('drop_nombre' in incoming()) || (incoming().drop_nombre is string && incoming().drop_nombre.size() <= 100))
+        )
       );
       allow delete: if isSignedIn() && existing().en_papelera == true;
     }
@@ -160,7 +167,7 @@ service cloud.firestore {
         && (!('descripcion' in incoming()) || (
           incoming().descripcion is string && incoming().descripcion.size() <= 500
         ));
-      allow delete: if false;
+      allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
     // Migraciones Collection (one-time migration trackers)

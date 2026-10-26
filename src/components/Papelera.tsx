@@ -10,6 +10,7 @@ import { PapeleraItem, PapeleraTipo } from "../types";
 
 const TYPE_LABELS: Record<PapeleraTipo, string> = {
   cliente: "Cliente",
+  drop: "Drop",
   venta: "Venta",
   movimiento: "Movimiento",
   compra: "Compra",

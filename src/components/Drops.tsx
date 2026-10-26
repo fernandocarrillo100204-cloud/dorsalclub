@@ -13,10 +13,12 @@ import {
   Layers3,
   Loader2,
   PackageCheck,
+  Pencil,
   Plus,
   RefreshCw,
   ShoppingCart,
   TrendingUp,
+  Trash2,
   X
 } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
@@ -79,6 +81,11 @@ export default function Drops() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [editNombre, setEditNombre] = useState("");
+  const [editDescripcion, setEditDescripcion] = useState("");
   const [nombre, setNombre] = useState("");
   const [descripcion, setDescripcion] = useState("");
   const [activeTab, setActiveTab] = useState<DetailTab>("productos");
@@ -250,6 +257,46 @@ export default function Drops() {
     }
   };
 
+  const openEdit = () => {
+    if (!selectedDrop) return;
+    setEditNombre(selectedDrop.nombre);
+    setEditDescripcion(selectedDrop.descripcion || "");
+    setIsEditOpen(true);
+  };
+
+  const handleEdit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedDrop) return;
+    setSavingEdit(true);
+    setDetailError(null);
+    try {
+      await firestoreService.updateDrop(selectedDrop.id, { nombre: editNombre, descripcion: editDescripcion });
+      setDrops(current => current.map(item => item.id === selectedDrop.id ? { ...item, nombre: editNombre.trim(), descripcion: editDescripcion.trim() || undefined, actualizado_at: new Date() } : item));
+      setIsEditOpen(false);
+    } catch (err: any) {
+      setDetailError(err?.message || "No se pudo editar el drop.");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const archiveSelectedDrop = async () => {
+    if (!selectedDrop || archiving) return;
+    if (!window.confirm(`¿Enviar “${selectedDrop.nombre}” a la Papelera? Solo es posible si ya no tiene compras ni ventas asociadas.`)) return;
+    setArchiving(true);
+    setDetailError(null);
+    try {
+      await firestoreService.enviarDropPapelera(selectedDrop.id);
+      const remaining = drops.filter(item => item.id !== selectedDrop.id);
+      setDrops(remaining);
+      setSelectedId(remaining[0]?.id || "");
+    } catch (err: any) {
+      setDetailError(err?.message || "No se pudo enviar el drop a la Papelera.");
+    } finally {
+      setArchiving(false);
+    }
+  };
+
   return (
     <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-5" id="drops-page">
       <header className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 pb-4 border-b border-zinc-200 dark:border-zinc-800">
@@ -331,13 +378,10 @@ export default function Drops() {
                     {selectedDrop.descripcion && <p className="text-xs text-zinc-500 mt-1">{selectedDrop.descripcion}</p>}
                     <p className="text-[11px] text-zinc-400 mt-2">Creado el {toDate(selectedDrop.creado_at).toLocaleDateString("es-MX")}</p>
                   </div>
-                  <div>
-                    <label htmlFor="drop-status" className="block text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">Estado</label>
-                    <select id="drop-status" value={selectedDrop.estado} onChange={event => handleStatusChange(event.target.value as EstadoDrop)} disabled={updatingStatus} className="h-10 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 text-xs font-semibold text-zinc-900 dark:text-white disabled:opacity-60">
-                      <option value="preparacion">Preparación</option>
-                      <option value="en_venta">En venta</option>
-                      <option value="cerrado">Cerrado</option>
-                    </select>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <button type="button" onClick={openEdit} className="h-10 px-3 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-semibold inline-flex items-center gap-2 hover:bg-zinc-50 dark:hover:bg-zinc-800"><Pencil className="w-4 h-4" />Editar</button>
+                    <div><label htmlFor="drop-status" className="block text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1">Estado</label><select id="drop-status" value={selectedDrop.estado} onChange={event => handleStatusChange(event.target.value as EstadoDrop)} disabled={updatingStatus} className="h-10 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 text-xs font-semibold text-zinc-900 dark:text-white disabled:opacity-60"><option value="preparacion">Preparación</option><option value="en_venta">En venta</option><option value="cerrado">Cerrado</option></select></div>
+                    <button type="button" onClick={archiveSelectedDrop} disabled={archiving} title="Enviar a Papelera" aria-label={`Enviar ${selectedDrop.nombre} a la Papelera`} className="h-10 w-10 rounded-xl border border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-400 inline-flex items-center justify-center hover:bg-rose-50 dark:hover:bg-rose-950/30 disabled:opacity-50">{archiving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}</button>
                   </div>
                 </div>
               </section>
@@ -416,6 +460,19 @@ export default function Drops() {
               <p className="text-[11px] text-zinc-500">Se creará en estado <strong>Preparación</strong>. Cuando estés listo para registrar ventas, cámbialo a <strong>En venta</strong>.</p>
             </div>
             <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-2"><button type="button" onClick={() => setIsCreateOpen(false)} className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-600 dark:text-zinc-300">Cancelar</button><button type="submit" disabled={creating || !nombre.trim()} className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold disabled:opacity-50 flex items-center gap-2">{creating && <Loader2 className="w-4 h-4 animate-spin" />} Crear drop</button></div>
+          </form>
+        </div>
+      )}
+
+      {isEditOpen && selectedDrop && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="edit-drop-title">
+          <form onSubmit={handleEdit} className="w-full max-w-lg rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between"><h2 id="edit-drop-title" className="font-bold text-zinc-900 dark:text-white">Editar drop</h2><button type="button" onClick={() => setIsEditOpen(false)} aria-label="Cerrar" className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"><X className="w-4 h-4" /></button></div>
+            <div className="p-5 space-y-4">
+              <div><label htmlFor="edit-drop-name" className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">Nombre *</label><input id="edit-drop-name" required maxLength={100} value={editNombre} onChange={event => setEditNombre(event.target.value)} className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2.5 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" /></div>
+              <div><label htmlFor="edit-drop-description" className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">Descripción (Opcional)</label><textarea id="edit-drop-description" maxLength={500} rows={3} value={editDescripcion} onChange={event => setEditDescripcion(event.target.value)} className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2.5 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none" /></div>
+            </div>
+            <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-2"><button type="button" onClick={() => setIsEditOpen(false)} className="px-4 py-2 rounded-xl text-xs font-semibold">Cancelar</button><button type="submit" disabled={savingEdit || !editNombre.trim()} className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold disabled:opacity-50 inline-flex items-center gap-2">{savingEdit && <Loader2 className="w-4 h-4 animate-spin" />}Guardar cambios</button></div>
           </form>
         </div>
       )}

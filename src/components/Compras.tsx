@@ -70,7 +70,7 @@ export default function Compras({
   onNavigateToHistory,
   onManageWarehouses
 }: ComprasProps) {
-  const goToHistory = () => {
+  const navigateToHistory = () => {
     if (onNavigateToHistory) onNavigateToHistory();
     else if (onNavigate) onNavigate("compras");
   };
@@ -124,6 +124,28 @@ export default function Compras({
   const [costoEnvio, setCostoEnvio] = useState<number | "">("");
   const [comisiones, setComisiones] = useState<number | "">("");
   const [descuentos, setDescuentos] = useState<number | "">("");
+  const [items, setItems] = useState<NewItemRow[]>([createEmptyPurchaseItem()]);
+  const [updatingCompraDropId, setUpdatingCompraDropId] = useState<string | null>(null);
+
+  const isPurchaseDirty = useMemo(() => {
+    if (!isNewView) return false;
+    const today = new Date().toISOString().split("T")[0];
+    return Boolean(
+      proveedor || almacenId || dropId || notas.trim() || costoEnvio !== "" || comisiones !== "" || descuentos !== "" || fecha !== today ||
+      items.some(item => item.sku || item.nombre_producto || item.variante_label || item.costo_unitario !== "" || item.cantidad !== 1)
+    );
+  }, [isNewView, proveedor, almacenId, dropId, notas, costoEnvio, comisiones, descuentos, fecha, items]);
+
+  const confirmDiscard = () => !isPurchaseDirty || window.confirm("Hay datos de una compra sin guardar. ¿Quieres salir y descartarlos?");
+  const goToHistory = () => { if (confirmDiscard()) navigateToHistory(); };
+  const manageWarehouses = () => { if (onManageWarehouses && confirmDiscard()) onManageWarehouses(); };
+
+  useEffect(() => {
+    if (!isPurchaseDirty) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [isPurchaseDirty]);
 
   const loadPurchaseSettings = async () => {
     try {
@@ -138,12 +160,24 @@ export default function Compras({
 
   useEffect(() => {
     firestoreService.getDrops()
-      .then(items => setDrops(items.filter(item => item.estado !== "cerrado")))
+      .then(setDrops)
       .catch((error: any) => setDropsError(error?.message || "No se pudieron cargar los drops."));
   }, []);
 
-  // Items in the current purchase draft
-  const [items, setItems] = useState<NewItemRow[]>([createEmptyPurchaseItem()]);
+  const updateCompraDrop = async (compra: Compra, nextDropId: string) => {
+    if (!compra.id) return;
+    setUpdatingCompraDropId(compra.id);
+    setFetchError(null);
+    try {
+      await firestoreService.updateCompraDropAssociation(compra.id, nextDropId || undefined);
+      const drop = drops.find(item => item.id === nextDropId);
+      setCompras(current => current.map(item => item.id === compra.id ? { ...item, drop_id: nextDropId || undefined, drop_nombre: drop?.nombre, actualizado_at: new Date() } : item));
+    } catch (error: any) {
+      setFetchError(error?.message || "No se pudo cambiar el drop de la compra.");
+    } finally {
+      setUpdatingCompraDropId(null);
+    }
+  };
 
   // Form submission state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -377,7 +411,7 @@ export default function Compras({
       setDropId("");
       setItems([createEmptyPurchaseItem()]);
       loadFirstPage(false);
-      goToHistory();
+      navigateToHistory();
     } catch (err: any) {
       console.error("Error al registrar compra:", err);
       setFormError(err.message || "No se pudo registrar la compra. Intente nuevamente.");
@@ -430,7 +464,7 @@ export default function Compras({
               Ingresa múltiples productos y variantes en una sola operación. Se incrementará el stock y registrará el folio de auditoría.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setIsSettingsOpen(true)} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"><Settings className="w-4 h-4" />Proveedores</button>{onManageWarehouses && <button type="button" onClick={onManageWarehouses} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"><Warehouse className="w-4 h-4" />Almacenes</button>}<button type="button" onClick={goToHistory} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-xs">Volver al historial</button></div>
+          <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setIsSettingsOpen(true)} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"><Settings className="w-4 h-4" />Proveedores</button>{onManageWarehouses && <button type="button" onClick={manageWarehouses} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"><Warehouse className="w-4 h-4" />Almacenes</button>}<button type="button" onClick={goToHistory} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-xs">Volver al historial</button></div>
         </div>
 
         {/* Feedback Messages */}
@@ -532,7 +566,7 @@ export default function Compras({
                   className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white disabled:opacity-60"
                 >
                   <option value="">Sin drop</option>
-                  {drops.map(item => <option key={item.id} value={item.id}>{item.nombre} — {item.estado === "en_venta" ? "En venta" : "Preparación"}</option>)}
+                  {drops.filter(item => item.estado !== "cerrado").map(item => <option key={item.id} value={item.id}>{item.nombre} — {item.estado === "en_venta" ? "En venta" : "Preparación"}</option>)}
                 </select>
                 {dropsError && <p className="text-[10px] text-rose-500 mt-1">{dropsError}</p>}
                 {!dropsError && drops.length === 0 && <p className="text-[10px] text-zinc-400 mt-1">Puedes crear uno desde Inventario → Drops.</p>}
@@ -987,6 +1021,7 @@ export default function Compras({
                   <th className="py-3 px-3">Almacén Destino</th>
                   <th className="py-3 px-3 text-center">Partidas / Uds</th>
                   <th className="py-3 px-3 text-right">Total Compra</th>
+                  <th className="py-3 px-3">Drop</th>
                   <th className="py-3 px-3">Referencia</th>
                   <th className="py-3 px-3 text-right">Acción</th>
                 </tr>
@@ -1064,6 +1099,14 @@ export default function Compras({
                             Sub: ${(compra.subtotal || 0).toFixed(2)}
                           </div>
                         ) : null}
+                      </td>
+
+                      {/* Drop */}
+                      <td className="py-3 px-3 min-w-44">
+                        <select value={compra.drop_id || ""} onChange={event => updateCompraDrop(compra, event.target.value)} disabled={updatingCompraDropId === compra.id} aria-label={`Drop de ${compra.folio}`} className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-[11px] disabled:opacity-60">
+                          <option value="">Sin drop</option>
+                          {drops.map(drop => <option key={drop.id} value={drop.id}>{drop.nombre}</option>)}
+                        </select>
                       </td>
 
                       {/* Referencia */}

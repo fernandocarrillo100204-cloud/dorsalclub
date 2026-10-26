@@ -302,6 +302,8 @@ export interface Drop {
     nanoseconds: number;
   } | Date;
   en_papelera?: boolean;
+  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
+  estado_antes_papelera?: EstadoDrop;
 }
 
 export interface Cliente {
@@ -409,6 +411,7 @@ export interface Compra {
   estado?: "completada" | "anulada";
   en_papelera?: boolean;
   desactivado_at?: { seconds: number; nanoseconds: number } | Date;
+  actualizado_at?: { seconds: number; nanoseconds: number } | Date;
 }
 
 export type PeriodoVenta = "esta_semana" | "mes_actual" | "ultimos_30_dias" | "personalizado";
@@ -600,6 +603,7 @@ export interface Gasto {
 
 export type PapeleraTipo =
   | "cliente"
+  | "drop"
   | "venta"
   | "movimiento"
   | "compra"

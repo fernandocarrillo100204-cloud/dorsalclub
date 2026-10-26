@@ -16,6 +16,15 @@ export interface SaleCalculationInput {
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 /**
+ * Devuelve los SKUs de una venta que no aparecen en las compras activas del
+ * drop elegido. Normaliza mayúsculas y espacios para evitar falsos errores.
+ */
+export const getMissingDropSkus = (saleSkus: string[], purchasedSkus: Iterable<string>): string[] => {
+  const allowed = new Set([...purchasedSkus].map(sku => String(sku || "").trim().toUpperCase()).filter(Boolean));
+  return [...new Set(saleSkus.map(sku => String(sku || "").trim().toUpperCase()).filter(sku => sku && !allowed.has(sku)))];
+};
+
+/**
  * Una venta solo puede anularse sin reembolso cuando nunca recibió dinero y
  * todavía no fue entregada. Los demás casos deben pasar por la devolución para
  * conservar el rastro del reembolso en Finanzas.

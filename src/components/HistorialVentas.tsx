@@ -22,7 +22,7 @@ import {
   WalletCards
 } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
-import { Almacen, Cliente, Movimiento, Producto, Venta, getSubtotalVenta } from "../types";
+import { Almacen, Cliente, Drop, Movimiento, Producto, Venta, getSubtotalVenta } from "../types";
 
 interface HistorialVentasProps {
   almacenes: Almacen[];
@@ -47,6 +47,7 @@ interface VentaAgrupada {
   recibido: number;
   saldo: number;
   master: boolean;
+  dropId?: string;
 }
 
 const money = new Intl.NumberFormat("es-MX", {
@@ -78,6 +79,7 @@ export default function HistorialVentas({
   const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
   const [ventasMaestras, setVentasMaestras] = useState<Venta[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [drops, setDrops] = useState<Drop[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [lastDoc, setLastDoc] = useState<any>(null);
@@ -113,6 +115,10 @@ export default function HistorialVentas({
     return () => {
       active = false;
     };
+  }, []);
+
+  useEffect(() => {
+    firestoreService.getDrops().then(setDrops).catch(() => setDrops([]));
   }, []);
 
   const loadFirstPage = useCallback(async () => {
@@ -225,7 +231,8 @@ export default function HistorialVentas({
         total,
         recibido: recibidoActual,
         saldo,
-        master: false
+        master: false,
+        dropId: principal.drop_id
       };
     });
 
@@ -270,7 +277,8 @@ export default function HistorialVentas({
         total: venta.total,
         recibido: venta.recibido,
         saldo: venta.saldo,
-        master: true
+        master: true,
+        dropId: venta.drop_id
       };
     });
 
@@ -360,6 +368,24 @@ export default function HistorialVentas({
     }
   };
 
+  const updateSaleDrop = async (venta: VentaAgrupada, nextDropId: string) => {
+    if (!venta.master) return;
+    setProcessingId(venta.key);
+    setError(null);
+    setSuccess(null);
+    try {
+      await firestoreService.updateVentaDropAssociation(venta.key, nextDropId || undefined);
+      const drop = drops.find(item => item.id === nextDropId);
+      setVentasMaestras(current => current.map(item => item.id === venta.key ? { ...item, drop_id: nextDropId || undefined, drop_nombre: drop?.nombre, actualizado_at: new Date() } : item));
+      setMovimientos(current => current.map(item => item.venta_id === venta.key ? { ...item, drop_id: nextDropId || undefined, drop_nombre: drop?.nombre } : item));
+      setSuccess(nextDropId ? `La venta ${venta.folio} ahora pertenece a ${drop?.nombre || "otro drop"}.` : `La venta ${venta.folio} quedó sin drop asociado.`);
+    } catch (associationError: any) {
+      setError(associationError?.message || "No se pudo cambiar el drop de la venta.");
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
   return (
     <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -428,7 +454,7 @@ export default function HistorialVentas({
                         <td className="px-4 py-4">{venta.estado === "anulado" ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-rose-600 dark:text-rose-400"><Ban className="h-3.5 w-3.5" />Anulada</span> : venta.estado === "devuelto" ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-violet-600 dark:text-violet-400"><RotateCcw className="h-3.5 w-3.5" />Devuelta</span> : <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" />Activa</span>}</td>
                         <td className="px-4 py-4"><div className="flex items-center justify-end gap-1"><button type="button" onClick={() => setExpandedKey(expanded ? null : venta.key)} className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800" title="Ver detalle" aria-label={`Ver detalle de ${venta.folio}`}>{expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button>{venta.estado === "activo" && venta.master && venta.recibido > 0.009 && <button type="button" onClick={() => setVentaToReturn(venta)} disabled={processing} className="p-2 rounded-lg text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/30 disabled:opacity-50" title="Registrar devolución completa" aria-label={`Devolver ${venta.folio}`}><RotateCcw className="h-4 w-4" /></button>}{venta.estado === "activo" && venta.recibido <= 0.009 && <button type="button" onClick={() => setVentaToCancel(venta)} disabled={processing} className="p-2 rounded-lg text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 disabled:opacity-50" title="Anular venta sin pagos" aria-label={`Anular ${venta.folio}`}><Ban className="h-4 w-4" /></button>}<button type="button" onClick={() => archiveSale(venta)} disabled={processing} className="p-2 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 disabled:opacity-50" title="Enviar a Papelera" aria-label={`Enviar ${venta.folio} a la Papelera`}>{processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}</button></div></td>
                       </tr>
-                      {expanded && <tr className="bg-zinc-50/80 dark:bg-zinc-950/30"><td colSpan={8} className="px-5 py-4"><div className="grid gap-2"><div className="grid grid-cols-[minmax(0,1fr)_100px_120px_140px] gap-3 text-[11px] uppercase tracking-wide text-zinc-500 px-2"><span>Producto</span><span className="text-center">Cantidad</span><span>Almacén</span><span className="text-right">Importe</span></div>{venta.items.map((item) => <div key={item.id || `${venta.key}-${item.sku}`} className="grid grid-cols-[minmax(0,1fr)_100px_120px_140px] gap-3 items-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2.5"><span><strong className="block truncate">{productName(item.sku)}</strong><small className="font-mono text-zinc-500">{item.sku}</small></span><span className="text-center font-semibold">{item.cantidad}</span><span className="text-xs text-zinc-500 truncate">{warehouseName(item.almacen_id)}</span><span className="text-right font-semibold">{money.format(getSubtotalVenta(item))}</span></div>)}</div>{venta.principal.comentarios_venta && <p className="mt-3 text-xs text-zinc-500"><strong>Comentarios:</strong> {venta.principal.comentarios_venta}</p>}</td></tr>}
+                      {expanded && <tr className="bg-zinc-50/80 dark:bg-zinc-950/30"><td colSpan={8} className="px-5 py-4"><div className="mb-4 flex flex-col sm:flex-row sm:items-center gap-2"><label htmlFor={`sale-drop-${venta.key}`} className="text-xs font-bold text-zinc-600 dark:text-zinc-300">Drop asociado</label><select id={`sale-drop-${venta.key}`} value={venta.dropId || ""} onChange={event => updateSaleDrop(venta, event.target.value)} disabled={!venta.master || processing} className="max-w-sm rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs disabled:opacity-60"><option value="">Sin drop</option>{drops.map(drop => <option key={drop.id} value={drop.id}>{drop.nombre} · {drop.estado === "preparacion" ? "Preparación" : drop.estado === "en_venta" ? "En venta" : "Cerrado"}</option>)}</select>{!venta.master && <span className="text-[11px] text-zinc-500">Las ventas anteriores al historial consolidado conservan su asociación original.</span>}</div><div className="grid gap-2"><div className="grid grid-cols-[minmax(0,1fr)_100px_120px_140px] gap-3 text-[11px] uppercase tracking-wide text-zinc-500 px-2"><span>Producto</span><span className="text-center">Cantidad</span><span>Almacén</span><span className="text-right">Importe</span></div>{venta.items.map((item) => <div key={item.id || `${venta.key}-${item.sku}`} className="grid grid-cols-[minmax(0,1fr)_100px_120px_140px] gap-3 items-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2.5"><span><strong className="block truncate">{productName(item.sku)}</strong><small className="font-mono text-zinc-500">{item.sku}</small></span><span className="text-center font-semibold">{item.cantidad}</span><span className="text-xs text-zinc-500 truncate">{warehouseName(item.almacen_id)}</span><span className="text-right font-semibold">{money.format(getSubtotalVenta(item))}</span></div>)}</div>{venta.principal.comentarios_venta && <p className="mt-3 text-xs text-zinc-500"><strong>Comentarios:</strong> {venta.principal.comentarios_venta}</p>}</td></tr>}
                     </React.Fragment>
                   );
                 })}
