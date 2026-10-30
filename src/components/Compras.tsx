@@ -443,7 +443,7 @@ export default function Compras({
     });
   }, [compras, searchTerm, selectedWarehouseFilter]);
 
-  // View: Formulario de Nueva Compra por Lote (/compras/nueva)
+  // View: Formulario para registrar una compra (/compras/nueva)
   if (isNewView) {
     return (
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6" id="compras-nueva-page">
@@ -458,10 +458,10 @@ export default function Compras({
                 Compras
               </button>
               <span>/</span>
-              <span className="text-zinc-900 dark:text-white font-bold">Nueva compra por lote</span>
+              <span className="text-zinc-900 dark:text-white font-bold">Registrar compra</span>
             </div>
             <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">
-              Registrar Compra por Lote
+              Registrar compra
             </h1>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
               Ingresa múltiples productos y variantes en una sola operación. Se incrementará el stock y registrará el folio de auditoría.
@@ -893,7 +893,7 @@ export default function Compras({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">
-            Compras de Mercancía
+            Historial de compras
           </h1>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
             Historial de lotes adquiridos por proveedor, costos unitarios y desglose de recepción en almacén.

@@ -77,8 +77,8 @@ const NAV_GROUPS: NavGroup[] = [
     icon: ShoppingBag,
     matchActive: (curr) => curr === "compras" || curr === "compras_nueva",
     items: [
-      { id: "compras", label: "Historial", icon: History, matchActive: (curr) => curr === "compras" },
-      { id: "compras_nueva", label: "Registrar compra", icon: Plus, matchActive: (curr) => curr === "compras_nueva" }
+      { id: "compras_nueva", label: "Registrar compra", icon: Plus, matchActive: (curr) => curr === "compras_nueva" },
+      { id: "compras", label: "Historial de compras", icon: History, matchActive: (curr) => curr === "compras" }
     ]
   },
   {
@@ -87,9 +87,9 @@ const NAV_GROUPS: NavGroup[] = [
     icon: ShoppingCart,
     matchActive: (curr) => ["ventas_nueva", "ventas_stock", "ventas_bajo_pedido", "ventas_emprendedor", "ventas_mayoreo", "ventas_pedidos", "ventas_historial"].includes(curr),
     items: [
-      { id: "ventas_stock", label: "Nueva venta", icon: ShoppingCart, matchActive: (curr) => ["ventas_stock", "ventas_nueva", "ventas_bajo_pedido", "ventas_emprendedor", "ventas_mayoreo"].includes(curr) },
-      { id: "ventas_pedidos", label: "Pedidos", icon: ClipboardList, matchActive: (curr) => curr === "ventas_pedidos" },
-      { id: "ventas_historial", label: "Historial", icon: History, matchActive: (curr) => curr === "ventas_historial" }
+      { id: "ventas_stock", label: "Registrar venta", icon: ShoppingCart, matchActive: (curr) => ["ventas_stock", "ventas_nueva", "ventas_bajo_pedido", "ventas_emprendedor", "ventas_mayoreo"].includes(curr) },
+      { id: "ventas_pedidos", label: "Seguimiento de pedidos", icon: ClipboardList, matchActive: (curr) => curr === "ventas_pedidos" },
+      { id: "ventas_historial", label: "Historial de ventas", icon: History, matchActive: (curr) => curr === "ventas_historial" }
     ]
   },
   {
