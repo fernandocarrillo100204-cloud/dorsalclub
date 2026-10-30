@@ -17,7 +17,8 @@ import {
   Movimiento,
   Compra,
   Gasto,
-  PeriodoFinancieroIndex
+  PeriodoFinancieroIndex,
+  MovimientoFinancieroManual
 } from "../types";
 import {
   getRealDb,
@@ -91,6 +92,7 @@ export interface PeriodContribution {
   deltaVentas: number;
   deltaCompras: number;
   deltaGastos: number;
+  deltaMovimientosManuales: number;
 }
 
 /**
@@ -129,7 +131,8 @@ export function getPeriodContribution(
       mes: parseInt(mStr, 10),
       deltaVentas: 1,
       deltaCompras: 0,
-      deltaGastos: 0
+      deltaGastos: 0,
+      deltaMovimientosManuales: 0
     };
   }
 
@@ -149,7 +152,8 @@ export function getPeriodContribution(
       mes: parseInt(mStr, 10),
       deltaVentas: 0,
       deltaCompras: 1,
-      deltaGastos: 0
+      deltaGastos: 0,
+      deltaMovimientosManuales: 0
     };
   }
 
@@ -169,7 +173,8 @@ export function getPeriodContribution(
       mes: parseInt(mStr, 10),
       deltaVentas: 0,
       deltaCompras: 0,
-      deltaGastos: 1
+      deltaGastos: 1,
+      deltaMovimientosManuales: 0
     };
   }
 
@@ -185,7 +190,8 @@ export function computeNewPeriodIndexData(
   periodo: string,
   deltaVentas = 0,
   deltaCompras = 0,
-  deltaGastos = 0
+  deltaGastos = 0,
+  deltaMovimientosManuales = 0
 ): PeriodoFinancieroIndex {
   const [yStr, mStr] = periodo.split("-");
   const anio = parseInt(yStr, 10);
@@ -194,11 +200,13 @@ export function computeNewPeriodIndexData(
   const prevVentas = Number(existingData?.ventasActivas) || 0;
   const prevCompras = Number(existingData?.comprasActivas) || 0;
   const prevGastos = Number(existingData?.gastosActivos) || 0;
+  const prevMovimientosManuales = Number(existingData?.movimientosManualesActivos) || 0;
 
   const ventasActivas = Math.max(0, prevVentas + deltaVentas);
   const comprasActivas = Math.max(0, prevCompras + deltaCompras);
   const gastosActivos = Math.max(0, prevGastos + deltaGastos);
-  const totalRegistrosActivos = ventasActivas + comprasActivas + gastosActivos;
+  const movimientosManualesActivos = Math.max(0, prevMovimientosManuales + deltaMovimientosManuales);
+  const totalRegistrosActivos = ventasActivas + comprasActivas + gastosActivos + movimientosManualesActivos;
 
   return {
     periodo,
@@ -207,6 +215,7 @@ export function computeNewPeriodIndexData(
     ventasActivas,
     comprasActivas,
     gastosActivos,
+    movimientosManualesActivos,
     totalRegistrosActivos,
     actualizadoEn: isRealFirebase ? Timestamp.now() : new Date()
   };
@@ -217,6 +226,7 @@ export interface PeriodDeltaItem {
   deltaVentas?: number;
   deltaCompras?: number;
   deltaGastos?: number;
+  deltaMovimientosManuales?: number;
 }
 
 /**
@@ -238,7 +248,8 @@ export async function applyPeriodIndexDeltas(
     return (
       (d.deltaVentas && d.deltaVentas !== 0) ||
       (d.deltaCompras && d.deltaCompras !== 0) ||
-      (d.deltaGastos && d.deltaGastos !== 0)
+      (d.deltaGastos && d.deltaGastos !== 0) ||
+      (d.deltaMovimientosManuales && d.deltaMovimientosManuales !== 0)
     );
   });
 
@@ -260,7 +271,8 @@ export async function applyPeriodIndexDeltas(
           d.periodo,
           d.deltaVentas || 0,
           d.deltaCompras || 0,
-          d.deltaGastos || 0
+          d.deltaGastos || 0,
+          d.deltaMovimientosManuales || 0
         );
         tx.set(doc(realDb, "periodos_financieros", d.periodo), updated, { merge: true });
       }
@@ -278,7 +290,8 @@ export async function applyPeriodIndexDeltas(
             d.periodo,
             d.deltaVentas || 0,
             d.deltaCompras || 0,
-            d.deltaGastos || 0
+            d.deltaGastos || 0,
+            d.deltaMovimientosManuales || 0
           );
           tx.set(doc(realDb, "periodos_financieros", d.periodo), updated, { merge: true });
         }
@@ -333,6 +346,7 @@ export async function getPeriodosFinancierosDisponibles(
             ventasActivas: Number(data.ventasActivas) || 0,
             comprasActivas: Number(data.comprasActivas) || 0,
             gastosActivos: Number(data.gastosActivos) || 0,
+            movimientosManualesActivos: Number(data.movimientosManualesActivos) || 0,
             totalRegistrosActivos: total,
             actualizadoEn: data.actualizadoEn
           });
@@ -355,13 +369,14 @@ export async function getPeriodosFinancierosDisponibles(
   const movs = getLocalStorageItem<Movimiento[]>("movimientos", []);
   const compras = getLocalStorageItem<Compra[]>("compras", []);
   const gastos = getLocalStorageItem<Gasto[]>("gastos", []);
+  const manuales = getLocalStorageItem<MovimientoFinancieroManual[]>("movimientos_financieros", []);
 
-  const map = new Map<string, { ventas: number; compras: number; gastos: number }>();
+  const map = new Map<string, { ventas: number; compras: number; gastos: number; manuales: number }>();
 
   for (const m of movs) {
     const contrib = getPeriodContribution(m, "venta");
     if (contrib) {
-      const curr = map.get(contrib.periodo) || { ventas: 0, compras: 0, gastos: 0 };
+      const curr = map.get(contrib.periodo) || { ventas: 0, compras: 0, gastos: 0, manuales: 0 };
       curr.ventas += 1;
       map.set(contrib.periodo, curr);
     }
@@ -370,7 +385,7 @@ export async function getPeriodosFinancierosDisponibles(
   for (const c of compras) {
     const contrib = getPeriodContribution(c, "compra");
     if (contrib) {
-      const curr = map.get(contrib.periodo) || { ventas: 0, compras: 0, gastos: 0 };
+      const curr = map.get(contrib.periodo) || { ventas: 0, compras: 0, gastos: 0, manuales: 0 };
       curr.compras += 1;
       map.set(contrib.periodo, curr);
     }
@@ -379,15 +394,24 @@ export async function getPeriodosFinancierosDisponibles(
   for (const g of gastos) {
     const contrib = getPeriodContribution(g, "gasto");
     if (contrib) {
-      const curr = map.get(contrib.periodo) || { ventas: 0, compras: 0, gastos: 0 };
+      const curr = map.get(contrib.periodo) || { ventas: 0, compras: 0, gastos: 0, manuales: 0 };
       curr.gastos += 1;
       map.set(contrib.periodo, curr);
     }
   }
 
+  for (const movement of manuales) {
+    if (movement.estado === "anulado") continue;
+    const periodo = getPeriodoKey(movement.fecha || movement.fecha_str);
+    if (!periodo) continue;
+    const curr = map.get(periodo) || { ventas: 0, compras: 0, gastos: 0, manuales: 0 };
+    curr.manuales += 1;
+    map.set(periodo, curr);
+  }
+
   const list: PeriodoFinancieroIndex[] = [];
   for (const [periodo, counts] of map.entries()) {
-    const total = counts.ventas + counts.compras + counts.gastos;
+    const total = counts.ventas + counts.compras + counts.gastos + counts.manuales;
     if (total > 0) {
       const [yStr, mStr] = periodo.split("-");
       list.push({
@@ -397,6 +421,7 @@ export async function getPeriodosFinancierosDisponibles(
         ventasActivas: counts.ventas,
         comprasActivas: counts.compras,
         gastosActivos: counts.gastos,
+        movimientosManualesActivos: counts.manuales,
         totalRegistrosActivos: total
       });
     }

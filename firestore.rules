@@ -156,6 +156,29 @@ service cloud.firestore {
       allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
+    // Movimientos financieros manuales: capital, otros ingresos, retiros y ajustes.
+    // Las ventas, compras y gastos conservan sus colecciones de origen.
+    match /movimientos_financieros/{movimientoId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && isValidId(movimientoId)
+        && incoming().tipo in ['aportacion_capital', 'otro_ingreso', 'retiro_propietario', 'ajuste_entrada', 'ajuste_salida']
+        && incoming().concepto is string && incoming().concepto.size() > 0 && incoming().concepto.size() <= 200
+        && incoming().monto is number && incoming().monto > 0
+        && incoming().fecha is timestamp
+        && incoming().fecha_str is string && incoming().fecha_str.size() > 0
+        && incoming().estado == 'activo';
+      allow update: if isSignedIn()
+        && existing().estado == 'activo'
+        && incoming().estado == 'anulado'
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'estado', 'motivo_anulacion', 'anulado_at', 'anulado_por', 'actualizado_at'
+        ])
+        && incoming().motivo_anulacion is string
+        && incoming().motivo_anulacion.size() > 0 && incoming().motivo_anulacion.size() <= 500;
+      allow delete: if false;
+    }
+
     // Drops comerciales: agrupadores independientes del calendario para compras y ventas.
     match /drops/{dropId} {
       allow read: if isSignedIn();

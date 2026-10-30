@@ -157,7 +157,7 @@ const NAV_GROUPS: NavGroup[] = [
     id: "finanzas",
     label: "Finanzas",
     icon: Receipt,
-    matchActive: (curr) => ["finanzas", "finanzas_gastos", "finanzas_gastos_nuevo", "finanzas_gastos_editar"].includes(curr),
+    matchActive: (curr) => ["finanzas", "finanzas_gastos", "finanzas_cobrar", "finanzas_gastos_nuevo", "finanzas_gastos_editar"].includes(curr),
     items: [
       {
         id: "finanzas",
@@ -167,9 +167,15 @@ const NAV_GROUPS: NavGroup[] = [
       },
       {
         id: "finanzas_gastos",
-        label: "Gastos",
+        label: "Movimientos",
         icon: Receipt,
         matchActive: (curr) => curr === "finanzas_gastos" || curr === "finanzas_gastos_nuevo" || curr === "finanzas_gastos_editar"
+      },
+      {
+        id: "finanzas_cobrar",
+        label: "Por cobrar",
+        icon: Receipt,
+        matchActive: (curr) => curr === "finanzas_cobrar"
       }
     ]
   }

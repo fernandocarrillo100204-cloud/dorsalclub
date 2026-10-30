@@ -5,19 +5,21 @@
 
 import React, { useState } from "react";
 import { Almacen } from "../types";
-import GastosHistorial from "./finanzas/GastosHistorial";
 import GastoForm from "./finanzas/GastoForm";
 import { ResumenFinanciero } from "./finanzas/ResumenFinanciero";
 import { FinanzasTabs } from "./finanzas/FinanzasTabs";
 import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 import { Settings } from "lucide-react";
+import MovimientosFinancieros from "./finanzas/MovimientosFinancieros";
+import CuentasPorCobrar from "./finanzas/CuentasPorCobrar";
 
 interface FinanzasProps {
   almacenes: Almacen[];
-  subView: "resumen" | "gastos" | "nuevo" | "editar";
+  subView: "resumen" | "movimientos" | "cobrar" | "nuevo" | "editar";
   gastoId?: string;
   onNavigateToResumen: () => void;
   onNavigateToGastos: () => void;
+  onNavigateToCobrar: () => void;
   onNavigateToNuevoGasto: () => void;
   onNavigateToEditarGasto: (gastoId: string) => void;
   onNavigateToVentas?: () => void;
@@ -30,6 +32,7 @@ export default function Finanzas({
   gastoId,
   onNavigateToResumen,
   onNavigateToGastos,
+  onNavigateToCobrar,
   onNavigateToNuevoGasto,
   onNavigateToEditarGasto,
   onNavigateToVentas,
@@ -66,31 +69,35 @@ export default function Finanzas({
             <FinanzasTabs
               activeTab="resumen"
               onNavigateToResumen={onNavigateToResumen}
-              onNavigateToGastos={onNavigateToGastos}
+              onNavigateToMovimientos={onNavigateToGastos}
+              onNavigateToCobrar={onNavigateToCobrar}
             />
           }
           onNavigateToGastos={onNavigateToGastos}
           onNavigateToVentas={onNavigateToVentas}
           onNavigateToCompras={onNavigateToCompras}
         />
-      ) : (
+      ) : subView === "movimientos" ? (
         <div className="space-y-6">
           {/* Barra alineada con las mismas pestañas para la vista de Gastos */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-50/60 dark:bg-slate-900/40 p-1.5 sm:p-2 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-2xs">
             <div className="flex items-center">
               <FinanzasTabs
-                activeTab="gastos"
+                activeTab="movimientos"
                 onNavigateToResumen={onNavigateToResumen}
-                onNavigateToGastos={onNavigateToGastos}
+                onNavigateToMovimientos={onNavigateToGastos}
+                onNavigateToCobrar={onNavigateToCobrar}
               />
             </div>
           </div>
-          <GastosHistorial
-            almacenes={almacenes}
-            onNuevoGasto={onNavigateToNuevoGasto}
-            onEditarGasto={onNavigateToEditarGasto}
-            configVersion={configVersion}
-          />
+          <MovimientosFinancieros onNuevoGasto={onNavigateToNuevoGasto} onEditarGasto={onNavigateToEditarGasto} />
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="flex items-center bg-slate-50/60 dark:bg-slate-900/40 p-2 rounded-2xl border border-slate-200/80 dark:border-slate-800/80">
+            <FinanzasTabs activeTab="cobrar" onNavigateToResumen={onNavigateToResumen} onNavigateToMovimientos={onNavigateToGastos} onNavigateToCobrar={onNavigateToCobrar} />
+          </div>
+          <CuentasPorCobrar />
         </div>
       )}
       <ConfiguracionModuloModal isOpen={isSettingsOpen} module="finanzas" onClose={() => setIsSettingsOpen(false)} onSaved={() => setConfigVersion(value => value + 1)} />

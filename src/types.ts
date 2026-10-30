@@ -360,6 +360,7 @@ export type NavigationTab =
   | "transferencias_nueva"
   | "historial" 
   | "finanzas_gastos"
+  | "finanzas_cobrar"
   | "finanzas_gastos_nuevo"
   | "finanzas_gastos_editar"
   | "finanzas"
@@ -401,6 +402,7 @@ export interface Compra {
   comisiones: number;
   descuentos: number;
   total: number;
+  clasificacion_financiera?: "operacion" | "inversion_inicial";
   referencia?: string; // Folio de factura / remisión
   notas?: string;
   creado_por: string;
@@ -576,6 +578,7 @@ export interface Gasto {
   concepto: string;
   categoria: CategoriaGasto | string;
   monto: number;
+  clasificacion_financiera?: "operacion" | "inversion_inicial";
   fecha: {
     seconds: number;
     nanoseconds: number;
@@ -599,6 +602,91 @@ export interface Gasto {
   estado?: "activo" | "inactivo";
   en_papelera?: boolean;
   desactivado_at?: { seconds: number; nanoseconds: number } | Date;
+}
+
+export type TipoMovimientoFinanciero =
+  | "aportacion_capital"
+  | "otro_ingreso"
+  | "retiro_propietario"
+  | "ajuste_entrada"
+  | "ajuste_salida";
+
+export interface MovimientoFinancieroManual {
+  id?: string;
+  tipo: TipoMovimientoFinanciero;
+  concepto: string;
+  monto: number;
+  fecha: { seconds: number; nanoseconds: number } | Date;
+  fecha_str: string;
+  metodo_pago?: string;
+  notas?: string;
+  creado_por: string;
+  creado_at: { seconds: number; nanoseconds: number } | Date;
+  actualizado_at: { seconds: number; nanoseconds: number } | Date;
+  estado: "activo" | "anulado";
+  motivo_anulacion?: string;
+  anulado_at?: { seconds: number; nanoseconds: number } | Date;
+  anulado_por?: string;
+}
+
+export interface MovimientoFinancieroFila {
+  id: string;
+  fecha: Date;
+  tipo: "venta" | "compra" | "gasto" | "capital" | "otro_ingreso" | "retiro" | "ajuste";
+  origen: string;
+  concepto: string;
+  entrada: number;
+  salida: number;
+  estado: string;
+  referencia?: string;
+  clasificacion?: "operacion" | "inversion_inicial";
+  editable?: boolean;
+}
+
+export interface CuentaPorCobrar {
+  venta_id: string;
+  folio: string;
+  fecha: Date;
+  cliente_nombre: string;
+  total: number;
+  cobrado: number;
+  pendiente: number;
+  estado_pago: "pagado" | "anticipo" | "pendiente";
+  canal_venta_nombre: string;
+}
+
+export interface FinanzasGraficaPunto {
+  clave: string;
+  etiqueta: string;
+  ingresos: number;
+  egresos: number;
+}
+
+export interface ResumenFinancieroConsolidado {
+  alcance: "mes" | "todo";
+  year?: number;
+  month?: number;
+  ingresosVentas: number;
+  otrosIngresos: number;
+  entradasOperativas: number;
+  comprasOperativas: number;
+  gastosOperativos: number;
+  costosAsociadosVentas: number;
+  egresosOperativos: number;
+  inversionInicial: number;
+  flujoOperativo: number;
+  aportacionesCapital: number;
+  retirosPropietario: number;
+  ajustesEntrada: number;
+  ajustesSalida: number;
+  movimientoCaja: number;
+  pendientePorCobrar: number;
+  numCuentasPorCobrar: number;
+  numVentas: number;
+  numCompras: number;
+  numGastos: number;
+  grafica: FinanzasGraficaPunto[];
+  movimientos: MovimientoFinancieroFila[];
 }
 
 export type PapeleraTipo =
@@ -652,6 +740,7 @@ export interface PeriodoFinancieroIndex {
   ventasActivas: number;
   comprasActivas: number;
   gastosActivos: number;
+  movimientosManualesActivos?: number;
   totalRegistrosActivos: number;
   actualizadoEn?: {
     seconds: number;

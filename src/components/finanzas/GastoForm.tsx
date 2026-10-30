@@ -53,6 +53,7 @@ export default function GastoForm({
   const [almacenId, setAlmacenId] = useState<string>("");
   const [proveedor, setProveedor] = useState("");
   const [notas, setNotas] = useState("");
+  const [clasificacionFinanciera, setClasificacionFinanciera] = useState<"operacion" | "inversion_inicial">("operacion");
 
   const [loadingInitial, setLoadingInitial] = useState(mode === "edit");
   const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
@@ -87,6 +88,7 @@ export default function GastoForm({
           setAlmacenId(g.almacen_id || "");
           setProveedor(g.proveedor || "");
           setNotas(g.notas || "");
+          setClasificacionFinanciera(g.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion");
         })
         .catch((err) => {
           console.error("Error al cargar gasto:", err);
@@ -163,7 +165,8 @@ export default function GastoForm({
           almacen_id: almacenId ? almacenId : undefined,
           almacen_nombre: almacenNombre,
           proveedor: proveedor.trim() ? proveedor.trim() : undefined,
-          notas: notas.trim() ? notas.trim() : undefined
+          notas: notas.trim() ? notas.trim() : undefined,
+          clasificacion_financiera: clasificacionFinanciera
         });
       } else if (mode === "edit" && gastoId) {
         await firestoreService.updateGasto(gastoId, {
@@ -176,7 +179,8 @@ export default function GastoForm({
           almacen_id: almacenId ? almacenId : "",
           almacen_nombre: almacenNombre ? almacenNombre : "",
           proveedor: proveedor.trim(),
-          notas: notas.trim()
+          notas: notas.trim(),
+          clasificacion_financiera: clasificacionFinanciera
         });
       }
 
@@ -463,6 +467,22 @@ export default function GastoForm({
                 />
               </div>
             </div>
+          </div>
+
+          <div>
+            <label htmlFor="gasto-clasificacion-financiera" className="block text-xs font-semibold uppercase tracking-wider text-[#475569] dark:text-[#94A3B8] mb-1.5">
+              Clasificación financiera
+            </label>
+            <select
+              id="gasto-clasificacion-financiera"
+              value={clasificacionFinanciera}
+              onChange={(event) => setClasificacionFinanciera(event.target.value as "operacion" | "inversion_inicial")}
+              className="w-full px-3.5 py-2.5 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] text-[#172033] dark:text-[#F8FAFC] text-sm focus:outline-none focus:ring-2 focus:ring-[#059669]"
+            >
+              <option value="operacion">Operación normal</option>
+              <option value="inversion_inicial">Inversión inicial</option>
+            </select>
+            <p className="mt-1 text-[10px] text-[#94A3B8]">La inversión inicial se excluye del flujo operativo, pero permanece en la caja total.</p>
           </div>
 
           {/* Notas */}

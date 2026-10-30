@@ -7,6 +7,7 @@
  * - Ventas activas (colección 'movimientos' con tipo == 'salida' y estado activo)
  * - Compras activas (colección 'compras' con estado no anulado)
  * - Gastos activos (colección 'gastos' con monto válido)
+ * - Movimientos financieros manuales activos (capital, otros ingresos, retiros y ajustes)
  *
  * y recalcula la colección liviana 'periodos_financieros' respetando los límites de Firestore.
  *
@@ -313,7 +314,8 @@ async function runMigration() {
         mes,
         ventasActivas: 0,
         comprasActivas: 0,
-        gastosActivos: 0
+        gastosActivos: 0,
+        movimientosManualesActivos: 0
       });
     }
     return periodsMap.get(periodKey);
@@ -322,7 +324,7 @@ async function runMigration() {
   // --------------------------------------------------------------------------
   // 4.1 VENTAS: colección 'movimientos' con tipo == 'salida'
   // --------------------------------------------------------------------------
-  console.log('\n[1/4] Consultando movimientos de venta activos (paginación máx 400)...');
+  console.log('\n[1/5] Consultando movimientos de venta activos (paginación máx 400)...');
   let totalMovimientosLeidos = 0;
   let ventasActivasContadas = 0;
 
@@ -359,7 +361,7 @@ async function runMigration() {
   // --------------------------------------------------------------------------
   // 4.2 COMPRAS: colección 'compras'
   // --------------------------------------------------------------------------
-  console.log('\n[2/4] Consultando compras activas (paginación máx 400)...');
+  console.log('\n[2/5] Consultando compras activas (paginación máx 400)...');
   let totalComprasLeidas = 0;
   let comprasActivasContadas = 0;
 
@@ -396,7 +398,7 @@ async function runMigration() {
   // --------------------------------------------------------------------------
   // 4.3 GASTOS: colección 'gastos'
   // --------------------------------------------------------------------------
-  console.log('\n[3/4] Consultando gastos operativos activos (paginación máx 400)...');
+  console.log('\n[3/5] Consultando gastos operativos activos (paginación máx 400)...');
   let totalGastosLeidos = 0;
   let gastosActivosContados = 0;
 
@@ -431,9 +433,29 @@ async function runMigration() {
   }
 
   // --------------------------------------------------------------------------
-  // 4.4 PERIODOS EXISTENTES EN 'periodos_financieros'
+  // 4.4 MOVIMIENTOS FINANCIEROS MANUALES
   // --------------------------------------------------------------------------
-  console.log('\n[4/4] Consultando documentos existentes en "periodos_financieros" (paginación máx 400)...');
+  console.log('\n[4/5] Consultando movimientos financieros manuales activos (paginación máx 400)...');
+  try {
+    await readQueryInPages(db.collection('movimientos_financieros'), (docSnap) => {
+      const data = docSnap.data();
+      if (String(data.estado || 'activo').toLowerCase() === 'anulado') return;
+      const parsed = parseAndValidatePeriod(data.fecha || data.fecha_str || data.creado_at);
+      if (!parsed) {
+        ignoredDocuments.push({ coleccion: 'movimientos_financieros', id: docSnap.id });
+        return;
+      }
+      getOrCreatePeriod(parsed.periodo, parsed.anio, parsed.mes).movimientosManualesActivos += 1;
+    }, 400);
+  } catch (err) {
+    console.error(` Falló la lectura de 'movimientos_financieros': ${err.message}`);
+    process.exit(1);
+  }
+
+  // --------------------------------------------------------------------------
+  // 4.5 PERIODOS EXISTENTES EN 'periodos_financieros'
+  // --------------------------------------------------------------------------
+  console.log('\n[5/5] Consultando documentos existentes en "periodos_financieros" (paginación máx 400)...');
   let totalPeriodosExistentes = 0;
 
   try {
@@ -476,6 +498,7 @@ async function runMigration() {
     'Ventas'.padStart(10) +
     'Compras'.padStart(10) +
     'Gastos'.padStart(10) +
+    'Manuales'.padStart(10) +
     'Total'.padStart(10) +
     '   Estado'
   );
@@ -483,7 +506,7 @@ async function runMigration() {
 
   let totalActivePeriods = 0;
   for (const p of sortedPeriods) {
-    const total = p.ventasActivas + p.comprasActivas + p.gastosActivos;
+    const total = p.ventasActivas + p.comprasActivas + p.gastosActivos + p.movimientosManualesActivos;
     if (total > 0) totalActivePeriods++;
     const status = total > 0 ? 'Con registros' : 'Sin registros (0)';
     console.log(
@@ -491,6 +514,7 @@ async function runMigration() {
       String(p.ventasActivas).padStart(10) +
       String(p.comprasActivas).padStart(10) +
       String(p.gastosActivos).padStart(10) +
+      String(p.movimientosManualesActivos).padStart(10) +
       String(total).padStart(10) +
       `   ${status}`
     );
@@ -552,8 +576,11 @@ async function runMigration() {
       if (!Number.isInteger(p.gastosActivos) || p.gastosActivos < 0) {
         throw new Error(`Contador gastosActivos no entero o negativo en periodo ${p.periodo}`);
       }
+      if (!Number.isInteger(p.movimientosManualesActivos) || p.movimientosManualesActivos < 0) {
+        throw new Error(`Contador movimientosManualesActivos no entero o negativo en periodo ${p.periodo}`);
+      }
 
-      const total = p.ventasActivas + p.comprasActivas + p.gastosActivos;
+      const total = p.ventasActivas + p.comprasActivas + p.gastosActivos + p.movimientosManualesActivos;
       const docRef = db.collection('periodos_financieros').doc(p.periodo);
 
       const docData = {
@@ -563,6 +590,7 @@ async function runMigration() {
         ventasActivas: p.ventasActivas,
         comprasActivas: p.comprasActivas,
         gastosActivos: p.gastosActivos,
+        movimientosManualesActivos: p.movimientosManualesActivos,
         totalRegistrosActivos: total,
         actualizadoEn: FieldValue.serverTimestamp()
       };

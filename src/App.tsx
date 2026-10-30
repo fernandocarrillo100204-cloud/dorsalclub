@@ -79,9 +79,10 @@ const getTabFromPath = (path: string): NavigationTab => {
   if (/^\/finanzas\/gastos\/[^/]+\/editar$/.test(normalized)) {
     return "finanzas_gastos_editar";
   }
-  if (normalized === "/finanzas/gastos") {
+  if (normalized === "/finanzas/gastos" || normalized === "/finanzas/movimientos") {
     return "finanzas_gastos";
   }
+  if (normalized === "/finanzas/por-cobrar") return "finanzas_cobrar";
   if (normalized === "/finanzas") {
     return "finanzas";
   }
@@ -193,7 +194,9 @@ const getPathFromTab = (tab: NavigationTab): string => {
     case "finanzas":
       return "/finanzas";
     case "finanzas_gastos":
-      return "/finanzas/gastos";
+      return "/finanzas/movimientos";
+    case "finanzas_cobrar":
+      return "/finanzas/por-cobrar";
     case "finanzas_gastos_nuevo":
       return "/finanzas/gastos/nuevo";
     case "papelera":
@@ -645,7 +648,7 @@ export default function App() {
                 )}
 
                 {/* Finanzas: Resumen y Gastos */}
-                {(activeTab === "finanzas" || activeTab === "finanzas_gastos" || activeTab === "finanzas_gastos_nuevo" || activeTab === "finanzas_gastos_editar") && (
+                {(activeTab === "finanzas" || activeTab === "finanzas_gastos" || activeTab === "finanzas_cobrar" || activeTab === "finanzas_gastos_nuevo" || activeTab === "finanzas_gastos_editar") && (
                   <motion.div
                     key="finanzas"
                     initial={{ opacity: 0, y: 15 }}
@@ -661,12 +664,15 @@ export default function App() {
                           : activeTab === "finanzas_gastos_editar"
                           ? "editar"
                           : activeTab === "finanzas_gastos"
-                          ? "gastos"
+                          ? "movimientos"
+                          : activeTab === "finanzas_cobrar"
+                          ? "cobrar"
                           : "resumen"
                       }
                       gastoId={preselectedGastoId}
                       onNavigateToResumen={() => navigateTo("finanzas")}
                       onNavigateToGastos={() => navigateTo("finanzas_gastos")}
+                      onNavigateToCobrar={() => navigateTo("finanzas_cobrar")}
                       onNavigateToNuevoGasto={() => navigateTo("finanzas_gastos_nuevo")}
                       onNavigateToEditarGasto={(id) => navigateTo("finanzas_gastos_editar", { gastoId: id })}
                       onNavigateToVentas={() => navigateTo("analisis_ventas")}

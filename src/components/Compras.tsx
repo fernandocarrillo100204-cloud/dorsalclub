@@ -124,6 +124,7 @@ export default function Compras({
   const [costoEnvio, setCostoEnvio] = useState<number | "">("");
   const [comisiones, setComisiones] = useState<number | "">("");
   const [descuentos, setDescuentos] = useState<number | "">("");
+  const [clasificacionFinanciera, setClasificacionFinanciera] = useState<"operacion" | "inversion_inicial">("operacion");
   const [items, setItems] = useState<NewItemRow[]>([createEmptyPurchaseItem()]);
   const [updatingCompraDropId, setUpdatingCompraDropId] = useState<string | null>(null);
 
@@ -131,10 +132,10 @@ export default function Compras({
     if (!isNewView) return false;
     const today = new Date().toISOString().split("T")[0];
     return Boolean(
-      proveedor || almacenId || dropId || notas.trim() || costoEnvio !== "" || comisiones !== "" || descuentos !== "" || fecha !== today ||
+      proveedor || almacenId || dropId || notas.trim() || costoEnvio !== "" || comisiones !== "" || descuentos !== "" || fecha !== today || clasificacionFinanciera !== "operacion" ||
       items.some(item => item.sku || item.nombre_producto || item.variante_label || item.costo_unitario !== "" || item.cantidad !== 1)
     );
-  }, [isNewView, proveedor, almacenId, dropId, notas, costoEnvio, comisiones, descuentos, fecha, items]);
+  }, [isNewView, proveedor, almacenId, dropId, notas, costoEnvio, comisiones, descuentos, fecha, clasificacionFinanciera, items]);
 
   const confirmDiscard = () => !isPurchaseDirty || window.confirm("Hay datos de una compra sin guardar. ¿Quieres salir y descartarlos?");
   const goToHistory = () => { if (confirmDiscard()) navigateToHistory(); };
@@ -396,7 +397,8 @@ export default function Compras({
         comisiones: typeof comisiones === "number" ? comisiones : 0,
         descuentos: typeof descuentos === "number" ? descuentos : 0,
         notas: notas.trim(),
-        drop_id: dropId || undefined
+        drop_id: dropId || undefined,
+        clasificacion_financiera: clasificacionFinanciera
       });
 
       setFormSuccess(`¡Compra registrada con éxito! Folio generado: ${res.folio}. El inventario ha sido actualizado.`);
@@ -409,6 +411,7 @@ export default function Compras({
       setDescuentos("");
       setAlmacenId("");
       setDropId("");
+      setClasificacionFinanciera("operacion");
       setItems([createEmptyPurchaseItem()]);
       loadFirstPage(false);
       navigateToHistory();
@@ -584,6 +587,22 @@ export default function Compras({
                   onChange={(e) => setNotas(e.target.value)}
                   className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white transition-all"
                 />
+              </div>
+
+              <div>
+                <label htmlFor="compra-clasificacion-financiera" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                  Clasificación financiera
+                </label>
+                <select
+                  id="compra-clasificacion-financiera"
+                  value={clasificacionFinanciera}
+                  onChange={(event) => setClasificacionFinanciera(event.target.value as "operacion" | "inversion_inicial")}
+                  className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
+                >
+                  <option value="operacion">Operación normal</option>
+                  <option value="inversion_inicial">Inversión inicial</option>
+                </select>
+                <p className="text-[10px] text-zinc-400 mt-1">La inversión inicial se separa del flujo operativo, pero sí afecta la caja total.</p>
               </div>
             </div>
           </div>

@@ -74,7 +74,12 @@ import {
   PapeleraItem,
   PapeleraTipo,
   Drop,
-  EstadoDrop
+  EstadoDrop,
+  MovimientoFinancieroManual,
+  TipoMovimientoFinanciero,
+  CuentaPorCobrar,
+  ResumenFinancieroConsolidado,
+  MovimientoFinancieroFila
 } from "../types";
 import {
   getPeriodoKey,
@@ -4497,6 +4502,7 @@ export const firestoreService = {
     descuentos?: number;
     referencia?: string;
     notas?: string;
+    clasificacion_financiera?: "operacion" | "inversion_inicial";
     drop_id?: string;
   }): Promise<{ id: string; folio: string; movimientosCount: number }> => {
     const user = authService.getCurrentUser();
@@ -4692,6 +4698,7 @@ export const firestoreService = {
           comisiones: comisiones,
           descuentos: descuentos,
           total: totalCompra,
+          clasificacion_financiera: compraData.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion",
           referencia: compraData.referencia || "",
           notas: compraData.notas || "",
           creado_por: usuarioEmail,
@@ -4809,6 +4816,7 @@ export const firestoreService = {
       comisiones: comisiones,
       descuentos: descuentos,
       total: totalCompra,
+      clasificacion_financiera: compraData.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion",
       referencia: compraData.referencia || "",
       notas: compraData.notas || "",
       creado_por: usuarioEmail,
@@ -6429,6 +6437,7 @@ export const firestoreService = {
     proveedor?: string;
     referencia?: string;
     notas?: string;
+    clasificacion_financiera?: "operacion" | "inversion_inicial";
   }): Promise<Gasto> => {
     const user = authService.getCurrentUser();
     const cleanConcepto = (gastoData.concepto || "").trim();
@@ -6466,6 +6475,7 @@ export const firestoreService = {
       creado_at: isConfigured && realDb ? Timestamp.now() : new Date(),
       actualizado_at: isConfigured && realDb ? Timestamp.now() : new Date()
     };
+    payload.clasificacion_financiera = gastoData.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion";
 
     if (gastoData.metodo_pago && typeof gastoData.metodo_pago === "string" && gastoData.metodo_pago.trim()) {
       const cleanMetodo = gastoData.metodo_pago.trim();
@@ -6532,6 +6542,7 @@ export const firestoreService = {
         if (payload.proveedor) createdGasto.proveedor = payload.proveedor;
         if (payload.referencia) createdGasto.referencia = payload.referencia;
         if (payload.notas) createdGasto.notas = payload.notas;
+        createdGasto.clasificacion_financiera = payload.clasificacion_financiera;
 
         return createdGasto;
       } catch (err: any) {
@@ -6558,6 +6569,7 @@ export const firestoreService = {
     if (payload.proveedor) createdLocal.proveedor = payload.proveedor;
     if (payload.referencia) createdLocal.referencia = payload.referencia;
     if (payload.notas) createdLocal.notas = payload.notas;
+    createdLocal.clasificacion_financiera = payload.clasificacion_financiera;
 
     const list = getLocalStorageItem<Gasto[]>("gastos", []);
     list.unshift(createdLocal);
@@ -6580,6 +6592,7 @@ export const firestoreService = {
     proveedor?: string | null;
     referencia?: string | null;
     notas?: string | null;
+    clasificacion_financiera?: "operacion" | "inversion_inicial";
   }): Promise<void> => {
     if (!id) throw new Error("ID de gasto no proporcionado.");
 
@@ -6587,6 +6600,10 @@ export const firestoreService = {
       actualizado_at: isConfigured && realDb ? Timestamp.now() : new Date()
     };
     const fieldsToDeleteInLocal: string[] = [];
+
+    if (gastoData.clasificacion_financiera !== undefined) {
+      updatePayload.clasificacion_financiera = gastoData.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion";
+    }
 
     if (gastoData.concepto !== undefined) {
       const cleanConcepto = (gastoData.concepto || "").trim();
@@ -7035,6 +7052,260 @@ export const firestoreService = {
     delete list[index].desactivado_at;
     setLocalStorageItem(target.localKey, list);
     notifyListeners(target.localKey as keyof typeof listeners, list);
+  },
+
+  addMovimientoFinanciero: async (input: {
+    tipo: TipoMovimientoFinanciero;
+    concepto: string;
+    monto: number;
+    fecha: Date;
+    fecha_str: string;
+    metodo_pago?: string;
+    notas?: string;
+  }): Promise<MovimientoFinancieroManual> => {
+    const tiposValidos: TipoMovimientoFinanciero[] = ["aportacion_capital", "otro_ingreso", "retiro_propietario", "ajuste_entrada", "ajuste_salida"];
+    const concepto = input.concepto.trim();
+    const monto = Math.round((Number(input.monto) + Number.EPSILON) * 100) / 100;
+    if (!tiposValidos.includes(input.tipo)) throw new Error("Selecciona un tipo de movimiento válido.");
+    if (!concepto || concepto.length > 200) throw new Error("El concepto es obligatorio y no puede superar 200 caracteres.");
+    if (!Number.isFinite(monto) || monto <= 0) throw new Error("El monto debe ser mayor a cero.");
+    if (!(input.fecha instanceof Date) || isNaN(input.fecha.getTime())) throw new Error("La fecha no es válida.");
+    if ((input.tipo === "ajuste_entrada" || input.tipo === "ajuste_salida") && !input.notas?.trim()) {
+      throw new Error("Los ajustes de caja requieren una explicación.");
+    }
+    const now = new Date();
+    const userEmail = realAuth?.currentUser?.email || getLocalStorageItem<Usuario | null>("currentUser", null)?.email || "Sistema";
+    const base = {
+      tipo: input.tipo,
+      concepto,
+      monto,
+      fecha: input.fecha,
+      fecha_str: input.fecha_str,
+      ...(input.metodo_pago?.trim() ? { metodo_pago: input.metodo_pago.trim() } : {}),
+      ...(input.notas?.trim() ? { notas: input.notas.trim() } : {}),
+      creado_por: userEmail,
+      creado_at: now,
+      actualizado_at: now,
+      estado: "activo" as const
+    };
+    let created: MovimientoFinancieroManual;
+    if (isConfigured && realDb) {
+      const ref = doc(collection(realDb, "movimientos_financieros"));
+      const payload = { ...base, fecha: Timestamp.fromDate(input.fecha), creado_at: Timestamp.now(), actualizado_at: Timestamp.now() };
+      await setDoc(ref, payload);
+      created = { id: ref.id, ...base };
+    } else {
+      const list = getLocalStorageItem<MovimientoFinancieroManual[]>("movimientos_financieros", []);
+      created = { id: `MF-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ...base };
+      setLocalStorageItem("movimientos_financieros", [created, ...list]);
+    }
+    const periodo = getPeriodoKey(input.fecha);
+    if (periodo) await applyPeriodIndexDeltas([{ periodo, deltaMovimientosManuales: 1 }]);
+    clearFinanzasCache();
+    clearPeriodosFinancierosCache();
+    return created;
+  },
+
+  anularMovimientoFinanciero: async (id: string, motivo: string): Promise<void> => {
+    const cleanReason = motivo.trim();
+    if (!cleanReason || cleanReason.length > 500) throw new Error("Indica un motivo válido para anular el movimiento.");
+    const userEmail = realAuth?.currentUser?.email || getLocalStorageItem<Usuario | null>("currentUser", null)?.email || "Sistema";
+    let fecha: any = null;
+    if (isConfigured && realDb) {
+      const ref = doc(realDb, "movimientos_financieros", id);
+      const snapshot = await getDoc(ref);
+      if (!snapshot.exists()) throw new Error("El movimiento financiero ya no existe.");
+      const data = snapshot.data();
+      if (data.estado === "anulado") return;
+      fecha = data.fecha;
+      await setDoc(ref, { estado: "anulado", motivo_anulacion: cleanReason, anulado_at: Timestamp.now(), anulado_por: userEmail, actualizado_at: Timestamp.now() }, { merge: true });
+    } else {
+      const list = getLocalStorageItem<MovimientoFinancieroManual[]>("movimientos_financieros", []);
+      const index = list.findIndex(item => item.id === id);
+      if (index < 0) throw new Error("El movimiento financiero ya no existe.");
+      if (list[index].estado === "anulado") return;
+      fecha = list[index].fecha;
+      list[index] = { ...list[index], estado: "anulado", motivo_anulacion: cleanReason, anulado_at: new Date(), anulado_por: userEmail, actualizado_at: new Date() };
+      setLocalStorageItem("movimientos_financieros", list);
+    }
+    const periodo = getPeriodoKey(fecha);
+    if (periodo) await applyPeriodIndexDeltas([{ periodo, deltaMovimientosManuales: -1 }]);
+    clearFinanzasCache();
+    clearPeriodosFinancierosCache();
+  },
+
+  setClasificacionFinanciera: async (origen: "compra" | "gasto", id: string, clasificacion: "operacion" | "inversion_inicial"): Promise<void> => {
+    if (!id) throw new Error("No se pudo identificar el registro.");
+    if (!(["operacion", "inversion_inicial"] as string[]).includes(clasificacion)) throw new Error("Clasificación financiera no válida.");
+    const collectionName = origen === "compra" ? "compras" : "gastos";
+    if (isConfigured && realDb) {
+      await setDoc(doc(realDb, collectionName, id), { clasificacion_financiera: clasificacion, actualizado_at: Timestamp.now() }, { merge: true });
+    } else {
+      const list = getLocalStorageItem<any[]>(collectionName, []);
+      const index = list.findIndex(item => item.id === id);
+      if (index < 0) throw new Error("El registro ya no existe.");
+      list[index] = { ...list[index], clasificacion_financiera: clasificacion, actualizado_at: new Date() };
+      setLocalStorageItem(collectionName, list);
+    }
+    clearFinanzasCache();
+  },
+
+  getCuentasPorCobrar: async (): Promise<CuentaPorCobrar[]> => {
+    let sales: Venta[] = [];
+    if (isConfigured && realDb) {
+      const snapshot = await getDocs(query(collection(realDb, "ventas"), orderBy("fecha", "desc")));
+      sales = snapshot.docs.map(item => {
+        const data = item.data();
+        const fecha = data.fecha?.toDate ? data.fecha.toDate() : data.fecha?.seconds ? new Date(data.fecha.seconds * 1000) : new Date(data.fecha || Date.now());
+        return { id: item.id, ...data, fecha } as Venta;
+      });
+    } else {
+      sales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+    }
+    return sales
+      .filter(sale => sale.estado !== "anulado" && sale.estado !== "devuelto" && sale.en_papelera !== true && Math.max(0, Number(sale.saldo) || 0) > 0.009)
+      .map(sale => ({
+        venta_id: sale.id,
+        folio: sale.folio,
+        fecha: sale.fecha instanceof Date ? sale.fecha : (sale.fecha as any)?.seconds ? new Date((sale.fecha as any).seconds * 1000) : new Date(sale.fecha as any),
+        cliente_nombre: sale.cliente_nombre || "Mostrador",
+        total: Number(sale.total) || 0,
+        cobrado: Number(sale.recibido) || 0,
+        pendiente: Math.max(0, Number(sale.saldo) || 0),
+        estado_pago: sale.estado_pago || "pendiente",
+        canal_venta_nombre: sale.canal_venta_nombre || "Venta"
+      }))
+      .sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
+  },
+
+  getResumenFinancieroConsolidado: async (scope: { alcance: "todo" } | { alcance: "mes"; year: number; month: number }): Promise<ResumenFinancieroConsolidado> => {
+    const toSafeDate = (value: any): Date => value instanceof Date ? value : value?.toDate ? value.toDate() : value?.seconds ? new Date(value.seconds * 1000) : new Date(value || Date.now());
+    const isMonth = scope.alcance === "mes";
+    const start = isMonth ? new Date(scope.year, scope.month - 1, 1, 0, 0, 0, 0) : null;
+    const end = isMonth ? new Date(scope.year, scope.month, 1, 0, 0, 0, 0) : null;
+    let rawSales: Movimiento[] = [];
+    let rawPurchases: Compra[] = [];
+    let rawExpenses: Gasto[] = [];
+    let rawManual: MovimientoFinancieroManual[] = [];
+
+    if (isConfigured && realDb) {
+      const startTs = start ? Timestamp.fromDate(start) : null;
+      const endTs = end ? Timestamp.fromDate(end) : null;
+      const salesQuery = isMonth
+        ? query(collection(realDb, "movimientos"), where("tipo", "==", "salida"), where("fecha", ">=", startTs), where("fecha", "<", endTs), orderBy("fecha", "desc"))
+        : query(collection(realDb, "movimientos"), where("tipo", "==", "salida"), orderBy("fecha", "desc"));
+      const purchaseQuery = isMonth
+        ? query(collection(realDb, "compras"), where("fecha", ">=", startTs), where("fecha", "<", endTs), orderBy("fecha", "desc"))
+        : query(collection(realDb, "compras"), orderBy("fecha", "desc"));
+      const expenseQuery = isMonth
+        ? query(collection(realDb, "gastos"), where("fecha", ">=", startTs), where("fecha", "<", endTs), orderBy("fecha", "desc"))
+        : query(collection(realDb, "gastos"), orderBy("fecha", "desc"));
+      const manualQuery = isMonth
+        ? query(collection(realDb, "movimientos_financieros"), where("fecha", ">=", startTs), where("fecha", "<", endTs), orderBy("fecha", "desc"))
+        : query(collection(realDb, "movimientos_financieros"), orderBy("fecha", "desc"));
+      const [salesSnap, purchasesSnap, expensesSnap, manualSnap] = await Promise.all([
+        getDocs(salesQuery), getDocs(purchaseQuery), getDocs(expenseQuery), getDocs(manualQuery)
+      ]);
+      rawSales = salesSnap.docs.map(item => ({ id: item.id, ...item.data(), fecha: toSafeDate(item.data().fecha) } as Movimiento));
+      rawPurchases = purchasesSnap.docs.map(item => ({ id: item.id, ...item.data(), fecha: toSafeDate(item.data().fecha) } as Compra));
+      rawExpenses = expensesSnap.docs.map(item => ({ id: item.id, ...item.data(), fecha: toSafeDate(item.data().fecha) } as Gasto));
+      rawManual = manualSnap.docs.map(item => ({ id: item.id, ...item.data(), fecha: toSafeDate(item.data().fecha), creado_at: toSafeDate(item.data().creado_at), actualizado_at: toSafeDate(item.data().actualizado_at) } as MovimientoFinancieroManual));
+    } else {
+      const inScope = (value: any) => {
+        if (!isMonth || !start || !end) return true;
+        const time = toSafeDate(value).getTime();
+        return time >= start.getTime() && time < end.getTime();
+      };
+      rawSales = getLocalStorageItem<Movimiento[]>("movimientos", []).filter(item => item.tipo === "salida" && inScope(item.fecha));
+      rawPurchases = getLocalStorageItem<Compra[]>("compras", []).filter(item => inScope(item.fecha));
+      rawExpenses = getLocalStorageItem<Gasto[]>("gastos", []).filter(item => inScope(item.fecha));
+      rawManual = getLocalStorageItem<MovimientoFinancieroManual[]>("movimientos_financieros", []).filter(item => inScope(item.fecha));
+    }
+
+    const movements: MovimientoFinancieroFila[] = [];
+    let ingresosVentas = 0;
+    let costosAsociadosVentas = 0;
+    const saleIds = new Set<string>();
+    rawSales.filter(item => (item.estado || "activo") !== "anulado" && item.en_papelera !== true).forEach(item => {
+      const saleKey = item.venta_id || item.venta_relacionada_id || item.folio || item.id || "venta";
+      if (item.subtipo !== "reembolso_venta") saleIds.add(saleKey);
+      let recognized = 0;
+      if (typeof item.venta_total_recibido === "number") recognized = Number(item.ingreso_reconocido) || 0;
+      else if (typeof item.total_cobrado === "number") recognized = Number(item.total_cobrado) || 0;
+      else if (typeof item.total_venta === "number") recognized = Number(item.total_venta) || 0;
+      else recognized = (Number(item.precio_unitario_venta) || 0) * (Number(item.cantidad) || 0);
+      ingresosVentas += recognized;
+      const saleCosts = Math.max(0, Number(item.total_costos_venta) || ((Number(item.costo_envio_venta) || 0) + (Number(item.otros_costos_venta) || 0)));
+      costosAsociadosVentas += saleCosts;
+      if (Math.abs(recognized) > 0.009) {
+        movements.push({ id: `venta-${item.id || saleKey}`, fecha: toSafeDate(item.fecha), tipo: "venta", origen: item.folio || "Venta", concepto: item.referencia || (item.subtipo === "reembolso_venta" ? "Reembolso de venta" : "Cobro de venta"), entrada: Math.max(0, recognized), salida: Math.max(0, -recognized), estado: "Activo", referencia: saleKey });
+      }
+      if (saleCosts > 0) movements.push({ id: `costo-venta-${item.id || saleKey}`, fecha: toSafeDate(item.fecha), tipo: "gasto", origen: item.folio || "Venta", concepto: "Costos asociados a la venta", entrada: 0, salida: saleCosts, estado: "Activo", referencia: saleKey, clasificacion: "operacion" });
+    });
+
+    let comprasOperativas = 0;
+    let gastosOperativos = 0;
+    let inversionInicial = 0;
+    const activePurchases = rawPurchases.filter(item => (item.estado || "completada") !== "anulada" && item.en_papelera !== true);
+    activePurchases.forEach(item => {
+      const amount = Number(item.total) || 0;
+      const classification = item.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion";
+      if (classification === "inversion_inicial") inversionInicial += amount; else comprasOperativas += amount;
+      movements.push({ id: `compra-${item.id || item.folio}`, fecha: toSafeDate(item.fecha), tipo: "compra", origen: item.folio || "Compra", concepto: item.proveedor || "Compra de mercancía", entrada: 0, salida: amount, estado: "Activa", referencia: item.id, clasificacion: classification, editable: Boolean(item.id) });
+    });
+    const activeExpenses = rawExpenses.filter(item => item.estado !== "inactivo" && item.en_papelera !== true);
+    activeExpenses.forEach(item => {
+      const amount = Number(item.monto) || 0;
+      const classification = item.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion";
+      if (classification === "inversion_inicial") inversionInicial += amount; else gastosOperativos += amount;
+      movements.push({ id: `gasto-${item.id || item.concepto}`, fecha: toSafeDate(item.fecha), tipo: "gasto", origen: item.categoria || "Gasto", concepto: item.concepto, entrada: 0, salida: amount, estado: "Activo", referencia: item.id, clasificacion: classification, editable: Boolean(item.id) });
+    });
+
+    let otrosIngresos = 0;
+    let aportacionesCapital = 0;
+    let retirosPropietario = 0;
+    let ajustesEntrada = 0;
+    let ajustesSalida = 0;
+    rawManual.filter(item => item.estado !== "anulado").forEach(item => {
+      const amount = Number(item.monto) || 0;
+      let entrada = 0;
+      let salida = 0;
+      let type: MovimientoFinancieroFila["tipo"] = "ajuste";
+      if (item.tipo === "otro_ingreso") { otrosIngresos += amount; entrada = amount; type = "otro_ingreso"; }
+      if (item.tipo === "aportacion_capital") { aportacionesCapital += amount; entrada = amount; type = "capital"; }
+      if (item.tipo === "retiro_propietario") { retirosPropietario += amount; salida = amount; type = "retiro"; }
+      if (item.tipo === "ajuste_entrada") { ajustesEntrada += amount; entrada = amount; }
+      if (item.tipo === "ajuste_salida") { ajustesSalida += amount; salida = amount; }
+      movements.push({ id: `manual-${item.id}`, fecha: toSafeDate(item.fecha), tipo: type, origen: "Movimiento manual", concepto: item.concepto, entrada, salida, estado: "Activo", referencia: item.id, editable: true });
+    });
+
+    const receivables = await firestoreService.getCuentasPorCobrar();
+    const pendientePorCobrar = receivables.reduce((sum, item) => sum + item.pendiente, 0);
+    const entradasOperativas = ingresosVentas + otrosIngresos;
+    const egresosOperativos = comprasOperativas + gastosOperativos + costosAsociadosVentas;
+    const flujoOperativo = entradasOperativas - egresosOperativos;
+    const movimientoCaja = entradasOperativas + aportacionesCapital + ajustesEntrada - egresosOperativos - inversionInicial - retirosPropietario - ajustesSalida;
+
+    const graphMap = new Map<string, { clave: string; etiqueta: string; ingresos: number; egresos: number }>();
+    movements.forEach(item => {
+      const date = item.fecha;
+      const key = isMonth ? String(date.getDate()).padStart(2, "0") : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+      const label = isMonth ? String(date.getDate()) : date.toLocaleDateString("es-MX", { month: "short", year: "2-digit" });
+      const point = graphMap.get(key) || { clave: key, etiqueta: label, ingresos: 0, egresos: 0 };
+      point.ingresos += item.entrada;
+      point.egresos += item.salida;
+      graphMap.set(key, point);
+    });
+    const graph = Array.from(graphMap.values()).sort((a, b) => a.clave.localeCompare(b.clave));
+    movements.sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
+    return {
+      alcance: scope.alcance,
+      ...(isMonth ? { year: scope.year, month: scope.month } : {}),
+      ingresosVentas, otrosIngresos, entradasOperativas, comprasOperativas, gastosOperativos, costosAsociadosVentas,
+      egresosOperativos, inversionInicial, flujoOperativo, aportacionesCapital, retirosPropietario, ajustesEntrada,
+      ajustesSalida, movimientoCaja, pendientePorCobrar, numCuentasPorCobrar: receivables.length, numVentas: saleIds.size,
+      numCompras: activePurchases.length, numGastos: activeExpenses.length, grafica: graph, movimientos: movements
+    };
   },
 
   // --- DASHBOARD FINANCIERO MENSUAL (FLUJO DE DINERO) ---
