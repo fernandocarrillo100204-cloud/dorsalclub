@@ -346,7 +346,6 @@ export interface Usuario {
 }
 
 export type NavigationTab = 
-  | "dashboard" 
   | "compras" 
   | "compras_nueva"
   | "ventas_nueva"
@@ -364,14 +363,12 @@ export type NavigationTab =
   | "finanzas_gastos_nuevo"
   | "finanzas_gastos_editar"
   | "finanzas"
-  | "analisis_ventas" 
   | "analisis_clientes"
   | "almacenes" 
   | "catalogo"
   | "drops"
   | "papelera"
   | "configuracion"
-  | "ventas" // legacy/alias for sales analysis
   | "movimientos"; // alias for redirect
 
 export interface CompraItem {

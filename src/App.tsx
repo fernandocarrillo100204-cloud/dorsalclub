@@ -49,7 +49,6 @@ function lazyWithRetry<T extends React.ComponentType<any>>(
   });
 }
 
-const Dashboard = lazyWithRetry(() => import("./components/Dashboard"));
 const Compras = lazyWithRetry(() => import("./components/Compras"));
 const Ventas = lazyWithRetry(() => import("./components/Ventas"));
 const PedidosVenta = lazyWithRetry(() => import("./components/PedidosVenta"));
@@ -59,7 +58,6 @@ const Historial = lazyWithRetry(() => import("./components/Historial"));
 const GestionAlmacenes = lazyWithRetry(() => import("./components/GestionAlmacenes"));
 const GestionProductos = lazyWithRetry(() => import("./components/GestionProductos"));
 const Drops = lazyWithRetry(() => import("./components/Drops"));
-const AnalisisVentas = lazyWithRetry(() => import("./components/AnalisisVentas"));
 const AnalisisClientes = lazyWithRetry(() => import("./components/AnalisisClientes"));
 const Clientes = lazyWithRetry(() => import("./components/Clientes"));
 const Finanzas = lazyWithRetry(() => import("./components/Finanzas"));
@@ -132,7 +130,7 @@ const getTabFromPath = (path: string): NavigationTab => {
     return "historial";
   }
   if (normalized === "/ventas" || normalized === "/ventas/analisis" || normalized === "/analisis-ventas" || normalized === "/analisis_ventas") {
-    return "analisis_ventas";
+    return "ventas_historial";
   }
   if (normalized === "/analisis-clientes" || normalized === "/analisis_clientes" || normalized === "/clientes/analisis") {
     return "analisis_clientes";
@@ -147,7 +145,7 @@ const getTabFromPath = (path: string): NavigationTab => {
     return "drops";
   }
   if (normalized === "/dashboard" || normalized === "/inventario") {
-    return "dashboard";
+    return "catalogo";
   }
   if (normalized === "" || normalized === "/") {
     return "compras";
@@ -176,9 +174,6 @@ const getPathFromTab = (tab: NavigationTab): string => {
       return "/ventas/historial";
     case "transferencias_nueva":
       return "/inventario/transferencias";
-    case "analisis_ventas":
-    case "ventas":
-      return "/ventas/analisis";
     case "analisis_clientes":
       return "/clientes/analisis";
     case "historial":
@@ -205,9 +200,8 @@ const getPathFromTab = (tab: NavigationTab): string => {
       return "/configuracion";
     case "movimientos":
       return "/compras/nueva";
-    case "dashboard":
     default:
-      return "/inventario";
+      return "/compras";
   }
 };
 
@@ -238,9 +232,6 @@ export default function App() {
   const [almacenes, setAlmacenes] = useState<Almacen[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
   const [stockList, setStockList] = useState<StockItem[]>([]);
-  const [almacenesLoaded, setAlmacenesLoaded] = useState(false);
-  const [productosLoaded, setProductosLoaded] = useState(false);
-  const [stockLoaded, setStockLoaded] = useState(false);
 
   // Navigation helper that updates browser history and URL
   const navigateTo = (tab: NavigationTab, params?: { sku?: string; almacenId?: string; clienteId?: string; gastoId?: string }) => {
@@ -302,9 +293,6 @@ export default function App() {
       setAlmacenes([]);
       setProductos([]);
       setStockList([]);
-      setAlmacenesLoaded(false);
-      setProductosLoaded(false);
-      setStockLoaded(false);
       return;
     }
 
@@ -312,11 +300,9 @@ export default function App() {
     const unsubscribeAlmacenes = firestoreService.getAlmacenesRealtime(
       (almList) => {
         setAlmacenes(almList);
-        setAlmacenesLoaded(true);
       },
       (error) => {
         console.error("Error en listener de almacenes:", error);
-        setAlmacenesLoaded(true);
       }
     );
 
@@ -324,11 +310,9 @@ export default function App() {
     const unsubscribeProductos = firestoreService.getProductosRealtime(
       (prodList) => {
         setProductos(prodList);
-        setProductosLoaded(true);
       },
       (error) => {
         console.error("Error en listener de productos:", error);
-        setProductosLoaded(true);
       }
     );
 
@@ -336,11 +320,9 @@ export default function App() {
     const unsubscribeStock = firestoreService.getStockRealtime(
       (stkList) => {
         setStockList(stkList);
-        setStockLoaded(true);
       },
       (error) => {
         console.error("Error en listener de stock:", error);
-        setStockLoaded(true);
       }
     );
 
@@ -513,48 +495,9 @@ export default function App() {
                       productos={productos}
                       preselectedSku={preselectedSku}
                       preselectedAlmacenId={preselectedAlmacenId}
-                      onSuccess={() => navigateTo("dashboard")}
-                      onCancel={() => navigateTo("dashboard")}
+                      onSuccess={() => navigateTo("historial")}
+                      onCancel={() => navigateTo("historial")}
                       onManageWarehouses={() => navigateTo("almacenes")}
-                    />
-                  </motion.div>
-                )}
-
-                {/* Dashboard */}
-                {activeTab === "dashboard" && (
-                  <motion.div
-                    key="dashboard"
-                    initial={{ opacity: 0, y: 15 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -15 }}
-                    transition={{ duration: 0.25, ease: "easeInOut" }}
-                  >
-                    <Dashboard 
-                      almacenes={almacenes} 
-                      productos={productos} 
-                      stockList={stockList}
-                      loadingStock={!stockLoaded}
-                      onNavigateToCompra={(sku, almId) => navigateTo("compras_nueva", { sku, almacenId: almId })}
-                      onNavigateToVenta={(sku, almId) => navigateTo("ventas_nueva", { sku, almacenId: almId })}
-                      onNavigateToTransferencia={(sku, almId) => navigateTo("transferencias_nueva", { sku, almacenId: almId })}
-                      onNavigateToHistory={(sku) => navigateTo("historial", { sku })}
-                    />
-                  </motion.div>
-                )}
-
-                {/* Análisis de Ventas */}
-                {(activeTab === "analisis_ventas" || activeTab === "ventas") && (
-                  <motion.div
-                    key="analisis_ventas"
-                    initial={{ opacity: 0, y: 15 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -15 }}
-                    transition={{ duration: 0.25, ease: "easeInOut" }}
-                  >
-                    <AnalisisVentas 
-                      almacenes={almacenes} 
-                      productos={productos} 
-                      onNavigateToHistory={(sku) => navigateTo("historial", { sku })}
                     />
                   </motion.div>
                 )}
@@ -675,7 +618,7 @@ export default function App() {
                       onNavigateToCobrar={() => navigateTo("finanzas_cobrar")}
                       onNavigateToNuevoGasto={() => navigateTo("finanzas_gastos_nuevo")}
                       onNavigateToEditarGasto={(id) => navigateTo("finanzas_gastos_editar", { gastoId: id })}
-                      onNavigateToVentas={() => navigateTo("analisis_ventas")}
+                      onNavigateToVentas={() => navigateTo("ventas_historial")}
                       onNavigateToCompras={() => navigateTo("compras")}
                     />
                   </motion.div>

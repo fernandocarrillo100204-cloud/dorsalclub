@@ -9,8 +9,6 @@ import {
   ShoppingCart,
   ArrowRightLeft,
   History, 
-  LayoutDashboard, 
-  TrendingUp, 
   Package, 
   LogOut, 
   Menu, 
@@ -87,12 +85,11 @@ const NAV_GROUPS: NavGroup[] = [
     id: "ventas",
     label: "Ventas",
     icon: ShoppingCart,
-    matchActive: (curr) => ["ventas_nueva", "ventas_stock", "ventas_bajo_pedido", "ventas_emprendedor", "ventas_mayoreo", "ventas_pedidos", "ventas_historial", "analisis_ventas", "ventas"].includes(curr),
+    matchActive: (curr) => ["ventas_nueva", "ventas_stock", "ventas_bajo_pedido", "ventas_emprendedor", "ventas_mayoreo", "ventas_pedidos", "ventas_historial"].includes(curr),
     items: [
       { id: "ventas_stock", label: "Nueva venta", icon: ShoppingCart, matchActive: (curr) => ["ventas_stock", "ventas_nueva", "ventas_bajo_pedido", "ventas_emprendedor", "ventas_mayoreo"].includes(curr) },
       { id: "ventas_pedidos", label: "Pedidos", icon: ClipboardList, matchActive: (curr) => curr === "ventas_pedidos" },
-      { id: "ventas_historial", label: "Historial", icon: History, matchActive: (curr) => curr === "ventas_historial" },
-      { id: "analisis_ventas", label: "Análisis", icon: TrendingUp, matchActive: (curr) => curr === "analisis_ventas" || curr === "ventas" }
+      { id: "ventas_historial", label: "Historial", icon: History, matchActive: (curr) => curr === "ventas_historial" }
     ]
   },
   {
@@ -119,14 +116,8 @@ const NAV_GROUPS: NavGroup[] = [
     id: "inventario",
     label: "Inventario",
     icon: Boxes,
-    matchActive: (curr) => ["dashboard", "catalogo", "drops", "transferencias_nueva", "historial"].includes(curr),
+    matchActive: (curr) => ["catalogo", "drops", "transferencias_nueva", "historial"].includes(curr),
     items: [
-      {
-        id: "dashboard",
-        label: "Resumen",
-        icon: LayoutDashboard,
-        matchActive: (curr) => curr === "dashboard"
-      },
       {
         id: "catalogo",
         label: "Productos",
