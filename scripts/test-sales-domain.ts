@@ -31,6 +31,7 @@ assert.equal(preorder.total, 800);
 assert.equal(preorder.recibido, 400);
 assert.equal(preorder.saldo, 400);
 assert.equal(preorder.estadoPago, "anticipo");
+assert.equal(calculateSaleTotals({ items: [{ cantidad: 1, precio_unitario_venta: 100, costo_unitario_venta: 20 }], anticipo_porcentaje: 0 }).estadoPago, "pendiente");
 
 assert.deepEqual(allocateRecognizedSaleIncome({
   recognizedAmount: 1000,
@@ -68,5 +69,10 @@ assert.equal(requiresSaleRefund(0, "entregado"), true);
 
 assert.deepEqual(getMissingDropSkus(["sku-1", " SKU-2 ", "sku-2"], ["SKU-1"]), ["SKU-2"]);
 assert.deepEqual(getMissingDropSkus(["sku-1", "sku-2"], ["SKU-1", "SKU-2"]), []);
+for (const value of [0.01, -0.01]) {
+  const parts = allocateRecognizedSaleIncome({ recognizedAmount: value, merchandiseSubtotal: 1, shippingCharged: 1 });
+  assert.equal(Math.round((parts.merchandise + parts.shipping + parts.other) * 100), Math.round(value * 100));
+  assert.equal(parts.other, 0, "El redondeo no debe inventar otro cargo negativo.");
+}
 
 console.log("Pruebas de dominio de ventas: aprobadas");

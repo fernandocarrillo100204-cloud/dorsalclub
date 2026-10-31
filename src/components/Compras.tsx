@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from "react";
-import { firestoreService } from "../lib/firebase";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { firestoreService, getLocalDateString } from "../lib/firebase";
+import { mensajeError } from "../lib/errores";
 import { Compra, CompraItem, Almacen, Producto, OpcionListaConfigurable, Drop } from "../types";
 import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 import {
@@ -117,7 +118,8 @@ export default function Compras({
 
   // Form state (/compras/nueva)
   const [proveedor, setProveedor] = useState("");
-  const [fecha, setFecha] = useState(() => new Date().toISOString().split("T")[0]);
+  const [fecha, setFecha] = useState(() => getLocalDateString(new Date()));
+  const requestRef = useRef(0);
   const [almacenId, setAlmacenId] = useState("");
   const [dropId, setDropId] = useState("");
   const [notas, setNotas] = useState("");
@@ -130,7 +132,7 @@ export default function Compras({
 
   const isPurchaseDirty = useMemo(() => {
     if (!isNewView) return false;
-    const today = new Date().toISOString().split("T")[0];
+    const today = getLocalDateString(new Date());
     return Boolean(
       proveedor || almacenId || dropId || notas.trim() || costoEnvio !== "" || comisiones !== "" || descuentos !== "" || fecha !== today || clasificacionFinanciera !== "operacion" ||
       items.some(item => item.sku || item.nombre_producto || item.variante_label || item.costo_unitario !== "" || item.cantidad !== 1)
@@ -187,6 +189,11 @@ export default function Compras({
 
   // Fetch first 50 compras records
   const loadFirstPage = async (isFirstMount = false) => {
+    const request = ++requestRef.current;
+    setLoadingMore(false);
+    setCompras([]);
+    setLastDocCursor(null);
+    setHasMore(false);
     if (isFirstMount) {
       setInitialLoading(true);
     } else {
@@ -197,45 +204,50 @@ export default function Compras({
     try {
       const res = await firestoreService.getComprasPaginated({
         pageSize: 50,
-        warehouseFilter: selectedWarehouseFilter,
-        searchTerm: searchTerm.trim() || undefined
+        warehouseFilter: selectedWarehouseFilter
       });
+      if (request !== requestRef.current) return;
       setCompras(res.items);
       setLastDocCursor(res.lastDoc);
       setHasMore(res.hasMore);
     } catch (err: any) {
+      if (request !== requestRef.current) return;
       console.error("Error al cargar compras:", err);
-      setFetchError("No se pudieron cargar las compras. Por favor intenta de nuevo.");
+      setFetchError(mensajeError(err, "No se pudieron cargar las compras. Por favor intenta de nuevo."));
     } finally {
-      setInitialLoading(false);
-      setRefreshing(false);
+      if (request === requestRef.current) { setInitialLoading(false); setRefreshing(false); }
     }
   };
 
   // Initial load & filter change
   useEffect(() => {
     loadFirstPage(compras.length === 0);
+    return () => { requestRef.current += 1; };
   }, [selectedWarehouseFilter]);
 
   // Load next 50 compras
   const loadNextPage = async () => {
-    if (!hasMore || loadingMore || !lastDocCursor) return;
+    if (!hasMore || loadingMore || refreshing || initialLoading || !lastDocCursor) return;
+    const request = requestRef.current;
     setLoadingMore(true);
+    setFetchError(null);
 
     try {
       const res = await firestoreService.getComprasPaginated({
         pageSize: 50,
         lastDoc: lastDocCursor,
-        warehouseFilter: selectedWarehouseFilter,
-        searchTerm: searchTerm.trim() || undefined
+        warehouseFilter: selectedWarehouseFilter
       });
+      if (request !== requestRef.current) return;
       setCompras((prev) => [...prev, ...res.items]);
       setLastDocCursor(res.lastDoc);
       setHasMore(res.hasMore);
     } catch (err) {
+      if (request !== requestRef.current) return;
       console.error("Error al cargar más compras:", err);
+      setFetchError(mensajeError(err, "No fue posible cargar compras anteriores. Vuelve a intentarlo."));
     } finally {
-      setLoadingMore(false);
+      if (request === requestRef.current) setLoadingMore(false);
     }
   };
 

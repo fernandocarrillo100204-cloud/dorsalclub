@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Ban,
@@ -22,6 +22,7 @@ import {
   WalletCards
 } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
+import { mensajeError } from "../lib/errores";
 import { Almacen, Cliente, Drop, Movimiento, Producto, Venta, getSubtotalVenta } from "../types";
 
 interface HistorialVentasProps {
@@ -98,6 +99,7 @@ export default function HistorialVentas({
   const [cancelReason, setCancelReason] = useState("");
   const [returnReason, setReturnReason] = useState("");
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const requestRef = useRef(0);
 
   useEffect(() => {
     if (preselectedClienteId) setClienteFilter(preselectedClienteId);
@@ -122,13 +124,16 @@ export default function HistorialVentas({
   }, []);
 
   const loadFirstPage = useCallback(async () => {
+    const request = ++requestRef.current;
     setLoading(true);
+    setLoadingMore(false);
     setError(null);
     try {
       const [result, masterResult] = await Promise.all([
         firestoreService.getMovimientosPaginated({ pageSize: 100, tipoFilter: "salida" }),
         firestoreService.getVentasMaestrasPaginated({ pageSize: 50 })
       ]);
+      if (request !== requestRef.current) return;
       setMovimientos(result.items);
       setVentasMaestras(masterResult.items);
       setLastDoc(result.lastDoc);
@@ -136,20 +141,28 @@ export default function HistorialVentas({
       setMasterLastDoc(masterResult.lastDoc);
       setMasterHasMore(masterResult.hasMore);
     } catch (loadError) {
+      if (request !== requestRef.current) return;
       console.error("Error al cargar el historial de ventas:", loadError);
       setMovimientos([]);
-      setError("No se pudo cargar el historial de ventas.");
+      setVentasMaestras([]);
+      setLastDoc(null);
+      setHasMore(false);
+      setMasterLastDoc(null);
+      setMasterHasMore(false);
+      setError(mensajeError(loadError, "No se pudo cargar el historial de ventas."));
     } finally {
-      setLoading(false);
+      if (request === requestRef.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     loadFirstPage();
+    return () => { requestRef.current += 1; };
   }, [loadFirstPage]);
 
   const loadMore = async () => {
-    if ((!hasMore && !masterHasMore) || loadingMore) return;
+    if ((!hasMore && !masterHasMore) || loadingMore || loading) return;
+    const request = requestRef.current;
     setLoadingMore(true);
     setError(null);
     try {
@@ -157,6 +170,7 @@ export default function HistorialVentas({
         hasMore && lastDoc ? firestoreService.getMovimientosPaginated({ pageSize: 100, lastDoc, tipoFilter: "salida" }) : Promise.resolve(null),
         masterHasMore && masterLastDoc ? firestoreService.getVentasMaestrasPaginated({ pageSize: 50, lastDoc: masterLastDoc }) : Promise.resolve(null)
       ]);
+      if (request !== requestRef.current) return;
       if (legacyResult) {
         setMovimientos((current) => {
           const byId = new Map(current.map((item) => [item.id, item]));
@@ -176,10 +190,11 @@ export default function HistorialVentas({
         setMasterHasMore(masterResult.hasMore);
       }
     } catch (loadError) {
+      if (request !== requestRef.current) return;
       console.error("Error al cargar más ventas:", loadError);
-      setError("No se pudieron cargar ventas anteriores.");
+      setError(mensajeError(loadError, "No se pudieron cargar ventas anteriores."));
     } finally {
-      setLoadingMore(false);
+      if (request === requestRef.current) setLoadingMore(false);
     }
   };
 
@@ -314,7 +329,7 @@ export default function HistorialVentas({
   const warehouseName = (id: string) => almacenes.find((warehouse) => warehouse.id === id)?.nombre || "Almacén no disponible";
 
   const cancelSale = async () => {
-    if (!ventaToCancel?.principal.id || !cancelReason.trim()) return;
+    if (!ventaToCancel || (!ventaToCancel.master && !ventaToCancel.principal?.id) || !cancelReason.trim()) return;
     setProcessingId(ventaToCancel.key);
     setError(null);
     try {
@@ -335,7 +350,7 @@ export default function HistorialVentas({
   };
 
   const archiveSale = async (venta: VentaAgrupada) => {
-    if (!venta.principal.id) return;
+    if (!venta.master && !venta.principal?.id) return;
     if (!window.confirm(`¿Enviar la venta ${venta.folio} a la Papelera? Podrás restaurarla después.`)) return;
     setProcessingId(venta.key);
     setError(null);
@@ -454,7 +469,7 @@ export default function HistorialVentas({
                         <td className="px-4 py-4">{venta.estado === "anulado" ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-rose-600 dark:text-rose-400"><Ban className="h-3.5 w-3.5" />Anulada</span> : venta.estado === "devuelto" ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-violet-600 dark:text-violet-400"><RotateCcw className="h-3.5 w-3.5" />Devuelta</span> : <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" />Activa</span>}</td>
                         <td className="px-4 py-4"><div className="flex items-center justify-end gap-1"><button type="button" onClick={() => setExpandedKey(expanded ? null : venta.key)} className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800" title="Ver detalle" aria-label={`Ver detalle de ${venta.folio}`}>{expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button>{venta.estado === "activo" && venta.master && venta.recibido > 0.009 && <button type="button" onClick={() => setVentaToReturn(venta)} disabled={processing} className="p-2 rounded-lg text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/30 disabled:opacity-50" title="Registrar devolución completa" aria-label={`Devolver ${venta.folio}`}><RotateCcw className="h-4 w-4" /></button>}{venta.estado === "activo" && venta.recibido <= 0.009 && <button type="button" onClick={() => setVentaToCancel(venta)} disabled={processing} className="p-2 rounded-lg text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 disabled:opacity-50" title="Anular venta sin pagos" aria-label={`Anular ${venta.folio}`}><Ban className="h-4 w-4" /></button>}<button type="button" onClick={() => archiveSale(venta)} disabled={processing} className="p-2 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 disabled:opacity-50" title="Enviar a Papelera" aria-label={`Enviar ${venta.folio} a la Papelera`}>{processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}</button></div></td>
                       </tr>
-                      {expanded && <tr className="bg-zinc-50/80 dark:bg-zinc-950/30"><td colSpan={8} className="px-5 py-4"><div className="mb-4 flex flex-col sm:flex-row sm:items-center gap-2"><label htmlFor={`sale-drop-${venta.key}`} className="text-xs font-bold text-zinc-600 dark:text-zinc-300">Drop asociado</label><select id={`sale-drop-${venta.key}`} value={venta.dropId || ""} onChange={event => updateSaleDrop(venta, event.target.value)} disabled={!venta.master || processing} className="max-w-sm rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs disabled:opacity-60"><option value="">Sin drop</option>{drops.map(drop => <option key={drop.id} value={drop.id}>{drop.nombre} · {drop.estado === "preparacion" ? "Preparación" : drop.estado === "en_venta" ? "En venta" : "Cerrado"}</option>)}</select>{!venta.master && <span className="text-[11px] text-zinc-500">Las ventas anteriores al historial consolidado conservan su asociación original.</span>}</div><div className="grid gap-2"><div className="grid grid-cols-[minmax(0,1fr)_100px_120px_140px] gap-3 text-[11px] uppercase tracking-wide text-zinc-500 px-2"><span>Producto</span><span className="text-center">Cantidad</span><span>Almacén</span><span className="text-right">Importe</span></div>{venta.items.map((item) => <div key={item.id || `${venta.key}-${item.sku}`} className="grid grid-cols-[minmax(0,1fr)_100px_120px_140px] gap-3 items-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2.5"><span><strong className="block truncate">{productName(item.sku)}</strong><small className="font-mono text-zinc-500">{item.sku}</small></span><span className="text-center font-semibold">{item.cantidad}</span><span className="text-xs text-zinc-500 truncate">{warehouseName(item.almacen_id)}</span><span className="text-right font-semibold">{money.format(getSubtotalVenta(item))}</span></div>)}</div>{venta.principal.comentarios_venta && <p className="mt-3 text-xs text-zinc-500"><strong>Comentarios:</strong> {venta.principal.comentarios_venta}</p>}</td></tr>}
+                      {expanded && <tr className="bg-zinc-50/80 dark:bg-zinc-950/30"><td colSpan={8} className="px-5 py-4"><div className="mb-4 flex flex-col sm:flex-row sm:items-center gap-2"><label htmlFor={`sale-drop-${venta.key}`} className="text-xs font-bold text-zinc-600 dark:text-zinc-300">Drop asociado</label><select id={`sale-drop-${venta.key}`} value={venta.dropId || ""} onChange={event => updateSaleDrop(venta, event.target.value)} disabled={!venta.master || processing} className="max-w-sm rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs disabled:opacity-60"><option value="">Sin drop</option>{drops.map(drop => <option key={drop.id} value={drop.id}>{drop.nombre} · {drop.estado === "preparacion" ? "Preparación" : drop.estado === "en_venta" ? "En venta" : "Cerrado"}</option>)}</select>{!venta.master && <span className="text-[11px] text-zinc-500">Las ventas anteriores al historial consolidado conservan su asociación original.</span>}</div><div className="grid gap-2"><div className="grid grid-cols-[minmax(0,1fr)_100px_120px_140px] gap-3 text-[11px] uppercase tracking-wide text-zinc-500 px-2"><span>Producto</span><span className="text-center">Cantidad</span><span>Almacén</span><span className="text-right">Importe</span></div>{venta.items.map((item) => <div key={item.id || `${venta.key}-${item.sku}`} className="grid grid-cols-[minmax(0,1fr)_100px_120px_140px] gap-3 items-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2.5"><span><strong className="block truncate">{productName(item.sku)}</strong><small className="font-mono text-zinc-500">{item.sku}</small></span><span className="text-center font-semibold">{item.cantidad}</span><span className="text-xs text-zinc-500 truncate">{warehouseName(item.almacen_id)}</span><span className="text-right font-semibold">{money.format(getSubtotalVenta(item))}</span></div>)}</div>{venta.principal?.comentarios_venta && <p className="mt-3 text-xs text-zinc-500"><strong>Comentarios:</strong> {venta.principal?.comentarios_venta}</p>}</td></tr>}
                     </React.Fragment>
                   );
                 })}

@@ -55,13 +55,15 @@ export const allocateRecognizedSaleIncome = (input: SaleIncomeCompositionInput) 
     return { merchandise: recognizedAmount, shipping: 0, other: 0 };
   }
 
-  const merchandise = money(recognizedAmount * merchandiseSubtotal / saleTotal);
-  const shipping = money(recognizedAmount * shippingCharged / saleTotal);
+  const sign = recognizedAmount < 0 ? -1 : 1;
+  const absoluteAmount = Math.abs(recognizedAmount);
+  const merchandise = money(Math.min(absoluteAmount, money(absoluteAmount * merchandiseSubtotal / saleTotal)));
+  const shipping = money(Math.min(money(absoluteAmount - merchandise), money(absoluteAmount * shippingCharged / saleTotal)));
   // El último componente absorbe cualquier diferencia de redondeo para que
   // la suma sea exactamente igual al importe reconocido.
-  const other = money(recognizedAmount - merchandise - shipping);
+  const other = money(absoluteAmount - merchandise - shipping);
 
-  return { merchandise, shipping, other };
+  return { merchandise: money(sign * merchandise), shipping: money(sign * shipping), other: other === 0 ? 0 : money(sign * other) };
 };
 
 export const calculateSaleTotals = (input: SaleCalculationInput) => {
@@ -80,6 +82,6 @@ export const calculateSaleTotals = (input: SaleCalculationInput) => {
     costosTotales: money(costoMercancia + costosAdicionales),
     recibido,
     saldo,
-    estadoPago: saldo > 0 ? "anticipo" as const : "pagado" as const
+    estadoPago: saldo > 0 ? recibido > 0 ? "anticipo" as const : "pendiente" as const : "pagado" as const
   };
 };

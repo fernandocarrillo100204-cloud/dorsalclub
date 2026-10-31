@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test:domain": "node --import tsx scripts/test-sales-domain.ts",
+    "test:domain": "node --import tsx scripts/test-sales-domain.ts && node --import tsx scripts/test-crm-regressions.ts && node --import tsx scripts/test-firestore-reads.ts",
     "reset:inventory": "node scripts/reset-inventory.mjs",
     "migrate:financial-periods": "node scripts/rebuild-financial-period-index.mjs"
   },

@@ -6,6 +6,8 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Cliente, Movimiento, TipoCliente, EstadoCliente, MarcaCatalogo, ConfiguracionListasDesplegables, PedidoVenta, getTotalCobradoVenta } from "../types";
 import { firestoreService } from "../lib/firebase";
+import { construirPedidos } from "../lib/lecturasVentas";
+import { mensajeError } from "../lib/errores";
 import ClienteModal from "./ClienteModal";
 import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 import {
@@ -75,6 +77,9 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
   const [clientePedidos, setClientePedidos] = useState<PedidoVenta[]>([]);
   const [loadingMovimientos, setLoadingMovimientos] = useState(false);
   const [clienteDetalleError, setClienteDetalleError] = useState("");
+  const [historialError, setHistorialError] = useState("");
+  const [detalleClienteId, setDetalleClienteId] = useState("");
+  const [detalleVersion, setDetalleVersion] = useState(0);
   const openedFromRouteRef = useRef("");
 
   // Status toggle in progress ID
@@ -150,20 +155,52 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
     let isMounted = true;
     setLoadingMovimientos(true);
     setClienteDetalleError("");
+    setHistorialError("");
+    setClienteMovimientos([]);
+    setClientePedidos([]);
+    setDetalleClienteId(selectedCliente.id);
 
-    Promise.all([
-      firestoreService.getMovimientosByClientePaginated({ clienteId: selectedCliente.id, pageSize: 200 }),
-      firestoreService.getPedidosVenta()
+    Promise.allSettled([
+      firestoreService.getMovimientosCliente(selectedCliente.id),
+      firestoreService.getVentasCliente(selectedCliente.id)
     ])
-      .then(([res, pedidos]) => {
+      .then(async ([movimientosResult, ventasResult]) => {
         if (!isMounted) return;
         const cId = selectedCliente.id;
-        setClienteMovimientos(res.items.filter(m => m.tipo === "salida"));
-        setClientePedidos(pedidos.filter(pedido => pedido.cliente_id === cId));
-      })
-      .catch((err) => {
-        console.warn("Error cargando compras del cliente:", err);
-        if (isMounted) setClienteDetalleError("No fue posible cargar el historial y los pedidos de este cliente.");
+        const failedSections: string[] = [];
+
+        if (movimientosResult.status === "fulfilled") {
+          setClienteMovimientos(movimientosResult.value.filter(m => m.tipo === "salida"));
+        } else {
+          console.warn("Error cargando el historial de ventas del cliente:", movimientosResult.reason);
+          setClienteMovimientos([]);
+          const message = mensajeError(movimientosResult.reason, "No fue posible cargar el historial de ventas del cliente.");
+          setHistorialError(message);
+          failedSections.push(message);
+        }
+
+        if (ventasResult.status === "fulfilled" && movimientosResult.status === "fulfilled") {
+          const masterIds = new Set(ventasResult.value.map(venta => venta.id));
+          const legacyIds = movimientosResult.value.filter(item => item.venta_id && item.afecta_stock === false && !masterIds.has(item.venta_id))
+            .map(item => item.venta_id!);
+          try {
+            const events = await firestoreService.getEventosVentas(legacyIds);
+            if (!isMounted) return;
+            const byId = new Map([...movimientosResult.value, ...events].map(item => [item.id, item]));
+            setClientePedidos(construirPedidos(ventasResult.value, [...byId.values()]).filter(pedido => pedido.cliente_id === cId));
+          } catch (cause) {
+            if (!isMounted) return;
+            failedSections.push(mensajeError(cause, "No fue posible cargar el seguimiento de los pedidos anteriores."));
+          }
+        } else {
+          setClientePedidos([]);
+          if (ventasResult.status === "rejected") {
+            console.warn("Error cargando las ventas del cliente:", ventasResult.reason);
+            failedSections.push(mensajeError(ventasResult.reason, "No fue posible cargar los pedidos del cliente."));
+          }
+        }
+
+        setClienteDetalleError([...new Set(failedSections)].join(" "));
       })
       .finally(() => {
         if (isMounted) setLoadingMovimientos(false);
@@ -172,7 +209,9 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
     return () => {
       isMounted = false;
     };
-  }, [selectedCliente]);
+  }, [selectedCliente?.id, detalleVersion]);
+
+  const detalleActual = detalleClienteId === selectedCliente?.id;
 
   // Client metrics calculated on the fly
   const returnedSaleIds = useMemo(() => new Set(
@@ -183,7 +222,7 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
 
   const groupedSales = useMemo(() => {
     const groups = new Map<string, Movimiento[]>();
-    clienteMovimientos.filter(m => !m.subtipo).forEach(m => {
+    clienteMovimientos.filter(m => !m.subtipo && m.en_papelera !== true).forEach(m => {
       const key = m.venta_id || m.folio || m.id || `${m.sku}-${groups.size}`;
       groups.set(key, [...(groups.get(key) || []), m]);
     });
@@ -720,9 +759,10 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
 
             {/* Drawer Body */}
             <div className="flex-1 overflow-y-auto p-5 space-y-6">
-              {clienteDetalleError && (
-                <div className="p-3 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30 text-xs text-rose-700 dark:text-rose-300">
-                  {clienteDetalleError}
+              {detalleActual && clienteDetalleError && (
+                <div role="alert" className="p-3 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30 text-xs text-rose-700 dark:text-rose-300">
+                  <p>{clienteDetalleError}</p>
+                  <button type="button" onClick={() => setDetalleVersion(value => value + 1)} disabled={loadingMovimientos} className="mt-2 font-bold underline disabled:opacity-50">Reintentar</button>
                 </div>
               )}
               {/* Quick Actions & Status banner */}
@@ -761,7 +801,7 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
               </div>
 
               {/* Commercial Metrics Cards */}
-              <div>
+              {detalleActual && !loadingMovimientos && !clienteDetalleError && <div>
                 <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2.5">
                   Métricas Comerciales
                 </h3>
@@ -815,7 +855,7 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
                     </span>
                   </div>
                 </div>
-              </div>
+              </div>}
 
               {/* Contact and details grid */}
               <div className="space-y-3 bg-zinc-50 dark:bg-zinc-800/30 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 text-xs">
@@ -912,7 +952,7 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
                 )}
               </div>
 
-              {clientePedidos.length > 0 && (
+              {detalleActual && !loadingMovimientos && clientePedidos.length > 0 && (
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider flex items-center gap-2">
@@ -952,7 +992,7 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider flex items-center gap-2">
                     <ShoppingBag className="w-4 h-4 text-rose-500" />
-                    Historial de Compras / Salidas
+                    Historial de ventas
                   </h3>
                   {onNavigateToHistory && (
                     <button
@@ -966,12 +1006,12 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
                   )}
                 </div>
 
-                {loadingMovimientos ? (
+                {loadingMovimientos || !detalleActual ? (
                   <div className="p-6 text-center text-xs text-zinc-400 flex items-center justify-center gap-2">
                     <span className="w-4 h-4 border-2 border-rose-500 border-t-transparent rounded-full animate-spin" />
                     <span>Buscando movimientos del cliente...</span>
                   </div>
-                ) : groupedSales.length === 0 ? (
+                ) : historialError ? <p className="text-xs text-rose-600">Historial no disponible. Usa Reintentar para volver a consultarlo.</p> : groupedSales.length === 0 ? (
                   <div className="p-6 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl text-center text-xs text-zinc-400 space-y-2">
                     <p>Este cliente aún no tiene salidas o compras registradas en el sistema.</p>
                     {onNavigateToVenta && (

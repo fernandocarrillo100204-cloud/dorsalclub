@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarDays, CheckCircle2, CircleDollarSign, LoaderCircle, PackageCheck, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
 import { OpcionListaConfigurable, PedidoVenta } from "../types";
+import { mensajeError } from "../lib/errores";
 
 const money = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
 
@@ -17,6 +18,8 @@ const PedidoCard: React.FC<{ pedido: PedidoVenta; metodosPago: OpcionListaConfig
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
+  useEffect(() => { setAmount(pedido.saldo > 0 ? pedido.saldo.toFixed(2) : ""); }, [pedido.saldo]);
+  useEffect(() => { setEstimatedDate(pedido.fecha_estimada || ""); setComments(pedido.comentarios || ""); }, [pedido.fecha_estimada, pedido.comentarios]);
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -131,7 +134,7 @@ export const PedidosVenta: React.FC = () => {
       setOrders(nextOrders);
       setMetodosPago(config.metodos_pago_venta.filter(item => item.activa));
     } catch (err: any) {
-      setError(err?.message || "No fue posible consultar los pedidos.");
+      setError(mensajeError(err, "No fue posible consultar los pedidos."));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -158,11 +161,11 @@ export const PedidosVenta: React.FC = () => {
         </button>
       </header>
 
-      {error && <div className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4 text-sm text-red-700 dark:text-red-300">{error}</div>}
+      {error && <div role="alert" className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4 text-sm text-red-700 dark:text-red-300">{error}<button type="button" onClick={() => load(true)} className="block mt-2 font-bold underline">Reintentar</button></div>}
 
       {loading ? (
         <div className="h-52 flex items-center justify-center text-zinc-500"><LoaderCircle className="w-6 h-6 animate-spin" /></div>
-      ) : (
+      ) : error && orders.length === 0 ? null : (
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
           {columns.map(column => {
             const columnOrders = orders.filter(order => order.estado === column.id);

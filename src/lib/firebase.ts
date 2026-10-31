@@ -90,6 +90,7 @@ import {
   clearPeriodosFinancierosCache
 } from "./periodosFinancieros";
 import { allocateRecognizedSaleIncome, calculateSaleTotals, getMissingDropSkus, requiresSaleRefund } from "./ventasCore";
+import { construirPedidos, fechaRegistro, leerMovimiento, leerVenta } from "./lecturasVentas";
 
 // Detect if Firebase config is present in environment variables
 const metaEnv = (import.meta as any).env || {};
@@ -2238,202 +2239,102 @@ export const firestoreService = {
   getVentasMaestrasPaginated: async (options: {
     pageSize?: number;
     lastDoc?: any;
+    includeArchived?: boolean;
   } = {}): Promise<{ items: Venta[]; lastDoc: any; hasMore: boolean }> => {
     const pageSize = options.pageSize || 40;
     if (isConfigured && realDb) {
       const constraints: any[] = [orderBy("fecha", "desc"), limit(pageSize + 1)];
       if (options.lastDoc) constraints.push(startAfter(options.lastDoc));
       const snap = await getDocs(query(collection(realDb, "ventas"), ...constraints));
-      const docs = snap.docs;
-      const hasMore = docs.length > pageSize;
-      const selected = hasMore ? docs.slice(0, pageSize) : docs;
-      const toDate = (value: any): Date => value?.toDate ? value.toDate() : value instanceof Date ? value : value?.seconds ? new Date(value.seconds * 1000) : new Date(value || Date.now());
-      const items = selected.map(snapshot => {
-        const data = snapshot.data();
-        const pagos: PagoVenta[] = Array.isArray(data.pagos) ? data.pagos.map((pago: any) => ({
-          id: String(pago.id || ""),
-          monto: Number(pago.monto) || 0,
-          metodo_pago: String(pago.metodo_pago || "Sin especificar"),
-          fecha: toDate(pago.fecha),
-          usuario: String(pago.usuario || ""),
-          estado: pago.estado === "anulado" ? "anulado" : "activo",
-          ...(pago.motivo_anulacion ? { motivo_anulacion: String(pago.motivo_anulacion) } : {})
-        })) : [];
-        return {
-          id: snapshot.id,
-          folio: String(data.folio || snapshot.id),
-          fecha: toDate(data.fecha),
-          fecha_str: String(data.fecha_str || getLocalDateString(data.fecha)),
-          items: Array.isArray(data.items) ? data.items : [],
-          total_unidades: Number(data.total_unidades) || 0,
-          subtotal: Number(data.subtotal) || 0,
-          envio_cobrado_cliente: Number(data.envio_cobrado_cliente) || 0,
-          otros_cargos_cliente: Number(data.otros_cargos_cliente) || 0,
-          concepto_otros_cargos: data.concepto_otros_cargos || undefined,
-          total: Number(data.total) || 0,
-          costo_mercancia: Number(data.costo_mercancia) || 0,
-          costo_envio_venta: Number(data.costo_envio_venta) || 0,
-          otros_costos_venta: Number(data.otros_costos_venta) || 0,
-          concepto_otros_costos: data.concepto_otros_costos || undefined,
-          costos_totales: Number(data.costos_totales) || 0,
-          cliente_id: data.cliente_id || undefined,
-          cliente_nombre: String(data.cliente_nombre || "Venta sin cliente / Mostrador"),
-          cliente_tipo: data.cliente_tipo || undefined,
-          drop_id: data.drop_id || undefined,
-          drop_nombre: data.drop_nombre || undefined,
-          canal_venta: data.canal_venta || "stock",
-          canal_venta_nombre: String(data.canal_venta_nombre || "Venta directa"),
-          porcentaje_precio: Number(data.porcentaje_precio) || 0,
-          afecta_stock: data.afecta_stock !== false,
-          anticipo_porcentaje: Number(data.anticipo_porcentaje) || 0,
-          recibido: Number(data.recibido) || 0,
-          saldo: Number(data.saldo) || 0,
-          estado_pago: data.estado_pago || "pendiente",
-          estado_pedido: data.estado_pedido || undefined,
-          fecha_estimada: data.fecha_estimada || undefined,
-          comentarios_pedido: data.comentarios_pedido || undefined,
-          entregado_at: data.entregado_at ? toDate(data.entregado_at) : undefined,
-          pagos,
-          metodo_pago_inicial: String(data.metodo_pago_inicial || ""),
-          comentarios: data.comentarios || undefined,
-          ubicacion_entrega_id: data.ubicacion_entrega_id || undefined,
-          ubicacion_entrega_nombre: data.ubicacion_entrega_nombre || undefined,
-          repartidor_id: data.repartidor_id || undefined,
-          repartidor_nombre: data.repartidor_nombre || undefined,
-          creado_por: String(data.creado_por || ""),
-          creado_at: toDate(data.creado_at || data.fecha),
-          actualizado_at: toDate(data.actualizado_at || data.fecha),
-          estado: data.estado || "activo",
-          motivo_anulacion: data.motivo_anulacion || undefined,
-          anulado_at: data.anulado_at ? toDate(data.anulado_at) : undefined,
-          anulado_por: data.anulado_por || undefined,
-          en_papelera: data.en_papelera === true,
-          monto_reembolsado: Number(data.monto_reembolsado) || 0,
-          motivo_devolucion: data.motivo_devolucion || undefined,
-          devuelto_at: data.devuelto_at ? toDate(data.devuelto_at) : undefined,
-          devuelto_por: data.devuelto_por || undefined
-        } as Venta;
-      }).filter(item => item.en_papelera !== true);
-      return { items, lastDoc: selected.length ? selected[selected.length - 1] : null, hasMore };
+      const hasMore = snap.docs.length > pageSize;
+      const selected = snap.docs.slice(0, pageSize);
+      const items = selected.map(item => leerVenta(item.id, item.data()))
+        .filter(item => options.includeArchived || item.en_papelera !== true);
+      return { items, lastDoc: selected.at(-1) || null, hasMore };
     }
-    const all = getLocalStorageItem<Venta[]>("ventas_maestras", []).filter(item => item.en_papelera !== true);
+    const all = getLocalStorageItem<Venta[]>("ventas_maestras", [])
+      .map(item => leerVenta(item.id, item))
+      .filter(item => options.includeArchived || item.en_papelera !== true)
+      .sort((a, b) => fechaRegistro(b.fecha).getTime() - fechaRegistro(a.fecha).getTime());
     const start = typeof options.lastDoc === "number" ? options.lastDoc : 0;
     const items = all.slice(start, start + pageSize);
     return { items, lastDoc: start + items.length, hasMore: start + items.length < all.length };
   },
 
-  getPedidosVenta: async (): Promise<PedidoVenta[]> => {
-    let movimientos: Array<Movimiento & { id?: string }> = [];
-    const ventasMaestras: Venta[] = [];
+  // Estas lecturas pertenecen a una ficha individual, no a todo el sistema.
+  // La igualdad por cliente usa el índice automático y trae todas sus partidas
+  // y eventos: no corta una venta ni presenta métricas de una página como totales.
+  getMovimientosCliente: async (clienteId: string): Promise<Movimiento[]> => {
+    if (!clienteId.trim()) throw new Error("Selecciona un cliente.");
+    const rows = isConfigured && realDb
+      ? (await getDocs(query(collection(realDb, "movimientos"), where("cliente_id", "==", clienteId)))).docs.map(item => leerMovimiento(item.id, item.data()))
+      : getLocalStorageItem<Movimiento[]>("movimientos", []).filter(item => item.cliente_id === clienteId).map(item => leerMovimiento(item.id || "", item));
+    return rows.filter(item => item.en_papelera !== true)
+      .sort((a, b) => fechaRegistro(b.fecha).getTime() - fechaRegistro(a.fecha).getTime());
+  },
 
+  getVentasCliente: async (clienteId: string): Promise<Venta[]> => {
+    if (!clienteId.trim()) throw new Error("Selecciona un cliente.");
     if (isConfigured && realDb) {
-      let cursor: any = null;
-      let moreMasters = true;
-      while (moreMasters) {
-        const page = await firestoreService.getVentasMaestrasPaginated({ pageSize: 200, lastDoc: cursor });
-        ventasMaestras.push(...page.items.filter(item => item.afecta_stock === false));
-        cursor = page.lastDoc;
-        moreMasters = page.hasMore;
-      }
-      const [salesSnap, trackingSnap] = await Promise.all([
-        getDocs(query(collection(realDb, "movimientos"), where("tipo", "==", "salida"), orderBy("fecha", "desc"), limit(500))),
-        getDocs(query(collection(realDb, "movimientos"), where("tipo", "==", "ajuste"), orderBy("fecha", "desc"), limit(250)))
-      ]);
-      movimientos = [...salesSnap.docs, ...trackingSnap.docs].map(item => ({ id: item.id, ...item.data() } as Movimiento));
-    } else {
-      movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
-      ventasMaestras.push(...getLocalStorageItem<Venta[]>("ventas_maestras", []).filter(item => item.afecta_stock === false));
+      const snapshot = await getDocs(query(collection(realDb, "ventas"), where("cliente_id", "==", clienteId)));
+      return snapshot.docs.map(item => leerVenta(item.id, item.data()));
     }
+    return getLocalStorageItem<Venta[]>("ventas_maestras", []).filter(item => item.cliente_id === clienteId).map(item => leerVenta(item.id, item));
+  },
 
-    const masterIds = new Set(ventasMaestras.map(item => item.id));
+  // Los seguimientos legados no siempre tenían cliente_id. Se recuperan por
+  // grupos de ventas del cliente, nunca con una lectura global o por cada fila.
+  getEventosVentas: async (ventaIds: string[]): Promise<Movimiento[]> => {
+    const ids = [...new Set(ventaIds.filter(Boolean))];
+    if (!ids.length) return [];
+    if (isConfigured && realDb) {
+      const groups = Array.from({ length: Math.ceil(ids.length / 10) }, (_, index) => ids.slice(index * 10, index * 10 + 10));
+      const snapshots = await Promise.all(groups.map(group => getDocs(query(
+        collection(realDb, "movimientos"), where("venta_relacionada_id", "in", group)
+      ))));
+      return snapshots.flatMap(snapshot => snapshot.docs.map(item => leerMovimiento(item.id, item.data())));
+    }
+    const allowed = new Set(ids);
+    return getLocalStorageItem<Movimiento[]>("movimientos", []).filter(item => allowed.has(item.venta_relacionada_id || ""))
+      .map(item => leerMovimiento(item.id || "", item));
+  },
 
-    const grupos = new Map<string, Movimiento[]>();
-    const eventos = new Map<string, Movimiento[]>();
-    movimientos.forEach(movimiento => {
-      if (movimiento.venta_relacionada_id) {
-        const actuales = eventos.get(movimiento.venta_relacionada_id) || [];
-        actuales.push(movimiento);
-        eventos.set(movimiento.venta_relacionada_id, actuales);
-        return;
+  getPedidosVenta: async (): Promise<PedidoVenta[]> => {
+    const readMasters = async () => {
+      const sales: Venta[] = [];
+      let cursor: any = null;
+      let hasMore = true;
+      while (hasMore) {
+        const page = await firestoreService.getVentasMaestrasPaginated({ pageSize: 200, lastDoc: cursor, includeArchived: true });
+        sales.push(...page.items);
+        cursor = page.lastDoc;
+        hasMore = page.hasMore;
       }
-      if (!movimiento.venta_id || masterIds.has(movimiento.venta_id) || movimiento.afecta_stock !== false) return;
-      if (movimiento.canal_venta !== "bajo_pedido" && movimiento.canal_venta !== "mayoreo") return;
-      if ((movimiento.estado || "activo") === "anulado" || movimiento.en_papelera === true) return;
-      const actuales = grupos.get(movimiento.venta_id) || [];
-      actuales.push(movimiento);
-      grupos.set(movimiento.venta_id, actuales);
-    });
-
-    const toDate = (value: any): Date => {
-      if (value instanceof Date) return value;
-      if (typeof value?.toDate === "function") return value.toDate();
-      if (typeof value?.seconds === "number") return new Date(value.seconds * 1000);
-      return new Date(value || Date.now());
+      return sales;
     };
-
-    const legacyOrders = Array.from(grupos.entries()).map(([ventaId, partidas]) => {
-      const ordered = [...partidas].sort((a, b) => (a.venta_partida || 0) - (b.venta_partida || 0));
-      const principal = ordered[0];
-      const orderEvents = (eventos.get(ventaId) || []).sort((a, b) => toDate(a.fecha).getTime() - toDate(b.fecha).getTime());
-      const payments = orderEvents.filter(item => item.subtipo === "abono_venta");
-      const lastTracking = [...orderEvents].reverse().find(item => item.subtipo === "seguimiento_pedido");
-      const total = Number(principal.venta_total_cobrado) || ordered.reduce((sum, item) => sum + (Number(item.total_cobrado) || Number(item.total_venta) || 0), 0);
-      const initialReceived = Math.max(0, Number(principal.ingreso_reconocido) || Number(principal.venta_total_recibido) || 0);
-      const recibido = Math.min(total, initialReceived + payments.reduce((sum, item) => sum + Math.max(0, Number(item.ingreso_reconocido) || 0), 0));
-      const saldo = Math.max(0, Math.round((total - recibido + Number.EPSILON) * 100) / 100);
-      const estado = lastTracking?.pedido_estado === "entregado" || principal.pedido_estado === "entregado"
-        ? "entregado"
-        : saldo <= 0 ? "pagado" : "pedido";
-      return {
-        venta_id: ventaId,
-        es_consolidado: false,
-        folio: principal.folio,
-        cliente_id: principal.cliente_id,
-        cliente_nombre: principal.cliente_nombre || "Cliente sin nombre",
-        canal_venta: principal.canal_venta as "bajo_pedido" | "mayoreo",
-        canal_venta_nombre: principal.canal_venta_nombre || (principal.canal_venta === "mayoreo" ? "Mayoreo" : "Bajo pedido"),
-        fecha: toDate(principal.fecha),
-        total,
-        recibido,
-        saldo,
-        estado,
-        fecha_estimada: lastTracking?.pedido_fecha_estimada || principal.pedido_fecha_estimada,
-        comentarios: lastTracking?.pedido_comentarios ?? principal.pedido_comentarios ?? principal.comentarios_venta,
-        ubicacion_entrega_nombre: principal.ubicacion_entrega_nombre,
-        repartidor_nombre: principal.repartidor_nombre,
-        items: ordered.map(item => ({
-          sku: item.sku,
-          cantidad: Number(item.cantidad) || 0,
-          precio_unitario: Number(item.precio_unitario_venta) || 0,
-          total: Number(item.total_venta) || 0
-        }))
-      } satisfies PedidoVenta;
-    });
-
-    const masterOrders: PedidoVenta[] = ventasMaestras
-      .filter(item => item.estado !== "anulado" && item.estado !== "devuelto" && item.en_papelera !== true && (item.canal_venta === "bajo_pedido" || item.canal_venta === "mayoreo"))
-      .map(item => ({
-        venta_id: item.id,
-        es_consolidado: true,
-        folio: item.folio,
-        cliente_id: item.cliente_id,
-        cliente_nombre: item.cliente_nombre,
-        canal_venta: item.canal_venta as "bajo_pedido" | "mayoreo",
-        canal_venta_nombre: item.canal_venta_nombre,
-        fecha: item.fecha instanceof Date ? item.fecha : new Date((item.fecha as any).seconds * 1000),
-        total: item.total,
-        recibido: item.recibido,
-        saldo: item.saldo,
-        estado: item.estado_pedido === "entregado" ? "entregado" : item.saldo <= 0 ? "pagado" : "pedido",
-        fecha_estimada: item.fecha_estimada,
-        comentarios: item.comentarios_pedido || item.comentarios,
-        ubicacion_entrega_nombre: item.ubicacion_entrega_nombre,
-        repartidor_nombre: item.repartidor_nombre,
-        items: item.items.map(line => ({ sku: line.sku, cantidad: line.cantidad, precio_unitario: line.precio_unitario, total: line.total })),
-        pagos: item.pagos
-      }));
-
-    return [...masterOrders, ...legacyOrders].sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
+    const readMovements = async (tipo: "salida" | "ajuste") => {
+      const rows: Movimiento[] = [];
+      let cursor: any = null;
+      let hasMore = true;
+      while (hasMore) {
+        const constraints: any[] = [where("tipo", "==", tipo), orderBy("fecha", "desc"), limit(201)];
+        if (cursor) constraints.push(startAfter(cursor));
+        const snapshot = await getDocs(query(collection(realDb, "movimientos"), ...constraints));
+        const page = snapshot.docs.slice(0, 200);
+        rows.push(...page.map(item => leerMovimiento(item.id, item.data())));
+        cursor = page.at(-1);
+        hasMore = snapshot.docs.length > 200;
+      }
+      return rows;
+    };
+    if (isConfigured && realDb) {
+      const [masters, sales, tracking] = await Promise.all([readMasters(), readMovements("salida"), readMovements("ajuste")]);
+      return construirPedidos(masters, [...sales, ...tracking]);
+    }
+    return construirPedidos(
+      getLocalStorageItem<Venta[]>("ventas_maestras", []).map(item => leerVenta(item.id, item)),
+      getLocalStorageItem<Movimiento[]>("movimientos", []).map(item => leerMovimiento(item.id || "", item))
+    );
   },
 
   registrarPagoPedido: async (ventaId: string, monto: number, metodoPago: string): Promise<void> => {
@@ -2530,8 +2431,8 @@ export const firestoreService = {
         const principal = active.find(item => item.data().venta_partida === 1) || active[0];
         const data = principal.data();
         const total = Math.max(0, Number(data.venta_total_cobrado) || 0);
-        const initialReceived = Math.max(0, Number(data.ingreso_reconocido) || Number(data.venta_total_recibido) || 0);
-        const previousPayments = currentPayments.reduce((sum, item) => sum + (item.exists() ? Math.max(0, Number(item.data().ingreso_reconocido) || 0) : 0), 0);
+        const initialReceived = Math.max(0, typeof data.venta_total_recibido === "number" ? data.venta_total_recibido : active.reduce((sum, item) => sum + (Number(item.data().ingreso_reconocido) || 0), 0));
+        const previousPayments = currentPayments.reduce((sum, item) => sum + (item.exists() && item.data().estado !== "anulado" && item.data().en_papelera !== true ? Math.max(0, Number(item.data().ingreso_reconocido) || 0) : 0), 0);
         const saldoActual = Math.max(0, Math.round((total - initialReceived - previousPayments + Number.EPSILON) * 100) / 100);
         if (saldoActual <= 0) throw new Error("Este pedido ya está pagado.");
         if (cleanAmount > saldoActual) throw new Error(`El pago no puede superar el saldo de $${saldoActual.toFixed(2)}.`);
@@ -2595,8 +2496,8 @@ export const firestoreService = {
       if (targets.length === 0) throw new Error("El pedido ya no existe.");
       const principal = targets.find(item => item.venta_partida === 1) || targets[0];
       const total = Math.max(0, Number(principal.venta_total_cobrado) || 0);
-      const initialReceived = Math.max(0, Number(principal.ingreso_reconocido) || Number(principal.venta_total_recibido) || 0);
-      const previousPayments = movimientos.filter(item => item.venta_relacionada_id === ventaId && item.subtipo === "abono_venta").reduce((sum, item) => sum + Math.max(0, Number(item.ingreso_reconocido) || 0), 0);
+      const initialReceived = Math.max(0, typeof principal.venta_total_recibido === "number" ? principal.venta_total_recibido : targets.reduce((sum, item) => sum + (Number(item.ingreso_reconocido) || 0), 0));
+      const previousPayments = movimientos.filter(item => item.venta_relacionada_id === ventaId && item.subtipo === "abono_venta" && item.estado !== "anulado" && item.en_papelera !== true).reduce((sum, item) => sum + Math.max(0, Number(item.ingreso_reconocido) || 0), 0);
       const saldoActual = Math.max(0, Math.round((total - initialReceived - previousPayments + Number.EPSILON) * 100) / 100);
       if (saldoActual <= 0) throw new Error("Este pedido ya está pagado.");
       if (cleanAmount > saldoActual) throw new Error(`El pago no puede superar el saldo de $${saldoActual.toFixed(2)}.`);
@@ -2671,14 +2572,16 @@ export const firestoreService = {
       ]);
       if (saleSnap.empty) throw new Error("El pedido ya no existe.");
       const principal = saleSnap.docs.find(item => item.data().venta_partida === 1) || saleSnap.docs[0];
-      const total = Math.max(0, Number(principal.data().venta_total_cobrado) || 0);
-      const initialReceived = Math.max(0, Number(principal.data().ingreso_reconocido) || Number(principal.data().venta_total_recibido) || 0);
-      const payments = eventSnap.docs.filter(item => item.data().subtipo === "abono_venta").reduce((sum, item) => sum + Math.max(0, Number(item.data().ingreso_reconocido) || 0), 0);
-      if (data.marcar_entregado && total - initialReceived - payments > 0.009) throw new Error("Liquida el saldo antes de marcar el pedido como entregado.");
+      const order = construirPedidos([], [...saleSnap.docs, ...eventSnap.docs].map(item => leerMovimiento(item.id, item.data())))
+        .find(item => item.venta_id === ventaId);
+      if (!order) throw new Error("El pedido está cancelado o ya no está disponible.");
+      if (data.marcar_entregado && order.saldo > 0.009) throw new Error("Liquida el saldo antes de marcar el pedido como entregado.");
       await addDoc(collection(realDb, "movimientos"), {
         folio: `Seguimiento-${principal.data().folio || ventaId}`,
         venta_relacionada_id: ventaId,
         subtipo: "seguimiento_pedido",
+        cliente_id: principal.data().cliente_id || "",
+        cliente_nombre: principal.data().cliente_nombre || "Cliente",
         sku: "SEGUIMIENTO",
         almacen_id: "bajo_pedido",
         tipo: "ajuste",
@@ -2713,15 +2616,16 @@ export const firestoreService = {
     const targets = movimientos.filter(item => item.venta_id === ventaId);
     if (targets.length === 0) throw new Error("El pedido ya no existe.");
     const principal = targets.find(item => item.venta_partida === 1) || targets[0];
-    const total = Math.max(0, Number(principal.venta_total_cobrado) || 0);
-    const initialReceived = Math.max(0, Number(principal.ingreso_reconocido) || Number(principal.venta_total_recibido) || 0);
-    const payments = movimientos.filter(item => item.venta_relacionada_id === ventaId && item.subtipo === "abono_venta").reduce((sum, item) => sum + Math.max(0, Number(item.ingreso_reconocido) || 0), 0);
-    if (data.marcar_entregado && total - initialReceived - payments > 0.009) throw new Error("Liquida el saldo antes de marcar el pedido como entregado.");
+    const order = construirPedidos([], movimientos).find(item => item.venta_id === ventaId);
+    if (!order) throw new Error("El pedido está cancelado o ya no está disponible.");
+    if (data.marcar_entregado && order.saldo > 0.009) throw new Error("Liquida el saldo antes de marcar el pedido como entregado.");
     movimientos.push({
       id: `seguimiento_${Math.random().toString(36).slice(2, 11)}`,
       folio: `Seguimiento-${principal.folio}`,
       venta_relacionada_id: ventaId,
       subtipo: "seguimiento_pedido",
+      cliente_id: principal.cliente_id,
+      cliente_nombre: principal.cliente_nombre,
       sku: "SEGUIMIENTO",
       almacen_id: "bajo_pedido",
       tipo: "ajuste",
@@ -4172,135 +4076,6 @@ export const firestoreService = {
     return res.items;
   },
 
-  // --- CONSULTA PAGINADA DE MOVIMIENTOS POR CLIENTE (50 EN 50 CON STARTAFTER) ---
-  getMovimientosByClientePaginated: async (options: {
-    clienteId: string;
-    pageSize?: number;
-    lastDoc?: any;
-  }): Promise<{
-    items: Movimiento[];
-    lastDoc: any;
-    hasMore: boolean;
-  }> => {
-    const pageSize = options.pageSize || 50;
-
-    if (isConfigured && realDb) {
-      try {
-        const constraints: any[] = [
-          where("cliente_id", "==", options.clienteId),
-          where("tipo", "==", "salida"),
-          orderBy("fecha", "desc"),
-          limit(pageSize + 1)
-        ];
-
-        if (options.lastDoc) {
-          constraints.push(startAfter(options.lastDoc));
-        }
-
-        const q = query(collection(realDb, "movimientos"), ...constraints);
-        const snap = await getDocs(q);
-        const docs = snap.docs;
-        const hasMore = docs.length > pageSize;
-        const itemsToProcess = hasMore ? docs.slice(0, pageSize) : docs;
-        const nextLastDoc = itemsToProcess.length > 0 ? itemsToProcess[itemsToProcess.length - 1] : null;
-
-        const items: Movimiento[] = itemsToProcess.map(d => {
-          const data = d.data();
-          return {
-            id: d.id,
-            folio: data.folio,
-            venta_id: data.venta_id,
-            venta_relacionada_id: data.venta_relacionada_id || undefined,
-            subtipo: data.subtipo || undefined,
-            venta_partida: typeof data.venta_partida === "number" ? data.venta_partida : undefined,
-            venta_total_partidas: typeof data.venta_total_partidas === "number" ? data.venta_total_partidas : undefined,
-            venta_subtotal: typeof data.venta_subtotal === "number" ? data.venta_subtotal : undefined,
-            venta_total_cobrado: typeof data.venta_total_cobrado === "number" ? data.venta_total_cobrado : undefined,
-            venta_total_costos: typeof data.venta_total_costos === "number" ? data.venta_total_costos : undefined,
-            canal_venta: data.canal_venta || undefined,
-            canal_venta_nombre: data.canal_venta_nombre || undefined,
-            porcentaje_precio: typeof data.porcentaje_precio === "number" ? data.porcentaje_precio : undefined,
-            afecta_stock: typeof data.afecta_stock === "boolean" ? data.afecta_stock : undefined,
-            anticipo_porcentaje: typeof data.anticipo_porcentaje === "number" ? data.anticipo_porcentaje : undefined,
-            venta_total_recibido: typeof data.venta_total_recibido === "number" ? data.venta_total_recibido : undefined,
-            venta_saldo_pendiente: typeof data.venta_saldo_pendiente === "number" ? data.venta_saldo_pendiente : undefined,
-            ingreso_reconocido: typeof data.ingreso_reconocido === "number" ? data.ingreso_reconocido : undefined,
-            unidades_devueltas: typeof data.unidades_devueltas === "number" ? data.unidades_devueltas : undefined,
-            estado_pago: data.estado_pago || undefined,
-            sku: data.sku,
-            almacen_id: data.almacen_id,
-            tipo: data.tipo,
-            cantidad: Number(data.cantidad) || 0,
-            referencia: data.referencia || "",
-            usuario: data.usuario || "",
-            fecha: data.fecha ? (data.fecha.toDate ? data.fecha.toDate() : new Date(data.fecha)) : new Date(),
-            almacen_destino_id: data.almacen_destino_id,
-            compra_id: data.compra_id,
-            lote_id: data.lote_id,
-            costo_unitario: typeof data.costo_unitario === "number" ? data.costo_unitario : undefined,
-            cliente_id: data.cliente_id,
-            cliente_nombre: data.cliente_nombre,
-            cliente_tipo: data.cliente_tipo,
-            precio_unitario_venta: typeof data.precio_unitario_venta === "number" ? data.precio_unitario_venta : undefined,
-            total_venta: typeof data.total_venta === "number" ? data.total_venta : undefined,
-            envio_cobrado_cliente: typeof data.envio_cobrado_cliente === "number" ? data.envio_cobrado_cliente : undefined,
-            otros_cargos_cliente: typeof data.otros_cargos_cliente === "number" ? data.otros_cargos_cliente : undefined,
-            concepto_otros_cargos: data.concepto_otros_cargos || undefined,
-            costo_envio_venta: typeof data.costo_envio_venta === "number" ? data.costo_envio_venta : undefined,
-            otros_costos_venta: typeof data.otros_costos_venta === "number" ? data.otros_costos_venta : undefined,
-            concepto_otros_costos: data.concepto_otros_costos || undefined,
-            total_cobrado: typeof data.total_cobrado === "number" ? data.total_cobrado : undefined,
-            total_costos_venta: typeof data.total_costos_venta === "number" ? data.total_costos_venta : undefined,
-            comentarios_venta: data.comentarios_venta || undefined,
-            ubicacion_entrega_id: data.ubicacion_entrega_id || undefined,
-            ubicacion_entrega_nombre: data.ubicacion_entrega_nombre || undefined,
-            repartidor_id: data.repartidor_id || undefined,
-            repartidor_nombre: data.repartidor_nombre || undefined,
-            estado: data.estado || "activo",
-            anulado_at: data.anulado_at ? (data.anulado_at.toDate ? data.anulado_at.toDate() : new Date(data.anulado_at)) : undefined,
-            anulado_por: data.anulado_por,
-            motivo_anulacion: data.motivo_anulacion,
-            en_papelera: data.en_papelera === true
-          };
-        });
-
-        return {
-          items,
-          lastDoc: nextLastDoc,
-          hasMore
-        };
-      } catch (err: any) {
-        console.error("Error en consulta indexada de movimientos por cliente:", err);
-        throw err;
-      }
-    }
-
-    // Modo local
-    let movs = getLocalStorageItem<Movimiento[]>("movimientos", []);
-    movs = movs.filter(m => m.cliente_id === options.clienteId && m.tipo === "salida");
-    movs = movs.map(m => ({
-      ...m,
-      fecha: typeof m.fecha === "string" ? new Date(m.fecha) : (m.fecha as any)?.toDate ? (m.fecha as any).toDate() : m.fecha,
-      estado: m.estado || "activo",
-      anulado_at: m.anulado_at ? (typeof m.anulado_at === "string" ? new Date(m.anulado_at) : (m.anulado_at as any)?.toDate ? (m.anulado_at as any).toDate() : m.anulado_at) : undefined
-    }));
-    movs.sort((a, b) => {
-      const timeA = a.fecha instanceof Date ? a.fecha.getTime() : new Date((a.fecha as any).seconds * 1000).getTime();
-      const timeB = b.fecha instanceof Date ? b.fecha.getTime() : new Date((b.fecha as any).seconds * 1000).getTime();
-      return timeB - timeA;
-    });
-
-    const startIndex = typeof options.lastDoc === "number" ? options.lastDoc : 0;
-    const pageItems = movs.slice(startIndex, startIndex + pageSize);
-    const nextIndex = startIndex + pageItems.length;
-    const hasMore = nextIndex < movs.length;
-
-    return {
-      items: pageItems,
-      lastDoc: nextIndex,
-      hasMore
-    };
-  },
 
   // --- CONSULTA OPTIMIZADA DE RESÚMENES INCREMENTALES DE VENTAS ---
   getResumenVentasByDateRange: async (startDate: Date, endDate: Date): Promise<ResumenVentaDiaria[]> => {

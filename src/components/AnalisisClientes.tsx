@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { 
   UserCheck, 
   Search, 
@@ -54,6 +54,7 @@ import {
   getSubtotalVenta
 } from "../types";
 import { firestoreService } from "../lib/firebase";
+import { mensajeError } from "../lib/errores";
 import { useTheme } from "../context/ThemeContext";
 import ClienteModal from "./ClienteModal";
 
@@ -106,11 +107,11 @@ export default function AnalisisClientes({
 
   // Movements state for the selected client
   const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
-  const [lastDoc, setLastDoc] = useState<any>(null);
-  const [hasMore, setHasMore] = useState(false);
   const [loadingMovs, setLoadingMovs] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [movsError, setMovsError] = useState<string | null>(null);
+  const [clientesError, setClientesError] = useState("");
+  const requestRef = useRef(0);
+  const openedFromRouteRef = useRef("");
 
   // Period filter
   const [periodo, setPeriodo] = useState<PeriodoAnalisis>("todo");
@@ -143,19 +144,13 @@ export default function AnalisisClientes({
         if (!isMounted) return;
         setClientes(data);
         setLoadingClientes(false);
-
-        // Preselect client if provided via URL or prop
-        if (preselectedClienteId && !selectedCliente) {
-          const found = data.find(c => c.id === preselectedClienteId);
-          if (found) {
-            setSelectedCliente(found);
-          }
-        }
+        setClientesError("");
       },
       (err) => {
         if (!isMounted) return;
         console.warn("Aviso al cargar clientes para análisis:", err);
         setLoadingClientes(false);
+        setClientesError(mensajeError(err, "No fue posible cargar los clientes."));
       }
     );
 
@@ -163,7 +158,16 @@ export default function AnalisisClientes({
       isMounted = false;
       unsubscribe();
     };
-  }, [preselectedClienteId]);
+  }, []);
+
+  useEffect(() => {
+    if (!preselectedClienteId || openedFromRouteRef.current === preselectedClienteId) return;
+    const found = clientes.find(item => item.id === preselectedClienteId);
+    if (found) {
+      openedFromRouteRef.current = preselectedClienteId;
+      setSelectedCliente(found);
+    }
+  }, [preselectedClienteId, clientes]);
 
   // Normalize date helper
   const normalizeDate = useCallback((raw: any): Date => {
@@ -176,58 +180,32 @@ export default function AnalisisClientes({
 
   // Fetch initial batch of movements when a client is selected
   const loadClientMovimientos = useCallback(async (clienteId: string) => {
+    const request = ++requestRef.current;
     setLoadingMovs(true);
     setMovsError(null);
     setMovimientos([]);
-    setLastDoc(null);
-    setHasMore(false);
 
     try {
-      const res = await firestoreService.getMovimientosByClientePaginated({
-        clienteId,
-        pageSize: 50
-      });
-
-      setMovimientos(res.items);
-      setLastDoc(res.lastDoc);
-      setHasMore(res.hasMore);
+      const rows = await firestoreService.getMovimientosCliente(clienteId);
+      if (request === requestRef.current) setMovimientos(rows);
     } catch (err: any) {
       console.error("Error al consultar movimientos del cliente:", err);
-      setMovsError(err?.message || "No se pudieron obtener las compras del cliente. Revisa la conexión o permisos.");
+      if (request === requestRef.current) setMovsError(mensajeError(err, "No se pudieron obtener las ventas del cliente."));
     } finally {
-      setLoadingMovs(false);
+      if (request === requestRef.current) setLoadingMovs(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (selectedCliente?.id) loadClientMovimientos(selectedCliente.id);
+    return () => { requestRef.current += 1; };
+  }, [selectedCliente?.id, loadClientMovimientos]);
 
   // Handler when user selects a client
   const handleSelectCliente = (cliente: Cliente) => {
     setSelectedCliente(cliente);
     setIsSelectorOpen(false);
     setSearchTerm("");
-    loadClientMovimientos(cliente.id || "");
-  };
-
-  // Handler for pagination "Cargar más"
-  const handleLoadMore = async () => {
-    if (!selectedCliente?.id || !lastDoc || loadingMore) return;
-    setLoadingMore(true);
-
-    try {
-      const res = await firestoreService.getMovimientosByClientePaginated({
-        clienteId: selectedCliente.id,
-        pageSize: 50,
-        lastDoc
-      });
-
-      setMovimientos(prev => [...prev, ...res.items]);
-      setLastDoc(res.lastDoc);
-      setHasMore(res.hasMore);
-    } catch (err: any) {
-      console.error("Error al cargar más compras del cliente:", err);
-      setMovsError("Error al cargar más registros. Intenta nuevamente.");
-    } finally {
-      setLoadingMore(false);
-    }
   };
 
   // Filter clients for selector search
@@ -600,6 +578,7 @@ export default function AnalisisClientes({
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6 select-none" id="analisis-clientes-view">
+      {clientesError && <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 text-sm text-rose-600">{clientesError}</div>}
       {/* Page Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
         <div className="space-y-1">
@@ -1017,7 +996,7 @@ export default function AnalisisClientes({
               {/* Tables Skeleton */}
               <div className="h-48 bg-zinc-200 dark:bg-zinc-800 rounded-3xl" />
             </div>
-          ) : filteredMovimientos.length === 0 ? (
+          ) : movsError ? null : filteredMovimientos.length === 0 ? (
             /* 9. Empty state: Client has no sales in selected period */
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-12 text-center space-y-4 shadow-xs" id="cliente-sin-ventas-estado">
               <div className="w-14 h-14 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-400 mx-auto flex items-center justify-center">
@@ -1376,30 +1355,6 @@ export default function AnalisisClientes({
                         ))}
                       </div>
 
-                      {/* Pagination "Cargar más" (50 registros) */}
-                      {hasMore && (
-                        <div className="pt-2 text-center">
-                          <button
-                            type="button"
-                            id="btn-cargar-mas-compras"
-                            onClick={handleLoadMore}
-                            disabled={loadingMore}
-                            className="w-full py-2.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700/80 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs font-bold text-zinc-800 dark:text-zinc-200 transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                          >
-                            {loadingMore ? (
-                              <>
-                                <span className="w-3.5 h-3.5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-                                <span>Cargando más ventas...</span>
-                              </>
-                            ) : (
-                              <>
-                                <span>Cargar 50 compras anteriores</span>
-                                <ChevronRight className="w-3.5 h-3.5" />
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>

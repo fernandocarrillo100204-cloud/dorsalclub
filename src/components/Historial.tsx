@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { firestoreService } from "../lib/firebase";
+import { mensajeError } from "../lib/errores";
 import { Movimiento, Almacen, Producto, Cliente, getTotalCobradoVenta, getSubtotalVenta, getTotalCostosVenta } from "../types";
 import {
   History,
@@ -71,6 +72,7 @@ export default function Historial({
   const [anularError, setAnularError] = useState<string | null>(null);
   const [anularSuccess, setAnularSuccess] = useState<string | null>(null);
   const [archivingId, setArchivingId] = useState<string | null>(null);
+  const requestRef = useRef(0);
 
   const handleEnviarPapelera = async (movimiento: Movimiento) => {
     if (!movimiento.id) return;
@@ -110,7 +112,12 @@ export default function Historial({
 
   // Load first page of movements (50 items)
   const loadFirstPage = useCallback(async () => {
+    const request = ++requestRef.current;
     setLoading(true);
+    setLoadingMore(false);
+    setMovimientos([]);
+    setLastDocCursor(null);
+    setHasMore(false);
     setAnularError(null);
     setFetchError(null);
     try {
@@ -121,21 +128,25 @@ export default function Historial({
         tipoFilter,
         estadoFilter
       });
+      if (request !== requestRef.current) return;
       setMovimientos(res.items);
       setLastDocCursor(res.lastDoc);
       setHasMore(res.hasMore);
     } catch (error) {
+      if (request !== requestRef.current) return;
       console.error("Error al cargar historial de auditoría:", error);
-      setFetchError("No se pudieron cargar los registros de auditoría.");
+      setFetchError(mensajeError(error, "No se pudieron cargar los registros de inventario."));
     } finally {
-      setLoading(false);
+      if (request === requestRef.current) setLoading(false);
     }
   }, [skuFilter, warehouseFilter, tipoFilter, estadoFilter]);
 
   // Load next page of 50 items
   const loadNextPage = async () => {
-    if (!hasMore || loadingMore || !lastDocCursor) return;
+    if (!hasMore || loadingMore || loading || !lastDocCursor) return;
+    const request = requestRef.current;
     setLoadingMore(true);
+    setFetchError(null);
     try {
       const res = await firestoreService.getMovimientosPaginated({
         pageSize: 50,
@@ -145,18 +156,22 @@ export default function Historial({
         tipoFilter,
         estadoFilter
       });
+      if (request !== requestRef.current) return;
       setMovimientos(prev => [...prev, ...res.items]);
       setLastDocCursor(res.lastDoc);
       setHasMore(res.hasMore);
     } catch (error) {
+      if (request !== requestRef.current) return;
       console.error("Error cargando más movimientos:", error);
+      setFetchError(mensajeError(error, "No fue posible cargar movimientos anteriores. Vuelve a intentarlo."));
     } finally {
-      setLoadingMore(false);
+      if (request === requestRef.current) setLoadingMore(false);
     }
   };
 
   useEffect(() => {
     loadFirstPage();
+    return () => { requestRef.current += 1; };
   }, [loadFirstPage]);
 
   // Client filtering
