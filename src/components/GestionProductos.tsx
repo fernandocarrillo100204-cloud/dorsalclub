@@ -17,6 +17,7 @@ import {
   UnidadMedidaCatalogo 
 } from "../types";
 import ModalCatalogos from "./ModalCatalogos";
+import { useWorkspace } from "../context/WorkspaceContext";
 import { 
   Package, 
   Plus, 
@@ -90,6 +91,7 @@ export default function GestionProductos({
   stockList: propStockList,
   onNavigateToMovimiento 
 }: GestionProductosProps) {
+  const { notify } = useWorkspace();
   const [internalProductos, setInternalProductos] = useState<Producto[]>(propProductos || []);
   const [internalStockList, setInternalStockList] = useState<StockItem[]>(propStockList || []);
   const [internalAlmacenes, setInternalAlmacenes] = useState<Almacen[]>(propAlmacenes || []);
@@ -637,7 +639,7 @@ export default function GestionProductos({
     try {
       await firestoreService.toggleProductoStatus(productoId, !currentStatus);
     } catch (e: any) {
-      alert("Error al cambiar estado: " + e.message);
+      notify("No se pudo cambiar el estado: " + e.message, "error");
     }
   };
 
@@ -660,7 +662,7 @@ export default function GestionProductos({
 
     if (stockBySku.length > 0) {
       const detail = stockBySku.map(item => `${item.sku} (${item.units} uds)`).join(", ");
-      alert(`No se puede enviar a la papelera porque aún hay existencias: ${detail}. Vende, transfiere o corrige ese stock primero.`);
+      notify(`Aún hay existencias: ${detail}. Vende, transfiere o corrige ese stock antes de enviar el producto a la papelera.`, "error");
       return;
     }
 
@@ -670,7 +672,7 @@ export default function GestionProductos({
       setIsDeleteModalOpen(false);
       setProductToDelete(null);
     } catch (err: any) {
-      alert(err.message || "Error al eliminar producto.");
+      notify(err.message || "No se pudo enviar el producto a la papelera.", "error");
     } finally {
       setSubmitLoading(false);
     }
@@ -684,28 +686,26 @@ export default function GestionProductos({
   };
 
   return (
-    <div id="gestion-productos-root" className="space-y-6">
+    <div id="gestion-productos-root" className="page-shell space-y-6">
       {/* Top Header Card */}
-      <div id="gestion-productos-header" className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 flex items-center justify-center font-bold shadow-sm">
-            <Shirt className="w-6 h-6" />
-          </div>
+      <div id="gestion-productos-header" className="page-header">
+        <div>
           <div>
+            <p className="page-eyebrow">Inventario</p>
             <h1 className="text-xl font-bold text-zinc-900 dark:text-white tracking-tight">
-              Catálogo de Productos y Variantes
+              Productos
             </h1>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-              Gestión centralizada de modelos, colores, tallas y SKUs para streetwear
+            <p className="page-description">
+              Tu catálogo, variantes y existencias por almacén. Abre un producto para consultar sus tallas y colores.
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="page-actions">
           <button
             id="btn-gestionar-catalogos"
             onClick={() => setIsCatalogosOpen(true)}
-            className="px-4 py-2.5 text-xs font-semibold rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700 transition-colors flex items-center gap-2"
+            className="btn-secondary"
           >
             <Settings className="w-4 h-4" />
             Configurar productos
@@ -714,10 +714,10 @@ export default function GestionProductos({
           <button
             id="btn-crear-producto"
             onClick={handleOpenCreateModal}
-            className="px-4 py-2.5 text-xs font-semibold rounded-xl bg-zinc-900 dark:bg-white hover:bg-black dark:hover:bg-zinc-100 text-white dark:text-zinc-900 shadow-sm transition-colors flex items-center gap-2"
+            className="btn-primary"
           >
             <Plus className="w-4 h-4" />
-            Crear Producto
+            Nuevo producto
           </button>
         </div>
       </div>

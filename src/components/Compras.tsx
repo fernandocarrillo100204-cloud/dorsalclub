@@ -6,6 +6,9 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { firestoreService, getLocalDateString } from "../lib/firebase";
 import { mensajeError } from "../lib/errores";
+import { useUnsavedChanges, useWorkspace } from "../context/WorkspaceContext";
+import { StatCard, FilterSummary, ErrorState } from "./ui/Page";
+import { downloadCsv, searchText } from "../lib/presentation";
 import { Compra, CompraItem, Almacen, Producto, OpcionListaConfigurable, Drop } from "../types";
 import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 import {
@@ -33,7 +36,8 @@ import {
   RefreshCw,
   Clock,
   Sparkles,
-  Settings
+  Settings,
+  Download
 } from "lucide-react";
 
 interface ComprasProps {
@@ -71,6 +75,7 @@ export default function Compras({
   onNavigateToHistory,
   onManageWarehouses
 }: ComprasProps) {
+  const { confirm, notify } = useWorkspace();
   const navigateToHistory = () => {
     if (onNavigateToHistory) onNavigateToHistory();
     else if (onNavigate) onNavigate("compras");
@@ -139,16 +144,8 @@ export default function Compras({
     );
   }, [isNewView, proveedor, almacenId, dropId, notas, costoEnvio, comisiones, descuentos, fecha, clasificacionFinanciera, items]);
 
-  const confirmDiscard = () => !isPurchaseDirty || window.confirm("Hay datos de una compra sin guardar. ¿Quieres salir y descartarlos?");
-  const goToHistory = () => { if (confirmDiscard()) navigateToHistory(); };
-  const manageWarehouses = () => { if (onManageWarehouses && confirmDiscard()) onManageWarehouses(); };
-
-  useEffect(() => {
-    if (!isPurchaseDirty) return;
-    const warnBeforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
-    window.addEventListener("beforeunload", warnBeforeUnload);
-    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
-  }, [isPurchaseDirty]);
+  const goToHistory = navigateToHistory;
+  const manageWarehouses = () => onManageWarehouses?.();
 
   const loadPurchaseSettings = async () => {
     try {
@@ -186,6 +183,7 @@ export default function Compras({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
+  const markSaved = useUnsavedChanges(isPurchaseDirty, isSubmitting);
 
   // Fetch first 50 compras records
   const loadFirstPage = async (isFirstMount = false) => {
@@ -263,11 +261,12 @@ export default function Compras({
 
   const handleEnviarCompraPapelera = async (compra: Compra) => {
     if (!compra.id) return;
-    if (!window.confirm(`¿Enviar la compra ${compra.folio} a la Papelera? Se revertirá su stock y podrás restaurarla después.`)) return;
+    if (!(await confirm({ title: `Enviar ${compra.folio} a la papelera`, description: "Se revertirá la entrada de stock de esta compra. Podrás restaurarla desde la papelera.", confirmLabel: "Enviar a la papelera", danger: true }))) return;
     setFetchError(null);
     setArchivingCompraId(compra.id);
     try {
       await firestoreService.enviarCompraPapelera(compra.id);
+      notify(`Compra ${compra.folio} enviada a la papelera.`);
       setCompras(current => current.filter(item => item.id !== compra.id));
       if (selectedCompraDetail?.id === compra.id) setSelectedCompraDetail(null);
     } catch (err: any) {
@@ -351,6 +350,7 @@ export default function Compras({
   // Submit Purchase
   const handleSubmitPurchase = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setFormError(null);
     setFormSuccess(null);
 
@@ -414,6 +414,8 @@ export default function Compras({
       });
 
       setFormSuccess(`¡Compra registrada con éxito! Folio generado: ${res.folio}. El inventario ha sido actualizado.`);
+      markSaved();
+      notify(`Compra ${res.folio} registrada. Inventario actualizado.`);
 
       // Reset form immediately without artificial delay
       setProveedor("");
@@ -437,18 +439,18 @@ export default function Compras({
 
   // Filtered purchases list
   const filteredCompras = useMemo(() => {
-    const term = searchTerm.toLowerCase().trim();
+    const term = searchText(searchTerm);
     return compras.filter((c) => {
       const matchWarehouse = selectedWarehouseFilter === "all" || c.almacen_id === selectedWarehouseFilter;
       if (!matchWarehouse) return false;
 
       if (!term) return true;
-      const inFolio = c.folio?.toLowerCase().includes(term);
-      const inProveedor = c.proveedor?.toLowerCase().includes(term);
-      const inDrop = c.drop_nombre?.toLowerCase().includes(term);
-      const inRef = c.referencia?.toLowerCase().includes(term);
+      const inFolio = searchText(c.folio || "").includes(term);
+      const inProveedor = searchText(c.proveedor || "").includes(term);
+      const inDrop = searchText(c.drop_nombre || "").includes(term);
+      const inRef = searchText(c.referencia || "").includes(term);
       const inItems = c.items?.some(
-        (it) => it.sku.toLowerCase().includes(term) || it.nombre_producto?.toLowerCase().includes(term)
+        (it) => searchText(`${it.sku} ${it.nombre_producto || ""}`).includes(term)
       );
 
       return inFolio || inProveedor || inDrop || inRef || inItems;
@@ -458,11 +460,11 @@ export default function Compras({
   // View: Formulario para registrar una compra (/compras/nueva)
   if (isNewView) {
     return (
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6" id="compras-nueva-page">
+      <div className="form-shell space-y-6" id="compras-nueva-page">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="page-header">
           <div>
-            <div className="flex items-center gap-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1">
+            <div className="page-eyebrow flex items-center gap-2">
               <button
                 onClick={goToHistory}
                 className="hover:text-zinc-900 dark:hover:text-white transition-colors"
@@ -475,8 +477,8 @@ export default function Compras({
             <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">
               Registrar compra
             </h1>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-              Ingresa múltiples productos y variantes en una sola operación. Se incrementará el stock y registrará el folio de auditoría.
+            <p className="page-description">
+              Registra la mercancía recibida, su costo y el almacén de destino.
             </p>
           </div>
           <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setIsSettingsOpen(true)} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"><Settings className="w-4 h-4" />Proveedores</button>{onManageWarehouses && <button type="button" onClick={manageWarehouses} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"><Warehouse className="w-4 h-4" />Almacenes</button>}<button type="button" onClick={goToHistory} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-xs">Volver al historial</button></div>
@@ -501,7 +503,8 @@ export default function Compras({
         )}
 
         {/* Form Container */}
-        <form onSubmit={handleSubmitPurchase} className="space-y-6">
+        <form onSubmit={handleSubmitPurchase} className="space-y-6" aria-busy={isSubmitting}>
+          <fieldset disabled={isSubmitting} className="min-w-0 space-y-6">
           {/* Section 1: General Purchase Info */}
           <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-xs space-y-4">
             <h2 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
@@ -892,6 +895,7 @@ export default function Compras({
               </div>
             </div>
           </div>
+          </fieldset>
         </form>
         <ConfiguracionModuloModal isOpen={isSettingsOpen} module="compras" onClose={() => setIsSettingsOpen(false)} onSaved={loadPurchaseSettings} />
       </div>
@@ -900,21 +904,22 @@ export default function Compras({
 
   // View: Historial de Compras (/compras)
   return (
-    <div className="max-w-7xl mx-auto px-3.5 sm:px-5 lg:px-6 py-5 space-y-6" id="compras-historial-page">
+    <div className="page-shell space-y-6" id="compras-historial-page">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="page-header">
         <div>
+          <p className="page-eyebrow">Compras</p>
           <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">
             Historial de compras
           </h1>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Historial de lotes adquiridos por proveedor, costos unitarios y desglose de recepción en almacén.
+          <p className="page-description">
+            Consulta tus compras, costos y recepción de mercancía en un solo lugar.
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setIsSettingsOpen(true)} className="inline-flex items-center gap-2 px-3 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl font-semibold text-xs"><Settings className="w-4 h-4" />Proveedores</button>{onManageWarehouses && <button type="button" onClick={onManageWarehouses} className="inline-flex items-center gap-2 px-3 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl font-semibold text-xs"><Warehouse className="w-4 h-4" />Almacenes</button>}<button
+        <div className="page-actions"><button type="button" onClick={() => setIsSettingsOpen(true)} className="btn-secondary" aria-label="Configurar proveedores"><Settings className="w-4 h-4" /><span className="hidden xl:inline">Proveedores</span></button><button type="button" className="btn-secondary" onClick={() => loadFirstPage(true)} disabled={initialLoading || refreshing} aria-label="Actualizar compras"><RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} /></button><button type="button" className="btn-secondary" disabled={initialLoading || !filteredCompras.length} title="Exportar únicamente los resultados cargados y filtrados" onClick={() => downloadCsv("antiorder-compras.csv", ["Folio", "Fecha", "Proveedor", "Almacén", "Unidades", "Total MXN", "Estado"], filteredCompras.map(compra => [compra.folio, getLocalDateString(compra.fecha), compra.proveedor, getWarehouseName(compra.almacen_id), compra.total_unidades, compra.total, compra.estado || "activo"]))}><Download className="h-4 w-4" />Exportar</button><button
           onClick={goToNew}
-          className="inline-flex items-center space-x-2 px-4 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-white dark:hover:bg-zinc-100 dark:text-zinc-900 rounded-xl font-bold text-xs transition-all shadow-sm self-start sm:self-auto"
+          className="btn-primary"
         >
           <Plus className="w-4 h-4" />
           <span>Registrar compra</span>
@@ -943,37 +948,11 @@ export default function Compras({
         </div>
       )}
 
-      {/* Stats Quick Cards */}
+      {/* These figures describe only the filtered, loaded page, never all history. */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 shadow-xs">
-          <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider block">
-            Total Lotes Comprados
-          </span>
-          <span className="text-2xl font-black text-zinc-900 dark:text-white mt-1 block">
-            {compras.length}
-          </span>
-          <span className="text-[10px] text-zinc-400 mt-0.5 block">Lotes registrados en sistema</span>
-        </div>
-
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 shadow-xs">
-          <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider block">
-            Unidades Ingresadas
-          </span>
-          <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1 block">
-            {compras.reduce((sum, c) => sum + (c.total_unidades || 0), 0)} uds
-          </span>
-          <span className="text-[10px] text-zinc-400 mt-0.5 block">Total prendas y calzado sumado a stock</span>
-        </div>
-
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 shadow-xs">
-          <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider block">
-            Inversión Acumulada
-          </span>
-          <span className="text-2xl font-black text-zinc-900 dark:text-white font-mono mt-1 block">
-            ${compras.reduce((sum, c) => sum + (c.total || 0), 0).toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </span>
-          <span className="text-[10px] text-zinc-400 mt-0.5 block">Costo total con fletes y aranceles</span>
-        </div>
+        <StatCard label="Compras en esta vista" value={initialLoading || (fetchError && !compras.length) ? "—" : filteredCompras.length} hint="Registros cargados con los filtros actuales" />
+        <StatCard label="Unidades compradas" tone="positive" value={initialLoading || (fetchError && !compras.length) ? "—" : filteredCompras.filter(c => c.estado !== "anulado").reduce((sum, c) => sum + (c.total_unidades || 0), 0).toLocaleString("es-MX")} hint="De compras activas en esta vista" />
+        <StatCard label="Importe de compras activas" value={initialLoading || (fetchError && !compras.length) ? "—" : new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(filteredCompras.filter(c => c.estado !== "anulado").reduce((sum, c) => sum + (c.total || 0), 0))} hint="Incluye envíos, comisiones y descuentos" />
       </div>
 
       {/* Filters Toolbar */}
@@ -986,7 +965,8 @@ export default function Compras({
             </span>
             <input
               type="text"
-              placeholder="Buscar por proveedor, folio COMP-X, referencia o SKU..."
+              aria-label="Buscar compras"
+              placeholder="Buscar proveedor, folio o SKU…"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white rounded-xl py-2 pl-9 pr-3 text-xs focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white transition-colors"
@@ -996,6 +976,7 @@ export default function Compras({
           {/* Warehouse filter */}
           <div className="relative flex items-center">
             <select
+              aria-label="Filtrar compras por almacén"
               value={selectedWarehouseFilter}
               onChange={(e) => setSelectedWarehouseFilter(e.target.value)}
               className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white rounded-xl py-2 px-3 text-xs focus:outline-none font-medium"
@@ -1011,6 +992,8 @@ export default function Compras({
         </div>
       </div>
 
+      <FilterSummary count={filteredCompras.length} noun="compras" partial={hasMore} active={Boolean(searchTerm || selectedWarehouseFilter !== "all")} onClear={() => { setSearchTerm(""); setSelectedWarehouseFilter("all"); }} />
+      {hasMore && <p className="text-xs text-zinc-500">Los filtros y la exportación incluyen solo los registros cargados. Carga más para consultar compras anteriores.</p>}
       {/* Compras Table */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-xs">
         {initialLoading ? (
@@ -1018,16 +1001,16 @@ export default function Compras({
             <span className="h-6 w-6 border-2 border-zinc-900 dark:border-white border-t-transparent rounded-full animate-spin inline-block mb-2" />
             <p className="text-xs">Cargando historial de compras...</p>
           </div>
-        ) : filteredCompras.length === 0 ? (
+        ) : fetchError && compras.length === 0 ? <ErrorState message="No se pudo cargar el historial." onRetry={() => loadFirstPage(false)} /> : filteredCompras.length === 0 ? (
           <div className="py-14 text-center space-y-3">
             <ShoppingBag className="w-10 h-10 mx-auto text-zinc-300 dark:text-zinc-600" />
             <div>
               <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200">
-                {searchTerm ? "No se encontraron compras coincidentes" : "No hay compras registradas aún"}
+                {searchTerm || selectedWarehouseFilter !== "all" ? "No hay compras con estos filtros" : "No hay compras registradas aún"}
               </p>
               <p className="text-xs text-zinc-400 mt-0.5">
-                {searchTerm
-                  ? "Prueba modificando los filtros de búsqueda o almacén."
+                {searchTerm || selectedWarehouseFilter !== "all"
+                  ? (hasMore ? "Puede haber resultados anteriores. Carga más o limpia los filtros." : "Prueba modificando los filtros de búsqueda o almacén.")
                   : "Registra tu primer lote de mercancía para comenzar el control de costos."}
               </p>
             </div>

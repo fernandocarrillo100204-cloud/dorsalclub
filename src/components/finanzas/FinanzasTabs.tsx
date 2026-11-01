@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React from "react";
 
 interface FinanzasTabsProps {
@@ -12,67 +7,14 @@ interface FinanzasTabsProps {
   onNavigateToCobrar: () => void;
 }
 
-export const FinanzasTabs: React.FC<FinanzasTabsProps> = ({
-  activeTab,
-  onNavigateToResumen,
-  onNavigateToMovimientos,
-  onNavigateToCobrar,
-}) => {
-  const isResumen = activeTab === "resumen";
-  const isMovimientos = activeTab === "movimientos";
-  const isCobrar = activeTab === "cobrar";
-
-  return (
-    <div
-      role="tablist"
-      aria-label="Pestañas del módulo Finanzas"
-      className="inline-flex items-center p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700/60 shadow-2xs"
-    >
-      <button
-        type="button"
-        role="tab"
-        id="tab-finanzas-resumen"
-        aria-selected={isResumen}
-        onClick={onNavigateToResumen}
-        className={`min-h-[38px] sm:min-h-[40px] px-3.5 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669] ${
-          isResumen
-            ? "bg-white dark:bg-[#111827] text-[#172033] dark:text-[#F8FAFC] shadow-2xs"
-            : "text-[#64748B] dark:text-[#94A3B8] hover:text-[#172033] dark:hover:text-[#F8FAFC]"
-        }`}
-      >
-        Resumen mensual
-      </button>
-
-      <button
-        type="button"
-        role="tab"
-        id="tab-finanzas-gastos"
-        aria-selected={isMovimientos}
-        onClick={onNavigateToMovimientos}
-        className={`min-h-[38px] sm:min-h-[40px] px-3.5 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669] ${
-          isMovimientos
-            ? "bg-white dark:bg-[#111827] text-[#172033] dark:text-[#F8FAFC] shadow-2xs"
-            : "text-[#64748B] dark:text-[#94A3B8] hover:text-[#172033] dark:hover:text-[#F8FAFC]"
-        }`}
-      >
-        Movimientos
-      </button>
-
-      <button
-        type="button"
-        role="tab"
-        aria-selected={isCobrar}
-        onClick={onNavigateToCobrar}
-        className={`min-h-[38px] sm:min-h-[40px] px-3.5 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#059669] ${
-          isCobrar
-            ? "bg-white dark:bg-[#111827] text-[#172033] dark:text-[#F8FAFC] shadow-2xs"
-            : "text-[#64748B] dark:text-[#94A3B8] hover:text-[#172033] dark:hover:text-[#F8FAFC]"
-        }`}
-      >
-        Por cobrar
-      </button>
-    </div>
-  );
-};
-
+export const FinanzasTabs: React.FC<FinanzasTabsProps> = ({ activeTab, onNavigateToResumen, onNavigateToMovimientos, onNavigateToCobrar }) => (
+  <nav aria-label="Secciones de Finanzas" className="inline-flex flex-wrap items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl max-w-full">
+    {[
+      { id: "resumen", label: "Resumen", action: onNavigateToResumen },
+      { id: "movimientos", label: "Movimientos", action: onNavigateToMovimientos },
+      { id: "cobrar", label: "Por cobrar", action: onNavigateToCobrar }
+    ].map(item => <button key={item.id} type="button" aria-current={activeTab === item.id ? "page" : undefined} onClick={item.action}
+      className={`min-h-10 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors ${activeTab === item.id ? "bg-white dark:bg-zinc-950 text-zinc-950 dark:text-white shadow-sm" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"}`}>{item.label}</button>)}
+  </nav>
+);
 export default FinanzasTabs;

@@ -1,196 +1,127 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, CheckCircle2, CircleDollarSign, LoaderCircle, PackageCheck, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUpRight, CalendarDays, Check, CheckCircle2, CircleDollarSign, Clock3, PackageCheck, RefreshCw, Search, Settings2 } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
 import { OpcionListaConfigurable, PedidoVenta } from "../types";
 import { mensajeError } from "../lib/errores";
+import { fechaLocal } from "../lib/lecturasVentas";
+import { money, searchText } from "../lib/presentation";
+import { useUnsavedChanges, useWorkspace } from "../context/WorkspaceContext";
+import { ErrorState, FilterSummary, LoadingState, PageHeader, StatCard } from "./ui/Page";
+import Dialog from "./ui/Dialog";
+import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 
-const money = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
+function isOverdue(order: PedidoVenta) {
+  return order.estado !== "entregado" && Boolean(order.fecha_estimada && /^\d{4}-\d{2}-\d{2}$/.test(order.fecha_estimada) && order.fecha_estimada < fechaLocal(new Date()));
+}
 
-const PedidoCard: React.FC<{ pedido: PedidoVenta; metodosPago: OpcionListaConfigurable[]; onChanged: () => Promise<void> }> = ({ pedido, metodosPago, onChanged }) => {
-  const [amount, setAmount] = useState(pedido.saldo > 0 ? pedido.saldo.toFixed(2) : "");
-  const [estimatedDate, setEstimatedDate] = useState(pedido.fecha_estimada || "");
-  const [comments, setComments] = useState(pedido.comentarios || "");
+const OrderManager: React.FC<{
+  order: PedidoVenta; methods: OpcionListaConfigurable[]; methodsError: string; onClose: () => void; onSaved: () => Promise<void>;
+}> = ({ order, methods, methodsError, onClose, onSaved }) => {
+  const { confirm, notify } = useWorkspace();
+  const [amount, setAmount] = useState(order.saldo > 0 ? order.saldo.toFixed(2) : "");
+  const [method, setMethod] = useState("");
+  const [date, setDate] = useState(order.fecha_estimada || "");
+  const [comments, setComments] = useState(order.comentarios || "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("");
-  useEffect(() => { setAmount(pedido.saldo > 0 ? pedido.saldo.toFixed(2) : ""); }, [pedido.saldo]);
-  useEffect(() => { setEstimatedDate(pedido.fecha_estimada || ""); setComments(pedido.comentarios || ""); }, [pedido.fecha_estimada, pedido.comentarios]);
-
-  const run = async (action: () => Promise<void>) => {
-    setBusy(true);
-    setError("");
-    try {
-      await action();
-      await onChanged();
-    } catch (err: any) {
-      setError(err?.message || "No fue posible actualizar el pedido.");
-    } finally {
-      setBusy(false);
-    }
+  const saving = useRef(false);
+  const dirty = date !== (order.fecha_estimada || "") || comments !== (order.comentarios || "");
+  const markSaved = useUnsavedChanges(dirty, busy);
+  const close = async () => {
+    if (busy) return;
+    if (dirty && !(await confirm({ title: "¿Cerrar sin guardar?", description: "Los cambios en la fecha y comentarios de este pedido no se han guardado.", confirmLabel: "Descartar cambios", danger: true }))) return;
+    markSaved(); onClose();
   };
-
-  const cancelOrder = () => {
-    if (pedido.recibido > 0.009) {
-      if (!window.confirm(`¿Cancelar y reembolsar el pedido ${pedido.folio}? Se registrará un reembolso por ${money.format(pedido.recibido)}.`)) return;
-      run(() => firestoreService.devolverVentaCompleta(pedido.venta_id, "Pedido cancelado y reembolsado por el usuario"));
-      return;
-    }
-    if (!window.confirm(`¿Cancelar el pedido ${pedido.folio}? Esta acción lo retirará del seguimiento.`)) return;
-    run(() => firestoreService.anularVentaAgrupada(pedido.venta_id, "Pedido sin pagos cancelado por el usuario"));
+  const run = async (action: () => Promise<void>, message: string) => {
+    if (saving.current) return;
+    saving.current = true; setBusy(true); setError("");
+    try { await action(); markSaved(); notify(message); await onSaved(); onClose(); }
+    catch (err) { setError(mensajeError(err, "No se pudo actualizar el pedido.")); }
+    finally { saving.current = false; setBusy(false); }
   };
-
-  return (
-    <article className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">{pedido.canal_venta_nombre}</p>
-          <h3 className="font-bold text-zinc-900 dark:text-white">{pedido.cliente_nombre}</h3>
-          <p className="text-xs text-zinc-500">{pedido.folio} · {pedido.fecha.toLocaleDateString("es-MX")}</p>
-        </div>
-        {(pedido.recibido <= 0.009 || pedido.es_consolidado !== false) && (
-          <button type="button" onClick={cancelOrder} disabled={busy} className="p-2 rounded-lg text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50" aria-label={`${pedido.recibido > 0.009 ? "Cancelar y reembolsar" : "Cancelar"} ${pedido.folio}`} title={pedido.recibido > 0.009 ? "Cancelar y reembolsar pedido" : "Cancelar pedido"}>
-            {pedido.recibido > 0.009 ? <RotateCcw className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
-          </button>
-        )}
-      </div>
-
-      <div className="space-y-1 text-sm">
-        {pedido.items.map((item, index) => (
-          <div key={`${item.sku}-${index}`} className="flex justify-between gap-3 text-zinc-600 dark:text-zinc-300">
-            <span className="truncate">{item.cantidad} × {item.sku}</span>
-            <span className="font-medium">{money.format(item.total)}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-3 gap-2 rounded-lg bg-zinc-50 dark:bg-zinc-950 p-3 text-xs">
-        <div><span className="block text-zinc-500">Total</span><strong className="text-zinc-900 dark:text-white">{money.format(pedido.total)}</strong></div>
-        <div><span className="block text-zinc-500">Pagado</span><strong className="text-emerald-600">{money.format(pedido.recibido)}</strong></div>
-        <div><span className="block text-zinc-500">Saldo</span><strong className={pedido.saldo > 0 ? "text-amber-600" : "text-zinc-900 dark:text-white"}>{money.format(pedido.saldo)}</strong></div>
-      </div>
-
-      {pedido.estado === "pedido" && (
-        <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2">
-          <label className="flex-1">
-            <span className="sr-only">Importe del pago</span>
-            <input type="number" min="0.01" max={pedido.saldo} step="0.01" value={amount} onChange={event => setAmount(event.target.value)} disabled={busy} className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-sm" />
-          </label>
-          <select value={paymentMethod} onChange={event => setPaymentMethod(event.target.value)} disabled={busy} className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-sm">
-            <option value="">Método de pago</option>
-            {metodosPago.map(item => <option key={item.id} value={item.nombre}>{item.nombre}</option>)}
-          </select>
-          <button type="button" onClick={() => run(() => firestoreService.registrarPagoPedido(pedido.venta_id, Number(amount), paymentMethod))} disabled={busy || Number(amount) <= 0 || !paymentMethod} className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 disabled:opacity-50">
-            Registrar pago
-          </button>
-        </div>
-      )}
-
-      <div className="grid gap-2">
-        <label className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-          Fecha estimada
-          <input type="date" value={estimatedDate} onChange={event => setEstimatedDate(event.target.value)} disabled={busy || pedido.estado === "entregado"} className="mt-1 w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-sm" />
-        </label>
-        <label className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-          Comentarios
-          <textarea value={comments} onChange={event => setComments(event.target.value)} disabled={busy || pedido.estado === "entregado"} rows={2} placeholder="Detalles de seguimiento..." className="mt-1 w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-sm resize-none" />
-        </label>
-      </div>
-
-      {pedido.estado !== "entregado" && (
-        <div className="flex flex-wrap justify-end gap-2">
-          <button type="button" onClick={() => run(() => firestoreService.actualizarSeguimientoPedido(pedido.venta_id, { fecha_estimada: estimatedDate, comentarios: comments }))} disabled={busy} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 text-xs font-bold text-zinc-700 dark:text-zinc-200 disabled:opacity-50">
-            <Save className="w-3.5 h-3.5" /> Guardar
-          </button>
-          {pedido.estado === "pagado" && (
-            <button type="button" onClick={() => run(() => firestoreService.actualizarSeguimientoPedido(pedido.venta_id, { fecha_estimada: estimatedDate, comentarios: comments, marcar_entregado: true }))} disabled={busy} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-xs font-bold disabled:opacity-50">
-              <PackageCheck className="w-3.5 h-3.5" /> Marcar entregado
-            </button>
-          )}
-        </div>
-      )}
-
-      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
-    </article>
-  );
+  const receive = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (dirty) { setError("Guarda primero los cambios de seguimiento antes de registrar un pago."); return; }
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value <= 0 || value > order.saldo || !method) { setError("Captura un importe válido, sin superar el saldo, y elige un método de pago."); return; }
+    if (!(await confirm({ title: "Confirmar pago recibido", description: `Registrar ${money.format(value)} por ${method} en el pedido ${order.folio}. Confirma únicamente si ya recibiste el dinero.`, confirmLabel: "Sí, registrar pago" }))) return;
+    await run(() => firestoreService.registrarPagoPedido(order.venta_id, value, method), `Pago registrado en ${order.folio}.`);
+  };
+  const deliver = async () => {
+    if (!(await confirm({ title: "Confirmar entrega", description: `¿El cliente ya recibió todos los productos del pedido ${order.folio}?`, confirmLabel: "Marcar entregado" }))) return;
+    await run(() => firestoreService.actualizarSeguimientoPedido(order.venta_id, { fecha_estimada: date, comentarios: comments, marcar_entregado: true }), `Pedido ${order.folio} entregado.`);
+  };
+  const cancel = async () => {
+    const paid = order.recibido > .009;
+    if (!(await confirm({ title: paid ? "Cancelar y registrar reembolso" : "Cancelar pedido", description: paid ? `Se cancelará ${order.folio} y se registrará un reembolso por ${money.format(order.recibido)}. Esto registra la operación; no envía dinero al cliente.` : `El pedido ${order.folio} se retirará del seguimiento.`, confirmLabel: paid ? "Cancelar y registrar reembolso" : "Cancelar pedido", danger: true }))) return;
+    await run(() => paid ? firestoreService.devolverVentaCompleta(order.venta_id, "Pedido cancelado y reembolsado por el usuario") : firestoreService.anularVentaAgrupada(order.venta_id, "Pedido sin pagos cancelado por el usuario"), `Pedido ${order.folio} cancelado.`);
+  };
+  return <Dialog open title={order.folio} description={`${order.cliente_nombre} · ${order.canal_venta_nombre}`} onClose={close} busy={busy} className="order-dialog">
+    <div className="space-y-5">
+      <div className="grid grid-cols-3 gap-3 order-money"><div><small>Total del pedido</small><strong>{money.format(order.total)}</strong></div><div><small>Recibido</small><strong className="text-emerald-600 dark:text-emerald-400">{money.format(order.recibido)}</strong></div><div><small>Por cobrar</small><strong>{money.format(order.saldo)}</strong></div></div>
+      <div className="divide-y divide-zinc-100 dark:divide-zinc-800">{order.items.map((item, index) => <div key={`${item.sku}-${index}`} className="flex justify-between gap-4 py-2 text-sm"><span><span className="text-zinc-500">{item.cantidad} × </span>{item.sku}</span><strong className="font-medium tabular-nums">{money.format(item.total)}</strong></div>)}</div>
+      {error && <ErrorState message={error} />}
+      {order.estado === "pedido" && <form onSubmit={receive} className="rounded-xl p-4 border border-emerald-200 dark:border-emerald-900 bg-emerald-50/40 dark:bg-emerald-950/20 space-y-3">
+        <h3 className="text-sm font-semibold">Registrar un pago</h3><p className="text-xs text-zinc-500">Solo registra importes que ya hayas recibido.</p>
+        {methodsError && <ErrorState message={methodsError} />}
+        {!methodsError && !methods.length && <p className="text-xs text-amber-700 dark:text-amber-400">Activa un método de pago en Configuración → Ventas para registrar cobros.</p>}
+        <div className="grid sm:grid-cols-2 gap-3"><label className="text-xs font-medium">Importe · MXN<input required type="number" min="0.01" max={order.saldo} step="0.01" value={amount} onChange={event => setAmount(event.target.value)} disabled={busy} className="mt-1 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2" /></label><label className="text-xs font-medium">Método de pago<select required value={method} onChange={event => setMethod(event.target.value)} disabled={busy || Boolean(methodsError)} className="mt-1 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2"><option value="">Seleccionar método</option>{methods.map(item => <option key={item.id} value={item.nombre}>{item.nombre}</option>)}</select></label></div>
+        <button type="submit" disabled={busy || dirty || !method || !Number.isFinite(Number(amount)) || Number(amount) <= 0 || Number(amount) > order.saldo || Boolean(methodsError)} className="btn-primary w-full"><CircleDollarSign className="h-4 w-4" />{busy ? "Guardando…" : "Registrar pago"}</button>
+        {dirty && <p className="text-xs text-amber-700 dark:text-amber-400">Guarda primero la fecha y comentarios si deseas conservar esos cambios.</p>}
+      </form>}
+      <div className="space-y-3"><h3 className="text-sm font-semibold">Entrega y seguimiento</h3><label className="block text-xs font-medium">Fecha estimada de entrega<input type="date" value={date} disabled={busy || order.estado === "entregado"} onChange={event => setDate(event.target.value)} className="mt-1 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2" /></label><label className="block text-xs font-medium">Comentarios<textarea rows={3} maxLength={1000} value={comments} disabled={busy || order.estado === "entregado"} onChange={event => setComments(event.target.value)} placeholder="Acuerdos con el cliente o detalles de entrega…" className="mt-1 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm" /></label></div>
+      <div className="flex flex-wrap gap-2 justify-end">{order.estado !== "entregado" && <button type="button" disabled={busy || !dirty} className="btn-secondary" onClick={() => run(() => firestoreService.actualizarSeguimientoPedido(order.venta_id, { fecha_estimada: date, comentarios: comments }), `Seguimiento de ${order.folio} actualizado.`)}><Check className="h-4 w-4" />Guardar seguimiento</button>}{order.estado === "pagado" && <button type="button" onClick={deliver} disabled={busy} className="btn-primary"><PackageCheck className="h-4 w-4" />Marcar entregado</button>}</div>
+      {(order.recibido <= .009 || order.es_consolidado !== false) && order.estado !== "entregado" && <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800"><button type="button" onClick={cancel} disabled={busy} className="text-xs font-medium text-rose-600 dark:text-rose-400 hover:underline">{order.recibido > .009 ? "Cancelar pedido y registrar reembolso" : "Cancelar pedido"}</button></div>}
+    </div>
+  </Dialog>;
 };
 
-export const PedidosVenta: React.FC = () => {
+export default function PedidosVenta() {
   const [orders, setOrders] = useState<PedidoVenta[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [metodosPago, setMetodosPago] = useState<OpcionListaConfigurable[]>([]);
-
+  const [methods, setMethods] = useState<OpcionListaConfigurable[]>([]);
+  const [methodsError, setMethodsError] = useState("");
+  const [search, setSearch] = useState("");
+  const [channel, setChannel] = useState("");
+  const [lateOnly, setLateOnly] = useState(false);
+  const [selectedId, setSelectedId] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const requestRef = useRef(0);
   const load = useCallback(async (refresh = false) => {
+    const request = ++requestRef.current;
     refresh ? setRefreshing(true) : setLoading(true);
     setError("");
     try {
-      const [nextOrders, config] = await Promise.all([firestoreService.getPedidosVenta(), firestoreService.getConfiguracionListasDesplegables()]);
-      setOrders(nextOrders);
-      setMetodosPago(config.metodos_pago_venta.filter(item => item.activa));
-    } catch (err: any) {
-      setError(mensajeError(err, "No fue posible consultar los pedidos."));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+      const [result, config] = await Promise.allSettled([firestoreService.getPedidosVenta(), firestoreService.getConfiguracionListasDesplegables()]);
+      if (request !== requestRef.current) return;
+      if (result.status === "fulfilled") setOrders(result.value);
+      else setError(mensajeError(result.reason, "No fue posible consultar los pedidos."));
+      if (config.status === "fulfilled") { setMethods(config.value.metodos_pago_venta.filter(item => item.activa)); setMethodsError(""); }
+      else setMethodsError(mensajeError(config.reason, "No se pudieron cargar los métodos de pago. Actualiza para reintentar."));
+    } finally { if (request === requestRef.current) { setLoading(false); setRefreshing(false); } }
   }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  const columns = useMemo(() => [
-    { id: "pedido" as const, title: "Pedido por el cliente", icon: CalendarDays, help: "Pedidos con saldo pendiente" },
-    { id: "pagado" as const, title: "Pagado", icon: CircleDollarSign, help: "Pedidos liquidados por entregar" },
-    { id: "entregado" as const, title: "Entregado", icon: CheckCircle2, help: "Pedidos finalizados" }
-  ], []);
-
-  return (
-    <section className="max-w-[1600px] mx-auto px-5 sm:px-7 py-6 space-y-6">
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">Seguimiento de pedidos</h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Pedidos de Bajo pedido y Mayoreo, desde el anticipo hasta la entrega.</p>
-        </div>
-        <button type="button" onClick={() => load(true)} disabled={refreshing} className="p-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 disabled:opacity-50" aria-label="Actualizar pedidos" title="Actualizar pedidos">
-          <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
-        </button>
-      </header>
-
-      {error && <div role="alert" className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4 text-sm text-red-700 dark:text-red-300">{error}<button type="button" onClick={() => load(true)} className="block mt-2 font-bold underline">Reintentar</button></div>}
-
-      {loading ? (
-        <div className="h-52 flex items-center justify-center text-zinc-500"><LoaderCircle className="w-6 h-6 animate-spin" /></div>
-      ) : error && orders.length === 0 ? null : (
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
-          {columns.map(column => {
-            const columnOrders = orders.filter(order => order.estado === column.id);
-            const Icon = column.icon;
-            return (
-              <div key={column.id} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/40 p-3 min-h-48">
-                <div className="flex items-center justify-between gap-3 px-1 pb-3">
-                  <div className="flex items-center gap-2">
-                    <Icon className="w-4 h-4 text-emerald-600" />
-                    <div><h2 className="font-bold text-sm text-zinc-900 dark:text-white">{column.title}</h2><p className="text-[11px] text-zinc-500">{column.help}</p></div>
-                  </div>
-                  <span className="min-w-7 h-7 px-2 inline-flex items-center justify-center rounded-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-bold">{columnOrders.length}</span>
-                </div>
-                <div className="space-y-3">
-                  {columnOrders.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700 p-8 text-center text-xs text-zinc-500">No hay pedidos en este apartado.</div>
-                  ) : columnOrders.map(order => <PedidoCard key={order.venta_id} pedido={order} metodosPago={metodosPago} onChanged={() => load(true)} />)}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
-};
-
-export default PedidosVenta;
+  useEffect(() => { load(); return () => { requestRef.current += 1; }; }, [load]);
+  const filtered = useMemo(() => orders.filter(order => (!channel || order.canal_venta_nombre === channel) && (!lateOnly || isOverdue(order)) && searchText(`${order.folio} ${order.cliente_nombre} ${order.items.map(item => item.sku).join(" ")}`).includes(searchText(search)))
+    .sort((a, b) => Number(isOverdue(b)) - Number(isOverdue(a)) || (a.fecha_estimada || "9999").localeCompare(b.fecha_estimada || "9999") || b.fecha.getTime() - a.fecha.getTime()), [orders, search, channel, lateOnly]);
+  const selected = orders.find(order => order.venta_id === selectedId);
+  const columns = [
+    { id: "pedido" as const, title: "Por pagar", help: "Anticipo recibido o pago pendiente", icon: CalendarDays },
+    { id: "pagado" as const, title: "Por entregar", help: "Pago completo, entrega pendiente", icon: PackageCheck },
+    { id: "entregado" as const, title: "Entregados", help: "Pedidos completados", icon: CheckCircle2 }
+  ];
+  return <section className="page-shell space-y-6">
+    <PageHeader eyebrow="Ventas" title="Seguimiento de pedidos" description="Del anticipo a la entrega. Abre un pedido para registrar pagos o actualizar su seguimiento." actions={<><button type="button" className="btn-secondary" onClick={() => setSettingsOpen(true)}><Settings2 className="h-4 w-4" />Configurar</button><button type="button" className="btn-secondary" disabled={loading || refreshing} onClick={() => load(true)}><RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />Actualizar</button></>} />
+    {error && <ErrorState message={error} onRetry={() => load(true)} />}
+    <div className="grid sm:grid-cols-3 gap-3"><StatCard label="Pedidos por completar" value={loading || (error && !orders.length) ? "—" : orders.filter(order => order.estado !== "entregado").length} hint="Por pagar y por entregar" /><StatCard label="Saldo por cobrar" tone="warning" value={loading || (error && !orders.length) ? "—" : money.format(orders.filter(order => order.estado !== "entregado").reduce((sum, order) => sum + order.saldo, 0))} hint="De los pedidos en seguimiento" /><StatCard label="Entregas atrasadas" value={loading || (error && !orders.length) ? "—" : orders.filter(isOverdue).length} hint="Según la fecha estimada registrada" /></div>
+    <div className="surface p-4 flex flex-wrap gap-3"><label className="relative flex-1 min-w-[190px]"><Search className="absolute left-3 top-3 h-4 w-4 text-zinc-400" /><input aria-label="Buscar pedidos" value={search} onChange={event => setSearch(event.target.value)} placeholder="Cliente, folio o SKU…" className="w-full pl-9 pr-3 py-2 bg-transparent border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm" /></label><select aria-label="Filtrar pedidos por canal" value={channel} onChange={event => setChannel(event.target.value)} className="border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-zinc-900"><option value="">Todos los canales</option>{[...new Set(orders.map(order => order.canal_venta_nombre))].sort().map(name => <option key={name}>{name}</option>)}</select><label className="inline-flex gap-2 items-center px-2 text-xs font-medium cursor-pointer"><input type="checkbox" checked={lateOnly} onChange={event => setLateOnly(event.target.checked)} />Solo entregas atrasadas</label></div>
+    <FilterSummary count={filtered.length} noun="pedidos" active={Boolean(search || channel || lateOnly)} onClear={() => { setSearch(""); setChannel(""); setLateOnly(false); }} />
+    {loading ? <LoadingState label="Cargando pedidos…" /> : error && !orders.length ? null : <div className="order-board">{columns.map(column => {
+      const items = filtered.filter(order => order.estado === column.id); const Icon = column.icon;
+      return <section key={column.id} className={`order-column ${column.id}`} aria-label={column.title}><header><div className="flex items-center gap-2"><Icon className="h-4 w-4" /><h2>{column.title}</h2><span className="column-count">{items.length}</span></div><p>{column.help}</p></header><div className="space-y-3">{!items.length ? <div className="order-column-empty">{search || channel || lateOnly ? "Sin coincidencias con estos filtros" : "No hay pedidos en este estado"}</div> : items.map(order => <button type="button" key={order.venta_id} className="order-card" onClick={() => setSelectedId(order.venta_id)} aria-label={`Gestionar pedido ${order.folio} de ${order.cliente_nombre}`}><div className="flex items-center justify-between gap-2"><span className="order-folio">{order.folio}</span><ArrowUpRight className="h-4 w-4 text-zinc-400" /></div><h3>{order.cliente_nombre}</h3><p className="order-channel">{order.canal_venta_nombre} · {order.items.reduce((sum, item) => sum + item.cantidad, 0)} unidades</p><p className="order-products">{order.items.map(item => `${item.cantidad} × ${item.sku}`).join(" · ")}</p><div className="order-card-money"><div><small>Total</small><strong>{money.format(order.total)}</strong></div><div><small>{order.saldo > .009 ? "Por cobrar" : "Pago completo"}</small><strong className={order.saldo > .009 ? "text-amber-700 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}>{order.saldo > .009 ? money.format(order.saldo) : <CheckCircle2 className="h-4 w-4 ml-auto mt-1" />}</strong></div></div>{order.fecha_estimada && <div className={`order-date ${isOverdue(order) ? "overdue" : ""}`}><Clock3 className="h-3.5 w-3.5" />{isOverdue(order) ? "Entrega atrasada" : "Entrega estimada"} · {new Date(`${order.fecha_estimada}T12:00:00`).toLocaleDateString("es-MX", { day: "numeric", month: "short" })}</div>}</button>)}</div></section>;
+    })}</div>}
+    {selected && <OrderManager key={selected.venta_id} order={selected} methods={methods} methodsError={methodsError} onClose={() => setSelectedId("")} onSaved={() => load(true)} />}
+    <ConfiguracionModuloModal isOpen={settingsOpen} module="ventas" onClose={() => setSettingsOpen(false)} onSaved={() => load(true)} />
+  </section>;
+}

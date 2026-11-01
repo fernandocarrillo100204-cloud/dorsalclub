@@ -195,13 +195,13 @@ export default function GestionAlmacenes({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-3.5 sm:px-5 lg:px-6 py-5" id="gestion-almacenes-view">
+    <div className="page-shell" id="gestion-almacenes-view">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-5 gap-3">
         <div>
           {onBackToSettings && <button type="button" onClick={onBackToSettings} className="mb-2 inline-flex items-center gap-1.5 text-xs font-semibold text-[#64748B] dark:text-[#94A3B8] hover:text-[#172033] dark:hover:text-white"><ArrowLeft className="w-3.5 h-3.5" />Configuración</button>}
           <h1 className="text-2xl sm:text-[28px] font-bold text-[#172033] dark:text-[#F8FAFC] tracking-tight leading-tight">
-            Configuración de Almacenes
+            Almacenes
           </h1>
           <p className="text-xs text-[#64748B] dark:text-[#94A3B8] mt-0.5">
             Administra las sedes físicas, ubicaciones y puntos de distribución de la empresa.

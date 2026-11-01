@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
 import { Compra, Drop, EstadoDrop, Venta } from "../types";
+import { useWorkspace } from "../context/WorkspaceContext";
 
 type DetailTab = "productos" | "ventas";
 
@@ -69,6 +70,7 @@ const toDate = (value: any): Date => {
 };
 
 export default function Drops() {
+  const { confirm } = useWorkspace();
   const [drops, setDrops] = useState<Drop[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [compras, setCompras] = useState<Compra[]>([]);
@@ -282,7 +284,7 @@ export default function Drops() {
 
   const archiveSelectedDrop = async () => {
     if (!selectedDrop || archiving) return;
-    if (!window.confirm(`¿Enviar “${selectedDrop.nombre}” a la Papelera? Solo es posible si ya no tiene compras ni ventas asociadas.`)) return;
+    if (!(await confirm({ title: "Enviar drop a la papelera", description: `Se enviará “${selectedDrop.nombre}” a la papelera. Solo es posible si ya no tiene compras ni ventas asociadas.`, confirmLabel: "Enviar a la papelera", danger: true }))) return;
     setArchiving(true);
     setDetailError(null);
     try {
@@ -298,13 +300,14 @@ export default function Drops() {
   };
 
   return (
-    <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-5" id="drops-page">
-      <header className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 pb-4 border-b border-zinc-200 dark:border-zinc-800">
+    <div className="page-shell space-y-6" id="drops-page">
+      <header className="page-header">
         <div>
+          <p className="page-eyebrow">Inventario</p>
           <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
-            <Layers3 className="w-6 h-6 text-emerald-500" /> Drops
+            Drops
           </h1>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+          <p className="page-description">
             Sigue compras, inventario y ventas por pedido comercial, sin ligarlo a un mes.
           </p>
         </div>

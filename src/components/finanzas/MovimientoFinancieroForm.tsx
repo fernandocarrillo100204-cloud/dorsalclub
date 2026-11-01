@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { AlertCircle, X } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { firestoreService } from "../../lib/firebase";
 import { OpcionListaConfigurable, TipoMovimientoFinanciero } from "../../types";
+import { useUnsavedChanges, useWorkspace } from "../../context/WorkspaceContext";
+import { mensajeError } from "../../lib/errores";
+import Dialog from "../ui/Dialog";
 
 interface Props {
   open: boolean;
@@ -18,6 +21,7 @@ const types: Array<{ value: TipoMovimientoFinanciero; label: string; help: strin
 ];
 
 export default function MovimientoFinancieroForm({ open, onClose, onSaved }: Props) {
+  const { confirm, notify } = useWorkspace();
   const [tipo, setTipo] = useState<TipoMovimientoFinanciero | "">("");
   const [concepto, setConcepto] = useState("");
   const [monto, setMonto] = useState("");
@@ -27,20 +31,26 @@ export default function MovimientoFinancieroForm({ open, onClose, onSaved }: Pro
   const [methods, setMethods] = useState<OpcionListaConfigurable[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [methodsError, setMethodsError] = useState("");
+  const [retry, setRetry] = useState(0);
+  const dirty = Boolean(tipo || concepto || monto || fecha || metodoPago || notas);
+  const markSaved = useUnsavedChanges(open && dirty, saving);
+  const reset = () => { setTipo(""); setConcepto(""); setMonto(""); setFecha(""); setMetodoPago(""); setNotas(""); setError(""); markSaved(); };
+  const close = async () => {
+    if (saving) return;
+    if (dirty && !(await confirm({ title: "¿Cerrar sin guardar?", description: "Este movimiento todavía no se ha registrado.", confirmLabel: "Descartar cambios", danger: true }))) return;
+    reset(); onClose();
+  };
 
   useEffect(() => {
     if (!open) return;
+    let active = true;
+    setMethodsError("");
     firestoreService.getConfiguracionListasDesplegables()
-      .then(config => setMethods(config.metodos_pago_gasto.filter(item => item.activa)))
-      .catch(() => setMethods([]));
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: KeyboardEvent) => { if (event.key === "Escape" && !saving) onClose(); };
-    document.addEventListener("keydown", close);
-    return () => document.removeEventListener("keydown", close);
-  }, [open, saving, onClose]);
+      .then(config => { if (active) setMethods(config.metodos_pago_gasto.filter(item => item.activa)); })
+      .catch(() => { if (active) { setMethods([]); setMethodsError("No se pudieron cargar los métodos de pago. Puedes reintentar o guardar sin especificar uno."); } });
+    return () => { active = false; };
+  }, [open, retry]);
 
   if (!open) return null;
   const selectedType = types.find(item => item.value === tipo);
@@ -48,8 +58,11 @@ export default function MovimientoFinancieroForm({ open, onClose, onSaved }: Pro
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (saving) return;
     setError("");
     if (!tipo) return setError("Selecciona el tipo de movimiento.");
+    if (!concepto.trim()) return setError("Escribe el concepto del movimiento.");
+    if (requiresExplanation && !notas.trim()) return setError("Explica el motivo de este ajuste de caja.");
     const parsedAmount = Number(monto);
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) return setError("Captura un monto mayor a cero.");
     if (!fecha) return setError("Selecciona la fecha del movimiento.");
@@ -64,25 +77,22 @@ export default function MovimientoFinancieroForm({ open, onClose, onSaved }: Pro
         metodo_pago: metodoPago || undefined,
         notas: notas || undefined
       });
-      setTipo(""); setConcepto(""); setMonto(""); setFecha(""); setMetodoPago(""); setNotas("");
+      reset(); notify("Movimiento financiero registrado.");
       onSaved();
       onClose();
     } catch (cause: any) {
-      setError(cause?.message || "No fue posible guardar el movimiento.");
+      setError(mensajeError(cause, "No fue posible guardar el movimiento."));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-[120] bg-black/55 p-4 flex items-center justify-center" onMouseDown={event => { if (event.target === event.currentTarget && !saving) onClose(); }}>
-      <form onSubmit={submit} className="w-full max-w-xl max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-2xl">
-        <header className="sticky top-0 bg-white dark:bg-zinc-900 flex items-start justify-between gap-4 p-5 border-b border-zinc-200 dark:border-zinc-800 z-10">
-          <div><h2 className="font-bold text-zinc-900 dark:text-white">Registrar movimiento financiero</h2><p className="text-xs text-zinc-500 mt-1">Solo para movimientos que no sean ventas, compras ni gastos.</p></div>
-          <button type="button" onClick={onClose} disabled={saving} className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800" aria-label="Cerrar"><X className="w-4 h-4" /></button>
-        </header>
-        <div className="p-5 space-y-4">
+    <Dialog open={open} onClose={close} busy={saving} title="Registrar movimiento financiero" description="Solo para movimientos que no sean ventas, compras ni gastos.">
+      <form onSubmit={submit} aria-busy={saving}>
+        <fieldset disabled={saving} className="space-y-4">
           {error && <div className="flex gap-2 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30 p-3 text-xs text-rose-700 dark:text-rose-300"><AlertCircle className="w-4 h-4 shrink-0" />{error}</div>}
+          {methodsError && <p role="status" className="text-xs text-amber-700 dark:text-amber-400">{methodsError} <button type="button" className="underline" onClick={() => setRetry(value => value + 1)}>Reintentar</button></p>}
           <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Tipo *
             <select value={tipo} onChange={event => setTipo(event.target.value as TipoMovimientoFinanciero)} className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950">
               <option value="">Seleccionar tipo</option>{types.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
@@ -102,9 +112,9 @@ export default function MovimientoFinancieroForm({ open, onClose, onSaved }: Pro
           <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Comentario {requiresExplanation ? "*" : "(opcional)"}
             <textarea value={notas} onChange={event => setNotas(event.target.value)} rows={3} maxLength={500} placeholder={requiresExplanation ? "Explica por qué es necesario el ajuste" : "Información adicional"} className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 resize-none" />
           </label>
-        </div>
-        <footer className="sticky bottom-0 bg-white dark:bg-zinc-900 flex justify-end gap-2 p-4 border-t border-zinc-200 dark:border-zinc-800"><button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 text-sm font-semibold">Cancelar</button><button type="submit" disabled={saving} className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold disabled:opacity-50">{saving ? "Guardando…" : "Guardar movimiento"}</button></footer>
+        </fieldset>
+        <footer className="flex justify-end gap-2 pt-5"><button type="button" onClick={close} disabled={saving} className="btn-secondary">Cancelar</button><button type="submit" disabled={saving} className="btn-primary">{saving ? "Guardando…" : "Guardar movimiento"}</button></footer>
       </form>
-    </div>
+    </Dialog>
   );
 }

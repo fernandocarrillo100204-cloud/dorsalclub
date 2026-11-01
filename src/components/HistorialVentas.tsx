@@ -19,10 +19,14 @@ import {
   Search,
   Trash2,
   User,
-  WalletCards
+  WalletCards, Download, Plus
 } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
 import { mensajeError } from "../lib/errores";
+import { PageHeader, FilterSummary, EmptyState, StatCard } from "./ui/Page";
+import { downloadCsv, searchText } from "../lib/presentation";
+import { fechaLocal } from "../lib/lecturasVentas";
+import { useWorkspace } from "../context/WorkspaceContext";
 import { Almacen, Cliente, Drop, Movimiento, Producto, Venta, getSubtotalVenta } from "../types";
 
 interface HistorialVentasProps {
@@ -30,6 +34,7 @@ interface HistorialVentasProps {
   productos: Producto[];
   preselectedClienteId?: string;
   onNavigateToCliente?: (clienteId: string) => void;
+  onNewSale?: () => void;
 }
 
 interface VentaAgrupada {
@@ -75,8 +80,10 @@ export default function HistorialVentas({
   almacenes,
   productos,
   preselectedClienteId = "",
-  onNavigateToCliente
+  onNavigateToCliente,
+  onNewSale
 }: HistorialVentasProps) {
+  const { confirm } = useWorkspace();
   const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
   const [ventasMaestras, setVentasMaestras] = useState<Venta[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -93,6 +100,8 @@ export default function HistorialVentas({
   const [clienteFilter, setClienteFilter] = useState(preselectedClienteId || "all");
   const [canalFilter, setCanalFilter] = useState("all");
   const [estadoFilter, setEstadoFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [ventaToCancel, setVentaToCancel] = useState<VentaAgrupada | null>(null);
   const [ventaToReturn, setVentaToReturn] = useState<VentaAgrupada | null>(null);
@@ -306,12 +315,15 @@ export default function HistorialVentas({
   );
 
   const filteredVentas = useMemo(() => {
-    const term = search.trim().toLocaleLowerCase("es");
+    const term = searchText(search);
     return ventas.filter((venta) => {
       if (clienteFilter === "mostrador" && venta.clienteId) return false;
       if (clienteFilter !== "all" && clienteFilter !== "mostrador" && venta.clienteId !== clienteFilter) return false;
       if (canalFilter !== "all" && venta.canal !== canalFilter) return false;
       if (estadoFilter !== "all" && venta.estado !== estadoFilter) return false;
+      const day = fechaLocal(venta.fecha);
+      if (dateFrom && day < dateFrom) return false;
+      if (dateTo && day > dateTo) return false;
       if (!term) return true;
       return [
         venta.folio,
@@ -321,9 +333,9 @@ export default function HistorialVentas({
           const product = productos.find((candidate) => candidate.sku === item.sku);
           return [item.sku, product?.nombre || ""];
         })
-      ].some((value) => value.toLocaleLowerCase("es").includes(term));
+      ].some((value) => searchText(value).includes(term));
     });
-  }, [ventas, clienteFilter, canalFilter, estadoFilter, search, productos]);
+  }, [ventas, clienteFilter, canalFilter, estadoFilter, search, productos, dateFrom, dateTo]);
 
   const productName = (sku: string) => productos.find((product) => product.sku === sku)?.nombre || sku;
   const warehouseName = (id: string) => almacenes.find((warehouse) => warehouse.id === id)?.nombre || "Almacén no disponible";
@@ -351,7 +363,7 @@ export default function HistorialVentas({
 
   const archiveSale = async (venta: VentaAgrupada) => {
     if (!venta.master && !venta.principal?.id) return;
-    if (!window.confirm(`¿Enviar la venta ${venta.folio} a la Papelera? Podrás restaurarla después.`)) return;
+    if (!(await confirm({ title: `Enviar ${venta.folio} a la papelera`, description: "La venta se retirará del historial activo y se revertirá su efecto según su estado. Podrás restaurarla desde la papelera.", confirmLabel: "Enviar a la papelera", danger: true }))) return;
     setProcessingId(venta.key);
     setError(null);
     try {
@@ -402,51 +414,53 @@ export default function HistorialVentas({
   };
 
   return (
-    <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-5">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2.5">
-            <History className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
-            Historial de ventas
-          </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Cada venta aparece una sola vez, con todas sus partidas, cobros y estado.</p>
-        </div>
-        <button type="button" onClick={loadFirstPage} disabled={loading} className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-2.5 text-sm font-semibold hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-60">
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          Actualizar
-        </button>
-      </div>
+    <div className="page-shell space-y-6">
+      <PageHeader eyebrow="Ventas" title="Historial de ventas" description="Cada operación, sus productos y su estado de pago. Abre una venta para ver el detalle." actions={<>
+        <button type="button" onClick={loadFirstPage} disabled={loading || loadingMore} className="btn-secondary" aria-label="Actualizar ventas"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /></button>
+        <button type="button" className="btn-secondary" disabled={loading || !filteredVentas.length} title="Exportar los resultados cargados y filtrados" onClick={() => downloadCsv("antiorder-ventas.csv", ["Folio", "Fecha", "Cliente", "Canal", "Unidades", "Total MXN", "Recibido MXN", "Saldo MXN", "Estado"], filteredVentas.map(venta => [venta.folio, fechaLocal(venta.fecha), venta.clienteNombre, venta.canal, venta.unidades, venta.total, venta.recibido, venta.saldo, venta.estado]))}><Download className="h-4 w-4" />Exportar</button>
+        {onNewSale && <button type="button" className="btn-primary" onClick={onNewSale}><Plus className="h-4 w-4" />Registrar venta</button>}
+      </>} />
 
       {success && <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300 flex items-center gap-2"><CheckCircle2 className="h-4 w-4" />{success}</div>}
       {error && <div className="rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 px-4 py-3 text-sm text-rose-700 dark:text-rose-300 flex items-center justify-between gap-3"><span className="flex items-center gap-2"><AlertTriangle className="h-4 w-4" />{error}</span><button type="button" onClick={loadFirstPage} className="font-bold underline">Reintentar</button></div>}
 
-      <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 p-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+      <div className="grid sm:grid-cols-3 gap-3">
+        <StatCard label="Ventas en esta vista" value={loading || (error && !ventas.length) ? "—" : filteredVentas.length} hint="Con los filtros actuales" />
+        <StatCard label="Total vendido · activas" value={loading || (error && !ventas.length) ? "—" : money.format(filteredVentas.filter(venta => venta.estado === "activo").reduce((sum, venta) => sum + venta.total, 0))} hint="Solo registros cargados; no es utilidad" />
+        <StatCard label="Saldo pendiente · activas" tone="warning" value={loading || (error && !ventas.length) ? "—" : money.format(filteredVentas.filter(venta => venta.estado === "activo").reduce((sum, venta) => sum + venta.saldo, 0))} hint="Para el total general consulta Cuentas por cobrar" />
+      </div>
+      <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
         <label className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Folio, cliente, producto o SKU" className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-2.5 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-emerald-500" />
+          <input aria-label="Buscar ventas" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Folio, cliente, producto o SKU" className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-2.5 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-emerald-500" />
         </label>
-        <select value={clienteFilter} onChange={(event) => setClienteFilter(event.target.value)} className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500">
+        <select aria-label="Filtrar ventas por cliente" value={clienteFilter} onChange={(event) => setClienteFilter(event.target.value)} className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500">
           <option value="all">Todos los clientes</option>
           <option value="mostrador">Venta sin cliente / Mostrador</option>
           {clientes.map((cliente) => <option key={cliente.id} value={cliente.id}>{cliente.nombre_completo}</option>)}
         </select>
-        <select value={canalFilter} onChange={(event) => setCanalFilter(event.target.value)} className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500">
+        <select aria-label="Filtrar ventas por canal" value={canalFilter} onChange={(event) => setCanalFilter(event.target.value)} className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500">
           <option value="all">Todos los canales</option>
           {canales.map((canal) => <option key={canal} value={canal}>{canal}</option>)}
         </select>
-        <select value={estadoFilter} onChange={(event) => setEstadoFilter(event.target.value)} className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500">
+        <select aria-label="Filtrar ventas por estado" value={estadoFilter} onChange={(event) => setEstadoFilter(event.target.value)} className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500">
           <option value="all">Todos los estados</option>
           <option value="activo">Solo activas</option>
           <option value="anulado">Solo anuladas</option>
           <option value="devuelto">Solo devueltas</option>
         </select>
+        <label className="text-xs text-zinc-500">Desde<input type="date" value={dateFrom} max={dateTo || undefined} onChange={event => setDateFrom(event.target.value)} className="mt-1 w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white" /></label>
+        <label className="text-xs text-zinc-500">Hasta<input type="date" value={dateTo} min={dateFrom || undefined} onChange={event => setDateTo(event.target.value)} className="mt-1 w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white" /></label>
       </div>
+
+      <FilterSummary count={filteredVentas.length} noun="ventas" partial={hasMore || masterHasMore} active={Boolean(search || clienteFilter !== "all" || canalFilter !== "all" || estadoFilter !== "all" || dateFrom || dateTo)} onClear={() => { setSearch(""); setClienteFilter("all"); setCanalFilter("all"); setEstadoFilter("all"); setDateFrom(""); setDateTo(""); }} />
+      {(hasMore || masterHasMore) && <p className="text-xs text-zinc-500">Filtros, importes y exportación corresponden a los registros cargados. Carga más para consultar ventas anteriores.</p>}
 
       <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden shadow-sm">
         {loading ? (
           <div className="py-20 text-center text-zinc-500"><Loader2 className="h-7 w-7 animate-spin mx-auto mb-3" /><p className="text-sm">Cargando ventas...</p></div>
-        ) : filteredVentas.length === 0 ? (
-          <div className="py-20 px-6 text-center"><WalletCards className="h-11 w-11 mx-auto text-zinc-300 dark:text-zinc-600 mb-3" /><p className="font-semibold text-zinc-900 dark:text-white">No hay ventas coincidentes</p><p className="text-sm text-zinc-500 mt-1">Las ventas reales registradas aparecerán aquí.</p></div>
+        ) : error && !ventas.length ? null : filteredVentas.length === 0 ? (
+          <EmptyState title="No hay ventas en esta vista" description={hasMore || masterHasMore ? "Puede haber coincidencias anteriores. Carga más registros o limpia los filtros." : "Prueba con otros filtros o registra una nueva venta."} icon={WalletCards} />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1050px] text-left">

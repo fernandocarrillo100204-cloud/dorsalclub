@@ -15,7 +15,11 @@ for (const [collection, field] of [["compras", "almacen_id"], ["movimientos", "e
 const calls: any[] = [];
 let rejectedCollection = "";
 const documents = new Map<string, any[]>();
-const state = { read: async (request: any) => {
+const subscriptions = new Map<string, { update: (snapshot: any) => void; error: (error: any) => void }>();
+const state = { listen: (request: any, update: (snapshot: any) => void, error: (error: any) => void) => {
+  subscriptions.set(request.path, { update, error });
+  return () => subscriptions.delete(request.path);
+}, read: async (request: any) => {
   calls.push(request);
   if (request.path === rejectedCollection) throw Object.assign(new Error("Consulta rechazada"), { code: "permission-denied" });
   let rows = [...(documents.get(request.path) || [])];
@@ -39,7 +43,8 @@ export const limit = value => ({ kind: "limit", value });
 export const startAfter = doc => ({ kind: "after", doc });
 export const getDocs = request => globalThis.__crmReadTest.read(request);
 export const Timestamp = { now: () => new Date(), fromDate: date => date };
-export const doc = () => ({}), getDoc = () => {}, setDoc = () => {}, addDoc = () => {}, onSnapshot = () => {}, runTransaction = () => {}, writeBatch = () => {}, deleteField = () => {};
+export const onSnapshot = (request, update, error) => globalThis.__crmReadTest.listen(request, update, error);
+export const doc = () => ({}), getDoc = () => {}, setDoc = () => {}, addDoc = () => {}, runTransaction = () => {}, writeBatch = () => {}, deleteField = () => {};
 `;
 const bundle = await build({
   entryPoints: ["src/lib/firebase.ts"], write: false, bundle: true, platform: "node", format: "esm",
@@ -80,5 +85,21 @@ calls.length = 0;
 documents.get("movimientos")!.push({ id: "old-tracking", tipo: "ajuste", venta_relacionada_id: "old-0", pedido_estado: "entregado", fecha: new Date() });
 assert.equal((await service.getEventosVentas(Array.from({ length: 12 }, (_, index) => `old-${index}`))).length, 1);
 assert.equal(calls.length, 2, "Los eventos legados deben consultarse por lotes y no por cada venta.");
+const originalConsoleError = console.error;
+try {
+  console.error = () => {};
+  for (const [collection, method] of [["almacenes", "getAlmacenesRealtime"], ["productos", "getProductosRealtime"], ["stock", "getStockRealtime"]]) {
+    const updates: any[] = []; const errors: any[] = [];
+    const unsubscribe = service[method]((data: any[]) => updates.push(data), (error: any) => errors.push(error));
+    const subscription = subscriptions.get(collection)!;
+    subscription.update({ forEach: (callback: any) => callback({ id: "real-record", data: () => ({ nombre: "Dato existente", sku: "TEST", cantidad: 3 }) }) });
+    assert.equal(updates[0].length, 1);
+    subscription.error({ code: "permission-denied" });
+    assert.equal(updates.length, 1, "Un error no debe convertirse en un catálogo vacío ni en stock cero.");
+    assert.equal(errors.length, 1, "El error debe llegar a la interfaz para mostrar el reintento.");
+    unsubscribe();
+    assert.equal(subscriptions.has(collection), false);
+  }
+} finally { console.error = originalConsoleError; }
 delete (globalThis as any).__crmReadTest;
 console.log("Lecturas Firebase simuladas: aislamiento por cliente, paginación completa y errores sin fallback aprobados.");

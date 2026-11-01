@@ -7,6 +7,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ArchiveRestore, RefreshCw, Search, Trash2, AlertCircle, Loader2, X, CheckCircle2 } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
 import { PapeleraItem, PapeleraTipo } from "../types";
+import { useWorkspace } from "../context/WorkspaceContext";
 
 const TYPE_LABELS: Record<PapeleraTipo, string> = {
   cliente: "Cliente",
@@ -28,6 +29,7 @@ const TYPE_LABELS: Record<PapeleraTipo, string> = {
 };
 
 export default function Papelera() {
+  const { confirm } = useWorkspace();
   const [items, setItems] = useState<PapeleraItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +68,7 @@ export default function Papelera() {
   }, [items, search, typeFilter]);
 
   const restoreItem = async (item: PapeleraItem) => {
-    if (!window.confirm(`¿Restaurar ${TYPE_LABELS[item.tipo].toLowerCase()} “${item.titulo}”? Volverá a estar activo en el sistema.`)) return;
+    if (!(await confirm({ title: "Restaurar registro", description: `Se restaurará ${TYPE_LABELS[item.tipo].toLowerCase()} “${item.titulo}”. Volverá a estar activo en el sistema.`, confirmLabel: "Restaurar" }))) return;
     setRestoringKey(item.key);
     setError(null);
     try {
@@ -107,14 +109,14 @@ export default function Papelera() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-3.5 sm:px-5 lg:px-6 py-5 space-y-6" id="papelera-page">
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+    <div className="page-shell space-y-6" id="papelera-page">
+      <div className="page-header">
         <div>
+          <p className="page-eyebrow">Administración</p>
           <div className="flex items-center gap-2">
-            <Trash2 className="h-6 w-6 text-zinc-500" />
             <h1 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white">Papelera</h1>
           </div>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="page-description">
             Registros desactivados que puedes restaurar o eliminar definitivamente.
           </p>
         </div>

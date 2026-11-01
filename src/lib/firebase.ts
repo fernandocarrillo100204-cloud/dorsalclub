@@ -939,7 +939,6 @@ export const firestoreService = {
         },
         (error) => {
           console.error("Error en listener de almacenes:", error);
-          onUpdate([]);
           if (onError) onError(error);
         }
       );
@@ -1446,7 +1445,6 @@ export const firestoreService = {
         },
         (error) => {
           console.error("Error en listener de productos:", error);
-          onUpdate([]);
           if (onError) onError(error);
         }
       );
@@ -2802,7 +2800,6 @@ export const firestoreService = {
         },
         (error) => {
           console.error("Error en listener de stock:", error);
-          onUpdate([]);
           if (onError) onError(error);
         }
       );

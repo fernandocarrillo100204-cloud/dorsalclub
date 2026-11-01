@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { firestoreService } from "../lib/firebase";
 import { mensajeError } from "../lib/errores";
+import { useWorkspace } from "../context/WorkspaceContext";
 import { Movimiento, Almacen, Producto, Cliente, getTotalCobradoVenta, getSubtotalVenta, getTotalCostosVenta } from "../types";
 import {
   History,
@@ -52,6 +53,7 @@ export default function Historial({
   onClearPreselectedSku,
   onNavigateToCliente
 }: HistorialProps) {
+  const { confirm } = useWorkspace();
   const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
   const [skuFilter, setSkuFilter] = useState(preselectedSku);
   const [warehouseFilter, setWarehouseFilter] = useState("all");
@@ -77,7 +79,7 @@ export default function Historial({
   const handleEnviarPapelera = async (movimiento: Movimiento) => {
     if (!movimiento.id) return;
     const scope = movimiento.venta_id ? "la venta completa" : "este movimiento";
-    if (!window.confirm(`¿Enviar ${scope} a la Papelera? Su efecto en inventario se revertirá y podrás restaurarlo después.`)) return;
+    if (!(await confirm({ title: "Enviar movimiento a la papelera", description: `Se enviará ${scope} a la papelera y se revertirá su efecto en inventario. Podrás restaurarlo después.`, confirmLabel: "Enviar a la papelera", danger: true }))) return;
     setArchivingId(movimiento.id);
     setAnularError(null);
     try {
@@ -254,16 +256,16 @@ export default function Historial({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-3.5 sm:px-5 lg:px-6 py-5 space-y-6" id="historial-container">
+    <div className="page-shell space-y-6" id="historial-container">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="page-header">
         <div>
+          <p className="page-eyebrow">Inventario</p>
           <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight leading-tight flex items-center gap-2.5">
-            <History className="h-6 w-6 text-zinc-800 dark:text-zinc-200" />
-            Historial de Auditoría y Movimientos
+            Movimientos de inventario
           </h1>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Registro transaccional paginado. Consulta salidas vinculadas a clientes, tickets de mostrador y trazabilidad de inventario.
+          <p className="page-description">
+            Entradas, salidas y transferencias. Consulta qué cambió, cuándo y en qué almacén.
           </p>
         </div>
         <div className="shrink-0 flex items-center space-x-2">
@@ -273,7 +275,7 @@ export default function Historial({
             title="Refrescar registro de auditoría"
           >
             <History className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-            <span>Refrescar Registro</span>
+            <span>Actualizar</span>
           </button>
         </div>
       </div>

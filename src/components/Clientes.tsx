@@ -10,6 +10,9 @@ import { construirPedidos } from "../lib/lecturasVentas";
 import { mensajeError } from "../lib/errores";
 import ClienteModal from "./ClienteModal";
 import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
+import { FilterSummary } from "./ui/Page";
+import { useWorkspace } from "../context/WorkspaceContext";
+import { downloadCsv, searchText } from "../lib/presentation";
 import {
   Users,
   Search,
@@ -37,7 +40,7 @@ import {
   X,
   ArrowUpRight,
   Trash2,
-  Settings
+  Settings, Download
 } from "lucide-react";
 
 interface ClientesProps {
@@ -48,10 +51,12 @@ interface ClientesProps {
 }
 
 export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNavigateToHistory, onNavigateToPedidos }: ClientesProps) {
+  const { confirm, notify } = useWorkspace();
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [marcas, setMarcas] = useState<MarcaCatalogo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retryVersion, setRetryVersion] = useState(0);
 
   // Search and filters
   const [searchTerm, setSearchTerm] = useState("");
@@ -96,6 +101,7 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
       (data) => {
         if (!isMounted) return;
         setClientes(data);
+        setError(null);
         setLoading(false);
       },
       (err: any) => {
@@ -110,7 +116,7 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
       isMounted = false;
       unsub();
     };
-  }, []);
+  }, [retryVersion]);
 
   // Load the brand catalog once for ID-to-name resolution and in-memory search.
   useEffect(() => {
@@ -275,7 +281,7 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
 
   // Filtered clients list
   const filteredClientes = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
+    const term = searchText(searchTerm);
     const termNoSymbols = term.replace(/[@\s-]/g, "");
 
     return clientes.filter((c) => {
@@ -291,14 +297,14 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
       // Search term match across name, instagram, phone, email, city
       if (!term) return true;
 
-      const matchName = c.nombre_normalizado?.includes(term) || c.nombre_completo?.toLowerCase().includes(term);
+      const matchName = searchText(c.nombre_completo || "").includes(term);
       const matchIg = c.instagram_normalizado?.includes(termNoSymbols) || c.instagram?.toLowerCase().includes(term);
       const cleanPhone = c.telefono ? String(c.telefono).replace(/\D/g, "") : "";
       const matchPhone = cleanPhone.includes(termNoSymbols) || (c.telefono && c.telefono.includes(term));
       const matchEmail = c.email?.toLowerCase().includes(term);
-      const matchCity = c.ciudad?.toLowerCase().includes(term);
+      const matchCity = searchText(c.ciudad || "").includes(term);
       const matchMarca = (c.marcas_favoritas_ids || []).some(id =>
-        marcasPorId.get(id)?.nombre.toLocaleLowerCase("es").includes(term)
+        searchText(marcasPorId.get(id)?.nombre || "").includes(term)
       );
 
       return matchName || matchIg || matchPhone || matchEmail || matchCity || matchMarca;
@@ -319,6 +325,7 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
       }
     } catch (err) {
       console.error("Error cambiando estado de cliente:", err);
+      notify(mensajeError(err, "No se pudo cambiar el estado del cliente."), "error");
     } finally {
       setTogglingId(null);
     }
@@ -327,10 +334,11 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
   const handleEnviarPapelera = async (cliente: Cliente, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (!cliente.id) return;
-    if (!window.confirm(`¿Enviar a ${cliente.nombre_completo} a la Papelera? Podrás restaurarlo después.`)) return;
+    if (!(await confirm({ title: "Enviar cliente a la papelera", description: `${cliente.nombre_completo} dejará de aparecer en el directorio activo. Sus operaciones históricas se conservan y podrás restaurar al cliente.`, confirmLabel: "Enviar a la papelera", danger: true }))) return;
     setArchivingId(cliente.id);
     try {
       await firestoreService.enviarClientePapelera(cliente.id);
+      notify(`${cliente.nombre_completo} se envió a la papelera.`);
       setClientes(current => current.filter(item => item.id !== cliente.id));
       if (selectedCliente?.id === cliente.id) setSelectedCliente(null);
     } catch (err: any) {
@@ -389,29 +397,30 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6" id="clientes-page">
+    <div className="page-shell space-y-6" id="clientes-page">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
+      <div className="page-header">
         <div>
+          <p className="page-eyebrow">Clientes</p>
           <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2.5">
-            <Users className="w-6 h-6 text-rose-500" />
-            Clientes y Contactos
+            Directorio de clientes
           </h1>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Gestiona tu cartera de clientes, canales de contacto e historial de salidas y tickets.
+          <p className="page-description">
+            Contactos, preferencias e historial comercial. Todo lo que necesitas para atender a cada cliente.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={() => setIsSettingsOpen(true)} className="px-3 py-2 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 rounded-xl font-semibold text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors flex items-center gap-2"><Settings className="w-4 h-4" /><span>Configurar</span></button>
+        <div className="page-actions">
+          <button type="button" onClick={() => setIsSettingsOpen(true)} className="btn-secondary"><Settings className="w-4 h-4" /><span>Configurar</span></button>
+          <button type="button" className="btn-secondary" disabled={loading || !filteredClientes.length} onClick={() => downloadCsv("antiorder-clientes.csv", ["Nombre", "Tipo", "Teléfono", "Instagram", "Correo", "Ciudad", "Marcas favoritas", "Estado"], filteredClientes.map(cliente => [cliente.nombre_completo, cliente.tipo_cliente, cliente.telefono, cliente.instagram, cliente.email, cliente.ciudad, (cliente.marcas_favoritas_ids || []).map(id => marcasPorId.get(id)?.nombre || "Marca no disponible").join(" · "), cliente.estado || "activo"]))}><Download className="h-4 w-4" />Exportar</button>
           <button
             type="button"
             onClick={openCreateModal}
-            className="px-4 py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-xl font-bold text-xs hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-colors flex items-center gap-2 shadow-xs shrink-0"
+            className="btn-primary"
             id="nuevo-cliente-btn"
           >
             <Plus className="w-4 h-4" />
-            <span>Nuevo Cliente</span>
+            <span>Nuevo cliente</span>
           </button>
         </div>
       </div>
@@ -425,7 +434,7 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
           </div>
           <button
             type="button"
-            onClick={() => window.location.reload()}
+            onClick={() => setRetryVersion(version => version + 1)}
             className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold text-xs transition-colors flex items-center gap-1.5"
           >
             <RefreshCw className="w-3.5 h-3.5" />
@@ -441,6 +450,7 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
           <Search className="w-4 h-4 text-zinc-400 absolute left-3.5 top-3" />
           <input
             type="text"
+            aria-label="Buscar clientes"
             placeholder="Buscar por nombre, Instagram (@), teléfono o ciudad..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -450,6 +460,7 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
             <button
               type="button"
               onClick={() => setSearchTerm("")}
+              aria-label="Limpiar búsqueda de clientes"
               className="absolute right-3 top-3 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 text-xs"
             >
               <X className="w-4 h-4" />
@@ -461,6 +472,7 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
         <div className="flex items-center gap-2">
           <Filter className="w-4 h-4 text-zinc-400 shrink-0 hidden sm:inline" />
           <select
+            aria-label="Tipo de cliente"
             value={tipoFilter}
             onChange={(e) => setTipoFilter(e.target.value)}
             className="bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
@@ -471,6 +483,7 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
 
           {/* Estado filter */}
           <select
+            aria-label="Estado del cliente"
             value={estadoFilter}
             onChange={(e) => setEstadoFilter(e.target.value)}
             className="bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
@@ -482,6 +495,7 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
         </div>
       </div>
 
+      <FilterSummary count={filteredClientes.length} noun="clientes" active={Boolean(searchTerm || tipoFilter !== "todos" || estadoFilter !== "todos")} onClear={() => { setSearchTerm(""); setTipoFilter("todos"); setEstadoFilter("todos"); }} />
       {/* Main Table or Card List */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xs overflow-hidden">
         {loading ? (
@@ -489,7 +503,7 @@ export default function Clientes({ preselectedClienteId, onNavigateToVenta, onNa
             <span className="h-7 w-7 border-2 border-rose-500 border-t-transparent rounded-full animate-spin mb-2" />
             <p className="text-xs">Cargando catálogo de clientes...</p>
           </div>
-        ) : filteredClientes.length === 0 ? (
+        ) : error && !clientes.length ? <p className="p-10 text-center text-sm text-zinc-500">El directorio no está disponible. Reintenta la consulta para continuar.</p> : filteredClientes.length === 0 ? (
           <div className="p-12 text-center space-y-3">
             <div className="w-12 h-12 rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center mx-auto text-zinc-400">
               <Users className="w-6 h-6" />

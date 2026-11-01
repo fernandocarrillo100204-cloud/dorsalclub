@@ -3,12 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, Suspense, lazy } from "react";
+import React, { useState, useEffect, useRef, Suspense, lazy } from "react";
 import { authService, firestoreService } from "./lib/firebase";
 import { Usuario, Almacen, Producto, StockItem, NavigationTab } from "./types";
 import Sidebar from "./components/Sidebar";
 import Login from "./components/Login";
 import ErrorBoundary from "./components/ErrorBoundary";
+import WorkspaceHeader from "./components/WorkspaceHeader";
+import { useWorkspace } from "./context/WorkspaceContext";
+import { navigationInfo, navigationParent } from "./lib/navigation";
+import { mensajeError } from "./lib/errores";
+import { ErrorState, LoadingState } from "./components/ui/Page";
 import { motion, AnimatePresence } from "motion/react";
 
 // Carga perezosa con reintento automático ante desincronización de chunks o recarga del servidor
@@ -206,6 +211,12 @@ const getPathFromTab = (tab: NavigationTab): string => {
 };
 
 export default function App() {
+  const { guardNavigation, notify } = useWorkspace();
+  const historyIndex = useRef(Number(window.history.state?.antiorderIndex) || 0);
+  const restoringHistory = useRef(false);
+  const navigationPending = useRef(false);
+  const historyPromptPending = useRef(false);
+  const pendingHistoryIndex = useRef(historyIndex.current);
   const [user, setUser] = useState<Usuario | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   
@@ -213,6 +224,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<NavigationTab>(() => {
     return getTabFromPath(window.location.pathname);
   });
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
   const [preselectedSku, setPreselectedSku] = useState(() => {
     const searchParams = new URLSearchParams(window.location.search);
     return searchParams.get("sku") || "";
@@ -232,9 +245,12 @@ export default function App() {
   const [almacenes, setAlmacenes] = useState<Almacen[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
   const [stockList, setStockList] = useState<StockItem[]>([]);
+  const [catalogErrors, setCatalogErrors] = useState<Record<string, string>>({});
+  const [catalogReady, setCatalogReady] = useState<Record<string, boolean>>({});
+  const [catalogVersion, setCatalogVersion] = useState(0);
 
   // Navigation helper that updates browser history and URL
-  const navigateTo = (tab: NavigationTab, params?: { sku?: string; almacenId?: string; clienteId?: string; gastoId?: string }) => {
+  const navigateTo = async (tab: NavigationTab, params?: { sku?: string; almacenId?: string; clienteId?: string; gastoId?: string }) => {
     let targetPath = "";
     if (tab === "finanzas_gastos_editar") {
       const gId = params?.gastoId || preselectedGastoId;
@@ -251,7 +267,14 @@ export default function App() {
 
     const currentFull = window.location.pathname + window.location.search;
     if (currentFull !== targetPath) {
-      window.history.pushState({}, "", targetPath);
+      if (navigationPending.current) return;
+      navigationPending.current = true;
+      const staysInSaleForm = navigationParent(activeTab) === "ventas_stock" && navigationParent(tab) === "ventas_stock";
+      const accepted = await guardNavigation(staysInSaleForm);
+      navigationPending.current = false;
+      if (!accepted) return;
+      historyIndex.current += 1;
+      window.history.pushState({ antiorderIndex: historyIndex.current }, "", targetPath);
     }
 
     setPreselectedSku(params?.sku || "");
@@ -263,7 +286,24 @@ export default function App() {
 
   // Sync state on browser back / forward navigation
   useEffect(() => {
-    const handlePopState = () => {
+    window.history.replaceState({ ...window.history.state, antiorderIndex: historyIndex.current }, "");
+    const handlePopState = async (event: PopStateEvent) => {
+      if (restoringHistory.current) { restoringHistory.current = false; return; }
+      pendingHistoryIndex.current = typeof event.state?.antiorderIndex === "number" ? event.state.antiorderIndex : historyIndex.current - 1;
+      // Multiple Back clicks share one decision and restore from the latest entry.
+      if (historyPromptPending.current) return;
+      historyPromptPending.current = true;
+      navigationPending.current = true;
+      const staysInSaleForm = navigationParent(activeTabRef.current) === "ventas_stock" && navigationParent(getTabFromPath(window.location.pathname)) === "ventas_stock";
+      const accepted = await guardNavigation(staysInSaleForm);
+      historyPromptPending.current = false;
+      navigationPending.current = false;
+      if (!accepted) {
+        const delta = historyIndex.current - pendingHistoryIndex.current;
+        if (delta) { restoringHistory.current = true; window.history.go(delta); }
+        return;
+      }
+      historyIndex.current = pendingHistoryIndex.current;
       const tab = getTabFromPath(window.location.pathname);
       const searchParams = new URLSearchParams(window.location.search);
       setPreselectedSku(searchParams.get("sku") || "");
@@ -275,7 +315,12 @@ export default function App() {
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
+  }, [guardNavigation]);
+
+  useEffect(() => {
+    document.title = `${navigationInfo(activeTab).title} · antiorder`;
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, [activeTab]);
 
   // Monitor Auth State Changes
   useEffect(() => {
@@ -293,16 +338,23 @@ export default function App() {
       setAlmacenes([]);
       setProductos([]);
       setStockList([]);
+      setCatalogReady({});
+      setCatalogErrors({});
       return;
     }
+    setCatalogErrors({});
+    const ready = (name: string) => { setCatalogReady(current => ({ ...current, [name]: true })); setCatalogErrors(current => { const next = { ...current }; delete next[name]; return next; }); };
+    const failed = (name: string, error: unknown) => setCatalogErrors(current => ({ ...current, [name]: mensajeError(error, `No se pudo cargar ${name}.`) }));
 
     // Subscribe to warehouses
     const unsubscribeAlmacenes = firestoreService.getAlmacenesRealtime(
       (almList) => {
         setAlmacenes(almList);
+        ready("almacenes");
       },
       (error) => {
         console.error("Error en listener de almacenes:", error);
+        failed("almacenes", error);
       }
     );
 
@@ -310,9 +362,11 @@ export default function App() {
     const unsubscribeProductos = firestoreService.getProductosRealtime(
       (prodList) => {
         setProductos(prodList);
+        ready("productos");
       },
       (error) => {
         console.error("Error en listener de productos:", error);
+        failed("productos", error);
       }
     );
 
@@ -320,9 +374,11 @@ export default function App() {
     const unsubscribeStock = firestoreService.getStockRealtime(
       (stkList) => {
         setStockList(stkList);
+        ready("stock");
       },
       (error) => {
         console.error("Error en listener de stock:", error);
+        failed("stock", error);
       }
     );
 
@@ -331,9 +387,10 @@ export default function App() {
       unsubscribeProductos();
       unsubscribeStock();
     };
-  }, [user?.uid]);
+  }, [user?.uid, catalogVersion]);
 
   const handleLogout = async () => {
+    if (!(await guardNavigation())) return;
     try {
       await authService.logout();
       setUser(null);
@@ -341,6 +398,7 @@ export default function App() {
       setPreselectedAlmacenId("");
     } catch (err) {
       console.error("Error signing out:", err);
+      notify("No se pudo cerrar la sesión. Vuelve a intentarlo.", "error");
     }
   };
 
@@ -349,7 +407,7 @@ export default function App() {
     return (
       <div className="min-h-screen bg-white dark:bg-[#0B1220] flex flex-col items-center justify-center text-[#64748B] dark:text-[#94A3B8] transition-colors">
         <span className="h-9 w-9 border-3 border-[#059669] border-t-transparent rounded-full animate-spin mb-4" />
-        <p className="text-xs font-medium text-[#172033] dark:text-[#F8FAFC]">Iniciando entorno de inventario...</p>
+        <p className="text-xs font-medium text-[#172033] dark:text-[#F8FAFC]">Preparando tu espacio de trabajo…</p>
       </div>
     );
   }
@@ -366,8 +424,12 @@ export default function App() {
     );
   }
 
+  const needsCatalogs = ["compras", "compras_nueva", "movimientos", "ventas_nueva", "ventas_stock", "ventas_bajo_pedido", "ventas_emprendedor", "ventas_mayoreo", "catalogo", "almacenes", "transferencias_nueva", "historial", "ventas_historial", "analisis_clientes"].includes(activeTab);
+  const catalogsLoading = needsCatalogs && ["almacenes", "productos", "stock"].some(key => !catalogReady[key]);
+  const catalogsFailed = needsCatalogs && Object.keys(catalogErrors).length > 0;
   return (
-    <div className="min-h-screen bg-white dark:bg-[#0B1220] text-[#172033] dark:text-[#F8FAFC] flex flex-col md:flex-row font-sans selection:bg-[#ECFDF5] dark:selection:bg-emerald-950/60 selection:text-[#059669] dark:selection:text-emerald-400 transition-colors duration-200">
+    <div className="app-workspace font-sans selection:bg-emerald-100 dark:selection:bg-emerald-950">
+      <a href="#workspace-main" className="skip-link">Ir al contenido</a>
       {/* Left Minimalist Sidebar (Desktop permanent + Mobile slide-over) */}
       <Sidebar 
         user={user} 
@@ -376,17 +438,16 @@ export default function App() {
         onLogout={handleLogout} 
       />
 
-      {/* Main Content Area: offsets for 224px fixed desktop sidebar */}
-      <div className="flex-1 flex flex-col min-w-0 md:pl-[224px]">
-        <main className="flex-1 w-full relative min-h-screen overflow-x-hidden">
-          <div className="w-full">
-            <ErrorBoundary>
+      {/* Main content shares its spacing with the desktop sidebar. */}
+      <div className="workspace-main">
+        <WorkspaceHeader activeTab={activeTab} onNavigate={navigateTo} />
+        <main id="workspace-main" tabIndex={-1} className="workspace-content">
+          {catalogsFailed && <div className="page-shell pb-0"><ErrorState message={`No se pudo sincronizar ${Object.keys(catalogErrors).join(", ")}. ${Object.values(catalogErrors)[0]}`} onRetry={() => setCatalogVersion(current => current + 1)} /></div>}
+          {catalogsLoading ? (!catalogsFailed && <div className="page-shell"><LoadingState label="Cargando catálogos…" /></div>) : <div className="w-full">
+            <ErrorBoundary key={navigationParent(activeTab)}>
               <Suspense
                 fallback={
-                  <div className="min-h-[50vh] flex flex-col items-center justify-center text-zinc-400">
-                    <span className="h-7 w-7 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin mb-2" />
-                    <p className="text-xs">Cargando módulo...</p>
-                  </div>
+                  <div className="page-shell"><LoadingState label="Cargando apartado…" /></div>
                 }
               >
                 <AnimatePresence mode="wait">
@@ -459,6 +520,7 @@ export default function App() {
                       productos={productos}
                       preselectedClienteId={preselectedClienteId}
                       onNavigateToCliente={(clienteId) => navigateTo("clientes", { clienteId })}
+                      onNewSale={() => navigateTo("ventas_stock")}
                     />
                   </motion.div>
                 )}
@@ -644,7 +706,7 @@ export default function App() {
               </AnimatePresence>
             </Suspense>
           </ErrorBoundary>
-        </div>
+        </div>}
         </main>
       </div>
     </div>

@@ -1,0 +1,46 @@
+import { ArrowLeftRight, Boxes, CircleDollarSign, ClipboardList, History, Layers, Package, Plus, Settings2, ShoppingBag, ShoppingCart, Trash2, UserRoundSearch, Users, Wallet } from "lucide-react";
+import { NavigationTab } from "../types";
+
+export const navigationGroups = [
+  { id: "compras", label: "Compras", icon: ShoppingBag, items: [
+    { id: "compras" as NavigationTab, label: "Historial de compras", icon: History, keywords: "proveedores costos mercancía" },
+    { id: "compras_nueva" as NavigationTab, label: "Registrar compra", icon: Plus, keywords: "nueva entrada inventario" }
+  ] },
+  { id: "ventas", label: "Ventas", icon: ShoppingCart, items: [
+    { id: "ventas_historial" as NavigationTab, label: "Historial de ventas", icon: History, keywords: "cobros devoluciones cancelar" },
+    { id: "ventas_stock" as NavigationTab, label: "Registrar venta", icon: Plus, keywords: "nueva stock mayoreo emprendedor bajo pedido" },
+    { id: "ventas_pedidos" as NavigationTab, label: "Seguimiento de pedidos", icon: ClipboardList, keywords: "anticipo entrega pendiente pagado" }
+  ] },
+  { id: "clientes", label: "Clientes", icon: Users, items: [
+    { id: "clientes" as NavigationTab, label: "Directorio de clientes", icon: Users, keywords: "contactos marcas teléfono" },
+    { id: "analisis_clientes" as NavigationTab, label: "Análisis de clientes", icon: UserRoundSearch, keywords: "actividad compras comportamiento" }
+  ] },
+  { id: "inventario", label: "Inventario", icon: Boxes, items: [
+    { id: "catalogo" as NavigationTab, label: "Productos", icon: Package, keywords: "stock variantes marcas catálogo SKU" },
+    { id: "drops" as NavigationTab, label: "Drops", icon: Layers, keywords: "colecciones lotes pedidos" },
+    { id: "transferencias_nueva" as NavigationTab, label: "Transferencias", icon: ArrowLeftRight, keywords: "almacenes mover" },
+    { id: "historial" as NavigationTab, label: "Movimientos de inventario", icon: History, keywords: "entradas salidas ajustes historial" }
+  ] },
+  { id: "finanzas", label: "Finanzas", icon: Wallet, items: [
+    { id: "finanzas" as NavigationTab, label: "Resumen financiero", icon: Wallet, keywords: "balance ingresos egresos flujo" },
+    { id: "finanzas_gastos" as NavigationTab, label: "Movimientos de dinero", icon: ArrowLeftRight, keywords: "gastos capital inversión ingresos" },
+    { id: "finanzas_cobrar" as NavigationTab, label: "Cuentas por cobrar", icon: CircleDollarSign, keywords: "saldo pendiente pagos" }
+  ] }
+];
+export const utilityNavigation = [
+  { id: "configuracion" as NavigationTab, label: "Configuración", icon: Settings2, keywords: "listas porcentajes almacenes catálogos" },
+  { id: "papelera" as NavigationTab, label: "Papelera", icon: Trash2, keywords: "eliminados restaurar borrar" }
+];
+export function navigationParent(tab: NavigationTab): NavigationTab {
+  if (["ventas_nueva", "ventas_bajo_pedido", "ventas_mayoreo", "ventas_emprendedor"].includes(tab)) return "ventas_stock";
+  if (["finanzas_gastos_nuevo", "finanzas_gastos_editar"].includes(tab)) return "finanzas_gastos";
+  if (tab === "almacenes") return "configuracion";
+  if (tab === "movimientos") return "compras_nueva";
+  return tab;
+}
+export function navigationInfo(tab: NavigationTab) {
+  const parent = navigationParent(tab);
+  const group = navigationGroups.find(group => group.items.some(item => item.id === parent));
+  const item = group?.items.find(item => item.id === parent) || utilityNavigation.find(item => item.id === parent);
+  return { section: group?.label || "Administración", title: tab === "almacenes" ? "Almacenes" : tab === "finanzas_gastos_nuevo" ? "Registrar gasto" : tab === "finanzas_gastos_editar" ? "Editar gasto" : item?.label || "Antiorder" };
+}

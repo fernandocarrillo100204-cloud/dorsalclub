@@ -577,20 +577,18 @@ export default function AnalisisClientes({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6 select-none" id="analisis-clientes-view">
+    <div className="page-shell space-y-6" id="analisis-clientes-view">
       {clientesError && <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 text-sm text-rose-600">{clientesError}</div>}
       {/* Page Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
+      <div className="page-header">
         <div className="space-y-1">
           <div className="flex items-center space-x-2">
-            <div className="p-2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-xl">
-              <UserCheck className="w-5 h-5" />
-            </div>
             <div>
+              <p className="page-eyebrow">Clientes</p>
               <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
                 Análisis de clientes
               </h1>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              <p className="page-description">
                 Consulta indicadores de compra, métricas individuales y comportamiento por cliente
               </p>
             </div>

@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Settings, ShoppingBag, ShoppingCart, Users, Receipt, Package, ChevronRight, Warehouse } from "lucide-react";
 import ConfiguracionModuloModal, { ModuloConfigurable } from "./ConfiguracionModuloModal";
+import { PageHeader } from "./ui/Page";
 
 interface ConfiguracionProps {
   onNavigateToProducts?: () => void;
@@ -18,13 +19,8 @@ export default function Configuracion({ onNavigateToProducts, onNavigateToWareho
   const [activeModule, setActiveModule] = useState<ModuloConfigurable | null>(null);
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-      <div className="pb-4 border-b border-zinc-200 dark:border-zinc-800">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-          <Settings className="w-6 h-6 text-emerald-600" /> Configuración
-        </h1>
-        <p className="text-xs text-zinc-500 mt-1">Administra desde un solo lugar las listas y reglas operativas de Antiorder.</p>
-      </div>
+    <div className="page-shell space-y-6">
+      <PageHeader eyebrow="Administración" title="Configuración" description="Un solo lugar para administrar tus catálogos, listas y reglas de operación." />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {modules.map(module => {

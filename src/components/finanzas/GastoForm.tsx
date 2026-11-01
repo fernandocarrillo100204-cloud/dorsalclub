@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   Receipt, 
   ArrowLeft, 
@@ -26,6 +26,7 @@ import {
   OpcionListaConfigurable
 } from "../../types";
 import { firestoreService } from "../../lib/firebase";
+import { useUnsavedChanges, useWorkspace } from "../../context/WorkspaceContext";
 
 interface GastoFormProps {
   mode: "create" | "edit";
@@ -44,6 +45,7 @@ export default function GastoForm({
   onCancel,
   configVersion = 0
 }: GastoFormProps) {
+  const { notify } = useWorkspace();
   // STRICT "Empty by default" policy: absolutely no pre-selected, pre-filled or calculated values on new form.
   const [concepto, setConcepto] = useState("");
   const [categoria, setCategoria] = useState<string>("");
@@ -61,6 +63,9 @@ export default function GastoForm({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [categorias, setCategorias] = useState<OpcionListaConfigurable[]>([]);
   const [metodosPago, setMetodosPago] = useState<OpcionListaConfigurable[]>([]);
+  const initialValues = useRef(JSON.stringify(["", "", "", "", "", "", "", "", "operacion"]));
+  const currentValues = JSON.stringify([concepto, categoria, monto, fecha, metodoPago, almacenId, proveedor, notas, clasificacionFinanciera]);
+  const markSaved = useUnsavedChanges(!loadingInitial && !initialLoadError && currentValues !== initialValues.current, saving);
 
   useEffect(() => {
     firestoreService.getConfiguracionListasDesplegables().then(config => {
@@ -89,6 +94,7 @@ export default function GastoForm({
           setProveedor(g.proveedor || "");
           setNotas(g.notas || "");
           setClasificacionFinanciera(g.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion");
+          initialValues.current = JSON.stringify([g.concepto || "", g.categoria || "", g.monto != null ? String(g.monto) : "", g.fecha_str || "", g.metodo_pago || "", g.almacen_id || "", g.proveedor || "", g.notas || "", g.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion"]);
         })
         .catch((err) => {
           console.error("Error al cargar gasto:", err);
@@ -102,6 +108,7 @@ export default function GastoForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving) return;
     setErrorMessage(null);
 
     // Validation
@@ -184,12 +191,13 @@ export default function GastoForm({
         });
       }
 
+      initialValues.current = currentValues;
+      markSaved(); notify(mode === "create" ? "Gasto registrado." : "Gasto actualizado.");
       onSuccess();
     } catch (err: any) {
       console.error("Error al guardar gasto:", err);
       setErrorMessage(err?.message || "Ocurrió un error al intentar guardar el gasto.");
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   if (loadingInitial) {
@@ -257,7 +265,7 @@ export default function GastoForm({
           className="inline-flex items-center space-x-2 text-xs sm:text-sm font-medium text-[#64748B] hover:text-[#172033] dark:text-[#94A3B8] dark:hover:text-[#F8FAFC] transition-colors py-1 px-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
         >
           <ArrowLeft className="h-4 w-4" />
-          <span>Volver al historial de gastos</span>
+          <span>Volver a movimientos de dinero</span>
         </button>
       </div>
 
@@ -267,6 +275,7 @@ export default function GastoForm({
         className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-xl shadow-xs overflow-hidden"
         id="form-gasto"
       >
+        <fieldset disabled={saving} className="contents">
         {/* Card Header */}
         <div className="px-5 py-4 border-b border-[#E2E8F0] dark:border-[#263449] flex items-center space-x-3 bg-slate-50/50 dark:bg-[#182235]/40">
           <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200/80 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 shrink-0">
@@ -534,6 +543,7 @@ export default function GastoForm({
             )}
           </button>
         </div>
+        </fieldset>
       </form>
     </div>
   );

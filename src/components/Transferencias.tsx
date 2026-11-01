@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
+import { useUnsavedChanges, useWorkspace } from "../context/WorkspaceContext";
 import { Almacen, Producto, StockItem } from "../types";
 import {
   ArrowRightLeft,
@@ -36,6 +37,7 @@ export default function Transferencias({
   onCancel,
   onManageWarehouses
 }: TransferenciasProps) {
+  const { notify } = useWorkspace();
   const [sku, setSku] = useState(preselectedSku);
   const [almacenOrigenId, setAlmacenOrigenId] = useState<string>(preselectedAlmacenId);
   const [almacenDestinoId, setAlmacenDestinoId] = useState<string>("");
@@ -45,6 +47,7 @@ export default function Transferencias({
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
+  const markSaved = useUnsavedChanges(!formSuccess && Boolean(sku || almacenOrigenId || almacenDestinoId || cantidad !== 1), loading);
 
   // Sync initial props
   useEffect(() => {
@@ -86,6 +89,7 @@ export default function Transferencias({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setFormError(null);
     setFormSuccess(null);
 
@@ -139,10 +143,9 @@ export default function Transferencias({
       );
 
       setCantidad(1);
-
-      if (onSuccess) {
-        setTimeout(() => onSuccess(), 1500);
-      }
+      markSaved();
+      notify(`Transferencia ${res.folio} registrada. Existencias actualizadas.`);
+      onSuccess?.();
     } catch (err: any) {
       console.error("Error al transferir inventario:", err);
       setFormError(err.message || "Error al procesar la transferencia.");
@@ -157,15 +160,14 @@ export default function Transferencias({
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 space-y-6" id="transferencias-page">
+    <div className="form-shell space-y-6" id="transferencias-page">
       {/* Header */}
-      <div className="pb-4 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-        <div><h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
-          <ArrowRightLeft className="w-6 h-6 text-sky-500" />
-          Transferencia entre Almacenes
+      <div className="page-header">
+        <div><p className="page-eyebrow">Inventario</p><h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
+          Transferir mercancía
         </h1>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-          Traspasa unidades de producto entre sucursales de forma atómica con trazabilidad completa de origen y destino.
+        <p className="page-description">
+          Mueve productos de un almacén a otro. El stock total no cambia.
         </p></div>
         {onManageWarehouses && <button type="button" onClick={onManageWarehouses} className="shrink-0 inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"><Settings className="w-4 h-4" />Configurar almacenes</button>}
       </div>
@@ -186,7 +188,8 @@ export default function Transferencias({
       )}
 
       {/* Transfer Form */}
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-6" aria-busy={loading}>
+        <fieldset disabled={loading} className="min-w-0 space-y-6">
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-xs space-y-5">
           {/* Product Selection */}
           <div>
@@ -358,6 +361,7 @@ export default function Transferencias({
             )}
           </button>
         </div>
+        </fieldset>
       </form>
     </div>
   );
