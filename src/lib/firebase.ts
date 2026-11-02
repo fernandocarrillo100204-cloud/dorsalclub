@@ -10,6 +10,7 @@ import {
   collection, 
   doc, 
   getDocs, 
+  getDocsFromServer,
   getDoc,
   setDoc,
   addDoc, 
@@ -24,6 +25,7 @@ import {
   Timestamp,
   deleteField
 } from "firebase/firestore";
+import type { Transaction } from "firebase/firestore";
 import { 
   getAuth, 
   signInWithEmailAndPassword, 
@@ -89,8 +91,10 @@ import {
   getPeriodosFinancierosDisponibles,
   clearPeriodosFinancierosCache
 } from "./periodosFinancieros";
-import { allocateRecognizedSaleIncome, calculateSaleTotals, getMissingDropSkus, requiresSaleRefund } from "./ventasCore";
+import { allocateRecognizedSaleIncome, calculateSaleTotals, requiresSaleRefund } from "./ventasCore";
 import { construirPedidos, fechaRegistro, leerMovimiento, leerVenta } from "./lecturasVentas";
+import { agruparCantidades, asignarExistencias, calcularInventarioDrop, dropsDeVenta, validarDemandaDrops } from "./inventarioDrops";
+import type { DetalleInventarioDrop, InventarioDropFila } from "./inventarioDrops";
 
 // Detect if Firebase config is present in environment variables
 const metaEnv = (import.meta as any).env || {};
@@ -138,6 +142,84 @@ if (isConfigured) {
   }
 } else {
   console.log("Firebase no configurado. Operando en modo Emulador Local (localStorage).");
+}
+
+/**
+ * Serializa las mutaciones de inventario (incluidas las asociaciones de drops).
+ * Las consultas de disponibilidad SIEMPRE se hacen al servidor después de leer
+ * esta revisión, dentro del callback. Si otra operación cambia el inventario,
+ * Firestore reintenta el callback completo, incluidas esas consultas.
+ * No es una caché ni un saldo: los saldos se derivan de los registros originales.
+ */
+const runInventoryTransaction = <T>(db: any, action: (transaction: Transaction) => Promise<T>): Promise<T> =>
+  runTransaction(db, async transaction => {
+    const ref = doc(db, "contadores", "revision_inventario");
+    const snapshot = await transaction.get(ref);
+    const result = await action(transaction);
+    transaction.set(ref, { revision: (Number(snapshot.data()?.revision) || 0) + 1, actualizado: Timestamp.now() }, { merge: true });
+    return result;
+  });
+
+async function readDropInventoryData(dropId: string): Promise<DetalleInventarioDrop> {
+  if (isConfigured && !realDb) throw new Error("No fue posible conectar con Firebase para validar el inventario.");
+  if (isConfigured && realDb) {
+    const [compras, legacySales, multiSales, movimientos] = await Promise.all([
+      getDocsFromServer(query(collection(realDb, "compras"), where("drop_id", "==", dropId))),
+      getDocsFromServer(query(collection(realDb, "ventas"), where("drop_id", "==", dropId))),
+      getDocsFromServer(query(collection(realDb, "ventas"), where("drop_ids", "array-contains", dropId))),
+      getDocsFromServer(query(collection(realDb, "movimientos"), where("drop_id", "==", dropId)))
+    ]);
+    if ([compras, legacySales, multiSales, movimientos].some(snapshot => snapshot.metadata?.hasPendingWrites)) {
+      throw new Error("Hay cambios de inventario pendientes de sincronizar. Espera unos segundos y vuelve a intentarlo.");
+    }
+    const sales = new Map([...legacySales.docs, ...multiSales.docs].map(item => [item.id, leerVenta(item.id, item.data())]));
+    return { compras: compras.docs.map(item => ({ ...item.data(), id: item.id } as Compra)), ventas: [...sales.values()], movimientos: movimientos.docs.map(item => leerMovimiento(item.id, item.data())) };
+  }
+  return {
+    compras: getLocalStorageItem<Compra[]>("compras", []).filter(item => item.drop_id === dropId),
+    ventas: getLocalStorageItem<Venta[]>("ventas_maestras", []).filter(item => dropsDeVenta(item).includes(dropId)),
+    movimientos: getLocalStorageItem<Movimiento[]>("movimientos", []).filter(item => item.drop_id === dropId)
+  };
+}
+
+async function validateDropDemand(items: { sku: string; cantidad: number; drop_id?: string }[], transaction?: Transaction, requireOpen = true): Promise<Map<string, string>> {
+  const ids = [...new Set(items.map(item => item.drop_id).filter((id): id is string => Boolean(id)))];
+  const inventories = new Map<string, InventarioDropFila[]>();
+  const names = new Map<string, string>();
+  await Promise.all(ids.map(async id => {
+    const drop = transaction ? (await transaction.get(doc(realDb, "drops", id))).data()
+      : getLocalStorageItem<Drop[]>("drops", []).find(item => item.id === id);
+    if (!drop || drop.en_papelera) throw new Error("El drop seleccionado ya no está disponible.");
+    if (requireOpen && drop.estado !== "en_venta") throw new Error(`El drop ${drop.nombre} no está En venta. Revisa su estado en Inventario.`);
+    inventories.set(id, calcularInventarioDrop(id, await readDropInventoryData(id)));
+    names.set(id, String(drop.nombre));
+  }));
+  validarDemandaDrops(items, inventories);
+  return names;
+}
+
+async function validatePurchaseRemoval(compra: Compra) {
+  if (!compra.drop_id || compra.estado === "anulada" || compra.en_papelera) return;
+  const data = await readDropInventoryData(compra.drop_id);
+  data.compras = data.compras.filter(item => item.id !== compra.id);
+  if (calcularInventarioDrop(compra.drop_id, data).some(item => item.saldo < 0)) {
+    throw new Error("No puedes retirar esta compra del drop: dejaría ventas sin existencias de origen. Primero devuelve o cancela las ventas correspondientes.");
+  }
+}
+
+async function readStockForSale(skus: string[], transaction: Transaction): Promise<StockItem[]> {
+  const unique = [...new Set(skus)];
+  const products = await Promise.all(unique.map(sku => transaction.get(doc(realDb, "productos", sku))));
+  if (products.some(item => !item.exists() || item.data()?.en_papelera)) throw new Error("Uno de los productos ya no está disponible en el catálogo. Revisa la venta.");
+  const chunks: string[][] = [];
+  for (let index = 0; index < unique.length; index += 10) chunks.push(unique.slice(index, index + 10));
+  const results = await Promise.all(chunks.map(chunk => getDocsFromServer(query(collection(realDb, "stock"), where("sku", "in", chunk)))));
+  if (results.some(snapshot => snapshot.metadata?.hasPendingWrites)) throw new Error("Hay existencias pendientes de sincronizar. Vuelve a intentarlo en unos segundos.");
+  const snapshots = await Promise.all(results.flatMap(result => result.docs).map(item => transaction.get(item.ref)));
+  const stock = snapshots.filter(item => item.exists()).map(item => ({ ...item.data(), id: item.id } as StockItem));
+  const warehouses = await Promise.all([...new Set(stock.map(item => item.almacen_id))].map(async id => ({ id, snapshot: await transaction.get(doc(realDb, "almacenes", id)) })));
+  const active = new Set(warehouses.filter(item => item.snapshot.exists() && !item.snapshot.data()?.en_papelera).map(item => item.id));
+  return stock.filter(item => active.has(item.almacen_id));
 }
 
 // --- HELPER PARA FECHAS LOCALES Y-M-D ---
@@ -636,6 +718,7 @@ export const firestoreService = {
 
   // --- DROPS / LOTES COMERCIALES ---
   getDrops: async (): Promise<Drop[]> => {
+    if (isConfigured && !realDb) throw new Error("No fue posible conectar con Firebase para consultar los drops.");
     if (isConfigured && realDb) {
       const snapshot = await getDocs(query(collection(realDb, "drops"), orderBy("creado_at", "desc")));
       return snapshot.docs
@@ -755,13 +838,14 @@ export const firestoreService = {
     if (!cleanId) throw new Error("Selecciona un drop válido.");
 
     if (isConfigured && realDb) {
-      const [dropSnapshot, comprasSnapshot, ventasSnapshot] = await Promise.all([
+      const [dropSnapshot, comprasSnapshot, ventasSnapshot, multiSnapshot] = await Promise.all([
         getDoc(doc(realDb, "drops", cleanId)),
         getDocs(query(collection(realDb, "compras"), where("drop_id", "==", cleanId))),
-        getDocs(query(collection(realDb, "ventas"), where("drop_id", "==", cleanId)))
+        getDocs(query(collection(realDb, "ventas"), where("drop_id", "==", cleanId))),
+        getDocs(query(collection(realDb, "ventas"), where("drop_ids", "array-contains", cleanId)))
       ]);
       if (!dropSnapshot.exists() || dropSnapshot.data().en_papelera === true) throw new Error("El drop ya no está disponible.");
-      if (!comprasSnapshot.empty || !ventasSnapshot.empty) {
+      if (!comprasSnapshot.empty || !ventasSnapshot.empty || !multiSnapshot.empty) {
         throw new Error("Este drop todavía tiene compras o ventas asociadas. Reasigna esos registros antes de enviarlo a la Papelera.");
       }
       await setDoc(doc(realDb, "drops", cleanId), {
@@ -777,7 +861,7 @@ export const firestoreService = {
     const index = drops.findIndex(item => item.id === cleanId && item.en_papelera !== true);
     if (index < 0) throw new Error("El drop ya no está disponible.");
     const hasLinkedPurchases = getLocalStorageItem<Compra[]>("compras", []).some(item => item.drop_id === cleanId);
-    const hasLinkedSales = getLocalStorageItem<Venta[]>("ventas_maestras", []).some(item => item.drop_id === cleanId);
+    const hasLinkedSales = getLocalStorageItem<Venta[]>("ventas_maestras", []).some(item => dropsDeVenta(item).includes(cleanId));
     if (hasLinkedPurchases || hasLinkedSales) throw new Error("Este drop todavía tiene compras o ventas asociadas. Reasigna esos registros antes de enviarlo a la Papelera.");
     const now = new Date();
     drops[index] = { ...drops[index], en_papelera: true, desactivado_at: now, estado_antes_papelera: drops[index].estado, actualizado_at: now };
@@ -811,106 +895,87 @@ export const firestoreService = {
   },
 
   updateCompraDropAssociation: async (compraId: string, dropId?: string): Promise<void> => {
-    const cleanCompraId = (compraId || "").trim();
-    const cleanDropId = (dropId || "").trim();
-    if (!cleanCompraId) throw new Error("Selecciona una compra válida.");
+    const cleanId = (compraId || "").trim();
+    const target = (dropId || "").trim();
+    if (!cleanId) throw new Error("Selecciona una compra válida.");
     if (isConfigured && realDb) {
-      const compraRef = doc(realDb, "compras", cleanCompraId);
-      const [compraSnapshot, dropSnapshot, movementSnapshot] = await Promise.all([
-        getDoc(compraRef),
-        cleanDropId ? getDoc(doc(realDb, "drops", cleanDropId)) : Promise.resolve(null),
-        getDocs(query(collection(realDb, "movimientos"), where("compra_id", "==", cleanCompraId)))
-      ]);
-      if (!compraSnapshot.exists() || compraSnapshot.data().en_papelera === true) throw new Error("La compra ya no está disponible.");
-      if (cleanDropId && (!dropSnapshot?.exists() || dropSnapshot.data().en_papelera === true)) throw new Error("El drop seleccionado ya no está disponible.");
-      const dropName = cleanDropId ? String(dropSnapshot?.data()?.nombre || "").trim() : "";
-      const values = cleanDropId ? { drop_id: cleanDropId, drop_nombre: dropName } : { drop_id: deleteField(), drop_nombre: deleteField() };
-      const batch = writeBatch(realDb);
-      batch.set(compraRef, { ...values, actualizado_at: Timestamp.now() }, { merge: true });
-      movementSnapshot.docs.forEach(item => batch.set(item.ref, values, { merge: true }));
-      await batch.commit();
+      await runInventoryTransaction(realDb, async transaction => {
+        const ref = doc(realDb, "compras", cleanId);
+        const snapshot = await transaction.get(ref);
+        if (!snapshot.exists() || snapshot.data().en_papelera) throw new Error("La compra ya no está disponible.");
+        const compra = { ...snapshot.data(), id: cleanId } as Compra;
+        if ((compra.drop_id || "") === target) return;
+        const drop = target ? (await transaction.get(doc(realDb, "drops", target))).data() : null;
+        if (target && (!drop || drop.en_papelera || drop.estado === "cerrado")) throw new Error("Selecciona un drop disponible que no esté cerrado.");
+        await validatePurchaseRemoval(compra);
+        const movements = await getDocsFromServer(query(collection(realDb, "movimientos"), where("compra_id", "==", cleanId)));
+        const values = target ? { drop_id: target, drop_nombre: String(drop!.nombre) } : { drop_id: deleteField(), drop_nombre: deleteField() };
+        transaction.set(ref, { ...values, actualizado_at: Timestamp.now() }, { merge: true });
+        movements.docs.forEach(item => transaction.set(item.ref, values, { merge: true }));
+      });
       return;
     }
     const compras = getLocalStorageItem<Compra[]>("compras", []);
-    const index = compras.findIndex(item => item.id === cleanCompraId && item.en_papelera !== true);
+    const index = compras.findIndex(item => item.id === cleanId && !item.en_papelera);
     if (index < 0) throw new Error("La compra ya no está disponible.");
-    const drop = cleanDropId ? getLocalStorageItem<Drop[]>("drops", []).find(item => item.id === cleanDropId && item.en_papelera !== true) : undefined;
-    if (cleanDropId && !drop) throw new Error("El drop seleccionado ya no está disponible.");
-    compras[index] = { ...compras[index], drop_id: cleanDropId || undefined, drop_nombre: drop?.nombre, actualizado_at: new Date() };
+    if ((compras[index].drop_id || "") === target) return;
+    const drop = getLocalStorageItem<Drop[]>("drops", []).find(item => item.id === target && !item.en_papelera && item.estado !== "cerrado");
+    if (target && !drop) throw new Error("Selecciona un drop disponible que no esté cerrado.");
+    await validatePurchaseRemoval(compras[index]);
+    compras[index] = { ...compras[index], drop_id: target || undefined, drop_nombre: drop?.nombre, actualizado_at: new Date() };
     setLocalStorageItem("compras", compras);
-    const movements = getLocalStorageItem<Movimiento[]>("movimientos", []).map(item => item.compra_id === cleanCompraId ? { ...item, drop_id: cleanDropId || undefined, drop_nombre: drop?.nombre } : item);
+    const movements = getLocalStorageItem<Movimiento[]>("movimientos", []).map(item => item.compra_id === cleanId ? { ...item, drop_id: target || undefined, drop_nombre: drop?.nombre } : item);
     setLocalStorageItem("movimientos", movements); notifyListeners("movimientos", movements);
   },
 
   updateVentaDropAssociation: async (ventaId: string, dropId?: string): Promise<void> => {
-    const cleanVentaId = (ventaId || "").trim();
-    const cleanDropId = (dropId || "").trim();
-    if (!cleanVentaId) throw new Error("Selecciona una venta válida.");
-    if (isConfigured && realDb) {
-      const ventaRef = doc(realDb, "ventas", cleanVentaId);
-      const [ventaSnapshot, dropSnapshot, purchaseSnapshot, movementSnapshot] = await Promise.all([
-        getDoc(ventaRef),
-        cleanDropId ? getDoc(doc(realDb, "drops", cleanDropId)) : Promise.resolve(null),
-        cleanDropId ? getDocs(query(collection(realDb, "compras"), where("drop_id", "==", cleanDropId))) : Promise.resolve(null),
-        getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", cleanVentaId)))
-      ]);
-      if (!ventaSnapshot.exists() || ventaSnapshot.data().en_papelera === true) throw new Error("La venta ya no está disponible.");
-      if (cleanDropId && (!dropSnapshot?.exists() || dropSnapshot.data().en_papelera === true)) throw new Error("El drop seleccionado ya no está disponible.");
-      if (cleanDropId) {
-        const allowedSkus = new Set<string>();
-        purchaseSnapshot?.docs.forEach(item => {
-          const data = item.data();
-          if (data.en_papelera === true || data.estado === "anulada") return;
-          (Array.isArray(data.items) ? data.items : []).forEach((purchaseItem: any) => allowedSkus.add(String(purchaseItem.sku || "").trim().toUpperCase()));
-        });
-        const missing = getMissingDropSkus(
-          (Array.isArray(ventaSnapshot.data().items) ? ventaSnapshot.data().items : []).map((item: any) => String(item.sku || "")),
-          allowedSkus
-        );
-        if (missing.length) throw new Error(`No puedes asociar esta venta al drop: ${missing.join(", ")} no pertenece a sus compras activas.`);
+    const id = (ventaId || "").trim();
+    const target = (dropId || "").trim();
+    if (!id) throw new Error("Selecciona una venta válida.");
+    const check = async (sale: Venta, drop?: Drop) => {
+      if (sale.en_papelera) throw new Error("Restaura la venta antes de modificarla.");
+      if (sale.inventario_por_drop) throw new Error("El origen de esta venta está validado por partida. Registra una devolución si necesitas corregirla.");
+      if (target && (!drop || drop.en_papelera || drop.estado === "cerrado")) throw new Error("Selecciona un drop disponible que no esté cerrado.");
+      if (sale.afecta_stock !== false && sale.estado !== "anulado" && sale.estado !== "devuelto") {
+        if (!target) throw new Error("Una venta de inventario necesita un drop de origen.");
+        const data = await readDropInventoryData(target);
+        data.ventas = data.ventas.filter(item => item.id !== id);
+        data.movimientos = data.movimientos.filter(item => item.venta_id !== id);
+        validarDemandaDrops(sale.items.map(item => ({ ...item, drop_id: target })), new Map([[target, calcularInventarioDrop(target, data)]]));
       }
-      const dropName = cleanDropId ? String(dropSnapshot?.data()?.nombre || "").trim() : "";
-      const values = cleanDropId ? { drop_id: cleanDropId, drop_nombre: dropName } : { drop_id: deleteField(), drop_nombre: deleteField() };
-      const batch = writeBatch(realDb);
-      batch.set(ventaRef, { ...values, actualizado_at: Timestamp.now() }, { merge: true });
-      movementSnapshot.docs.forEach(item => batch.set(item.ref, values, { merge: true }));
-      await batch.commit();
+    };
+    if (isConfigured && realDb) {
+      await runInventoryTransaction(realDb, async transaction => {
+        const ref = doc(realDb, "ventas", id);
+        const snapshot = await transaction.get(ref);
+        if (!snapshot.exists()) throw new Error("La venta ya no está disponible.");
+        const sale = leerVenta(id, snapshot.data());
+        if ((sale.drop_id || "") === target && !sale.inventario_por_drop) return;
+        const drop = target ? (await transaction.get(doc(realDb, "drops", target))).data() as Drop | undefined : undefined;
+        await check(sale, drop);
+        const movements = await getDocsFromServer(query(collection(realDb, "movimientos"), where("venta_id", "==", id)));
+        const values = target ? { drop_id: target, drop_nombre: drop!.nombre } : { drop_id: deleteField(), drop_nombre: deleteField() };
+        const items = sale.items.map(item => { const { drop_id, drop_nombre, ...rest } = item; return target ? { ...rest, drop_id: target, drop_nombre: drop!.nombre } : rest; });
+        transaction.set(ref, { ...values, drop_ids: target ? [target] : [], items, actualizado_at: Timestamp.now() }, { merge: true });
+        movements.docs.forEach(item => transaction.set(item.ref, values, { merge: true }));
+      });
       return;
     }
-    const ventas = getLocalStorageItem<Venta[]>("ventas_maestras", []);
-    const index = ventas.findIndex(item => item.id === cleanVentaId && item.en_papelera !== true);
+    const sales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+    const index = sales.findIndex(item => item.id === id);
     if (index < 0) throw new Error("La venta ya no está disponible.");
-    const drop = cleanDropId ? getLocalStorageItem<Drop[]>("drops", []).find(item => item.id === cleanDropId && item.en_papelera !== true) : undefined;
-    if (cleanDropId && !drop) throw new Error("El drop seleccionado ya no está disponible.");
-    if (cleanDropId) {
-      const allowedSkus = new Set(getLocalStorageItem<Compra[]>("compras", []).filter(item => item.drop_id === cleanDropId && item.en_papelera !== true && item.estado !== "anulada").flatMap(item => item.items.map(purchaseItem => purchaseItem.sku.trim().toUpperCase())));
-      const missing = getMissingDropSkus(ventas[index].items.map(item => item.sku), allowedSkus);
-      if (missing.length) throw new Error(`No puedes asociar esta venta al drop: ${missing.join(", ")} no pertenece a sus compras activas.`);
-    }
-    ventas[index] = { ...ventas[index], drop_id: cleanDropId || undefined, drop_nombre: drop?.nombre, actualizado_at: new Date() };
-    setLocalStorageItem("ventas_maestras", ventas);
-    const movements = getLocalStorageItem<Movimiento[]>("movimientos", []).map(item => item.venta_id === cleanVentaId ? { ...item, drop_id: cleanDropId || undefined, drop_nombre: drop?.nombre } : item);
+    if ((sales[index].drop_id || "") === target && !sales[index].inventario_por_drop) return;
+    const drop = getLocalStorageItem<Drop[]>("drops", []).find(item => item.id === target);
+    await check(sales[index], drop);
+    sales[index] = { ...sales[index], drop_id: target || undefined, drop_nombre: drop?.nombre, drop_ids: target ? [target] : [], items: sales[index].items.map(item => ({ ...item, drop_id: target || undefined, drop_nombre: drop?.nombre })), actualizado_at: new Date() };
+    setLocalStorageItem("ventas_maestras", sales);
+    const movements = getLocalStorageItem<Movimiento[]>("movimientos", []).map(item => item.venta_id === id ? { ...item, drop_id: target || undefined, drop_nombre: drop?.nombre } : item);
     setLocalStorageItem("movimientos", movements); notifyListeners("movimientos", movements);
   },
 
-  getDropDetail: async (dropId: string): Promise<{ compras: Compra[]; ventas: Venta[] }> => {
+  getDropDetail: async (dropId: string): Promise<DetalleInventarioDrop> => {
     const cleanId = (dropId || "").trim();
-    if (!cleanId) return { compras: [], ventas: [] };
-    if (isConfigured && realDb) {
-      const [comprasSnapshot, ventasSnapshot] = await Promise.all([
-        getDocs(query(collection(realDb, "compras"), where("drop_id", "==", cleanId))),
-        getDocs(query(collection(realDb, "ventas"), where("drop_id", "==", cleanId)))
-      ]);
-      return {
-        compras: comprasSnapshot.docs.map(item => ({ id: item.id, ...item.data() } as Compra)),
-        ventas: ventasSnapshot.docs.map(item => ({ id: item.id, ...item.data() } as Venta))
-      };
-    }
-
-    return {
-      compras: getLocalStorageItem<Compra[]>("compras", []).filter(item => item.drop_id === cleanId),
-      ventas: getLocalStorageItem<Venta[]>("ventas_maestras", []).filter(item => item.drop_id === cleanId)
-    };
+    return cleanId ? readDropInventoryData(cleanId) : { compras: [], ventas: [], movimientos: [] };
   },
 
   // --- ALMACENES ---
@@ -1753,15 +1818,16 @@ export const firestoreService = {
     }
 
     const afectaStock = venta.afecta_stock !== false;
-    const normalizedItems = venta.items.map((item, index) => {
+    let normalizedItems = venta.items.map((item, index) => {
       const sku = (item.sku || "").trim().toUpperCase();
-      const almacenId = (item.almacen_id || "").trim() || (!afectaStock ? "bajo_pedido" : "");
+      const almacenId = afectaStock ? "" : "bajo_pedido";
+      const dropId = afectaStock ? (item.drop_id || venta.drop_id || "").trim() : "";
       const cantidad = Number(item.cantidad);
       const precioUnitario = Number(item.precio_unitario_venta);
       const costoUnitario = Number(item.costo_unitario_venta);
 
       if (!sku) throw new Error(`Selecciona el producto de la partida ${index + 1}.`);
-      if (!almacenId) throw new Error(`Selecciona el almacén de la partida ${index + 1}.`);
+      if (afectaStock && !dropId) throw new Error(`Selecciona el drop de origen de la partida ${index + 1}.`);
       if (!Number.isInteger(cantidad) || cantidad <= 0) {
         throw new Error(`La cantidad de la partida ${index + 1} debe ser un entero mayor a cero.`);
       }
@@ -1775,6 +1841,8 @@ export const firestoreService = {
       return {
         sku,
         almacen_id: almacenId,
+        drop_id: dropId,
+        drop_nombre: "",
         cantidad,
         precio_unitario_venta: Math.round((precioUnitario + Number.EPSILON) * 100) / 100,
         costo_unitario_venta: Math.round((costoUnitario + Number.EPSILON) * 100) / 100,
@@ -1783,10 +1851,7 @@ export const firestoreService = {
       };
     });
 
-    const stockKeys = normalizedItems.map(item => `${item.sku}_${item.almacen_id}`);
-    if (new Set(stockKeys).size !== stockKeys.length) {
-      throw new Error("El mismo producto y almacén aparece más de una vez. Unifica su cantidad en una sola partida.");
-    }
+    const requestedItems = normalizedItems;
 
     const totalUnidadesVenta = normalizedItems.reduce((sum, item) => sum + item.cantidad, 0);
     const minimoPiezas = Math.max(1, Math.floor(Number(venta.minimo_piezas) || 1));
@@ -1834,43 +1899,30 @@ export const firestoreService = {
     const now = new Date();
     const todayStr = getLocalDateString(now);
     const periodoKey = getPeriodoKey(now);
-    const dropId = (venta.drop_id || "").trim();
+    const dropIds = [...new Set(requestedItems.map(item => item.drop_id).filter(Boolean))];
+    const dropId = dropIds.length === 1 ? dropIds[0] : "";
 
     if (isConfigured && realDb) {
-      if (dropId) {
-        const purchaseSnapshot = await getDocs(query(collection(realDb, "compras"), where("drop_id", "==", dropId)));
-        const allowedSkus = new Set<string>();
-        purchaseSnapshot.docs.forEach(item => {
-          const data = item.data();
-          if (data.en_papelera === true || data.estado === "anulada") return;
-          (Array.isArray(data.items) ? data.items : []).forEach((purchaseItem: any) => {
-            const sku = String(purchaseItem.sku || "").trim().toUpperCase();
-            if (sku) allowedSkus.add(sku);
-          });
-        });
-        const missingSkus = getMissingDropSkus(normalizedItems.map(item => item.sku), allowedSkus);
-        if (missingSkus.length) {
-          throw new Error(`No puedes registrar esta venta en el drop seleccionado: ${[...new Set(missingSkus)].join(", ")} no pertenece a sus compras activas.`);
-        }
-      }
       const counterRef = doc(realDb, "contadores", "salida");
       const ventaRef = doc(collection(realDb, "ventas"));
       const ventaId = ventaRef.id;
-      const movementRefs = normalizedItems.map(() => doc(collection(realDb, "movimientos")));
-      const stockRefs = afectaStock ? normalizedItems.map((item) => {
-        const key = `${item.sku}_${item.almacen_id}`;
-        return { key, ref: doc(realDb!, "stock", key) };
-      }) : [];
-      const summaryRefs = normalizedItems.map((item) => {
-        const key = `${todayStr}_${item.sku}_${item.almacen_id}`;
-        return { key, ref: doc(realDb!, "resumen_ventas", key) };
-      });
       const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
-      const dropRef = dropId ? doc(realDb, "drops", dropId) : null;
       let generatedFolio = "";
       let dropNombre = "";
 
-      await runTransaction(realDb, async (transaction) => {
+      await runInventoryTransaction(realDb, async (transaction) => {
+        const names = afectaStock ? await validateDropDemand(requestedItems, transaction) : new Map<string, string>();
+        const physicalStock = afectaStock ? await readStockForSale(requestedItems.map(item => item.sku), transaction) : [];
+        normalizedItems = (afectaStock ? asignarExistencias(requestedItems, physicalStock) : requestedItems).map(item => ({
+          ...item, drop_nombre: names.get(item.drop_id) || "",
+          total_venta: Math.round(item.precio_unitario_venta * item.cantidad * 100) / 100,
+          costo_total: Math.round(item.costo_unitario_venta * item.cantidad * 100) / 100
+        }));
+        dropNombre = names.get(dropId) || "";
+        const movementRefs = normalizedItems.map(() => doc(collection(realDb, "movimientos")));
+        const groups = agruparCantidades(normalizedItems, item => item.sku + "_" + item.almacen_id, item => item.cantidad);
+        const stockRefs = afectaStock ? groups.map(group => ({ ...group, ref: doc(realDb, "stock", group.key) })) : [];
+        const summaryRefs = groups.map(group => ({ ...group, key: todayStr + "_" + group.key, ref: doc(realDb, "resumen_ventas", todayStr + "_" + group.key) }));
         const counterSnap = await transaction.get(counterRef);
         const nextNumber = counterSnap.exists() && typeof counterSnap.data()?.ultimo_consecutivo === "number"
           ? counterSnap.data()!.ultimo_consecutivo + 1
@@ -1888,64 +1940,21 @@ export const firestoreService = {
         }
 
         const periodSnap = periodRef ? await transaction.get(periodRef) : null;
-        const dropSnap = dropRef ? await transaction.get(dropRef) : null;
-        if (dropRef) {
-          if (!dropSnap?.exists() || dropSnap.data()?.en_papelera === true) {
-            throw new Error("El drop seleccionado ya no está disponible.");
-          }
-          if (dropSnap.data()?.estado !== "en_venta") {
-            throw new Error("Solo puedes registrar ventas en un drop con estado En venta.");
-          }
-          dropNombre = String(dropSnap.data()?.nombre || "").trim();
-        }
-
-        if (afectaStock) normalizedItems.forEach((item, index) => {
-          const currentQty = stockSnaps[index].exists()
-            ? Number(stockSnaps[index].data()?.cantidad) || 0
-            : 0;
-          if (currentQty < item.cantidad) {
-            throw new Error(
-              `Stock insuficiente para ${item.sku}. Disponible: ${currentQty} uds, solicitado: ${item.cantidad} uds.`
-            );
-          }
-        });
-
         const operationTimestamp = Timestamp.now();
 
+        stockRefs.forEach((entry, index) => transaction.set(entry.ref, {
+          id: entry.key, sku: entry.item.sku, almacen_id: entry.item.almacen_id,
+          cantidad: (Number(stockSnaps[index].data()?.cantidad) || 0) - entry.cantidad, actualizado: operationTimestamp
+        }, { merge: true }));
+        summaryRefs.forEach((entry, index) => transaction.set(entry.ref, {
+          id: entry.key, fecha_str: todayStr, fecha: operationTimestamp,
+          sku: entry.item.sku, almacen_id: entry.item.almacen_id,
+          cantidad: (Number(summarySnaps[index].data()?.cantidad) || 0) + entry.cantidad,
+          total_transacciones: (Number(summarySnaps[index].data()?.total_transacciones) || 0) + entry.partidas,
+          actualizado: operationTimestamp
+        }, { merge: true }));
         normalizedItems.forEach((item, index) => {
-          const currentQty = afectaStock && stockSnaps[index]?.exists()
-            ? Number(stockSnaps[index].data()?.cantidad) || 0
-            : 0;
-          const previousSummaryQty = summarySnaps[index]?.exists()
-            ? Number(summarySnaps[index].data()?.cantidad) || 0
-            : 0;
-          const previousSummaryTransactions = summarySnaps[index]?.exists()
-            ? Number(summarySnaps[index].data()?.total_transacciones) || 0
-            : 0;
           const isPrimaryItem = index === 0;
-
-          if (afectaStock) {
-            transaction.set(stockRefs[index].ref, {
-              id: stockRefs[index].key,
-              sku: item.sku,
-              almacen_id: item.almacen_id,
-              cantidad: currentQty - item.cantidad,
-              actualizado: operationTimestamp
-            }, { merge: true });
-
-          }
-
-          transaction.set(summaryRefs[index].ref, {
-            id: summaryRefs[index].key,
-            fecha_str: todayStr,
-            fecha: operationTimestamp,
-            sku: item.sku,
-            almacen_id: item.almacen_id,
-            cantidad: previousSummaryQty + item.cantidad,
-            total_transacciones: previousSummaryTransactions + 1,
-            actualizado: operationTimestamp
-          }, { merge: true });
-
           transaction.set(movementRefs[index], {
             folio: generatedFolio,
             venta_id: ventaId,
@@ -1972,7 +1981,7 @@ export const firestoreService = {
             usuario: usuarioEmail,
             fecha: operationTimestamp,
             estado: "activo",
-            ...(dropId ? { drop_id: dropId, drop_nombre: dropNombre } : {}),
+            ...(item.drop_id ? { drop_id: item.drop_id, drop_nombre: item.drop_nombre } : {}),
             cliente_nombre: venta.cliente_nombre,
             precio_unitario_venta: item.precio_unitario_venta,
             costo_unitario_venta: item.costo_unitario_venta,
@@ -2009,6 +2018,7 @@ export const firestoreService = {
           items: normalizedItems.map(item => ({
             sku: item.sku,
             almacen_id: item.almacen_id,
+            ...(item.drop_id ? { drop_id: item.drop_id, drop_nombre: item.drop_nombre } : {}),
             cantidad: item.cantidad,
             precio_unitario: item.precio_unitario_venta,
             costo_unitario: item.costo_unitario_venta,
@@ -2029,6 +2039,8 @@ export const firestoreService = {
           ...(venta.cliente_id ? { cliente_id: venta.cliente_id } : {}),
           cliente_nombre: venta.cliente_nombre,
           ...(venta.cliente_tipo ? { cliente_tipo: venta.cliente_tipo } : {}),
+          drop_ids: dropIds,
+          inventario_por_drop: afectaStock,
           ...(dropId ? { drop_id: dropId, drop_nombre: dropNombre } : {}),
           canal_venta: venta.canal_venta,
           canal_venta_nombre: venta.canal_venta_nombre,
@@ -2074,27 +2086,15 @@ export const firestoreService = {
       return { id: ventaId, folio: generatedFolio, movimientosCount: normalizedItems.length };
     }
 
-    let localDropNombre = "";
-    if (dropId) {
-      const localDrop = getLocalStorageItem<Drop[]>("drops", []).find(item => item.id === dropId && item.en_papelera !== true);
-      if (!localDrop) throw new Error("El drop seleccionado ya no está disponible.");
-      if (localDrop.estado !== "en_venta") throw new Error("Solo puedes registrar ventas en un drop con estado En venta.");
-      const allowedSkus = new Set(getLocalStorageItem<Compra[]>("compras", [])
-        .filter(item => item.drop_id === dropId && item.en_papelera !== true && item.estado !== "anulada")
-        .flatMap(item => item.items.map(purchaseItem => purchaseItem.sku.trim().toUpperCase())));
-      const missingSkus = getMissingDropSkus(normalizedItems.map(item => item.sku), allowedSkus);
-      if (missingSkus.length) throw new Error(`No puedes registrar esta venta en el drop seleccionado: ${[...new Set(missingSkus)].join(", ")} no pertenece a sus compras activas.`);
-      localDropNombre = localDrop.nombre;
-    }
-
+    const names = afectaStock ? await validateDropDemand(requestedItems) : new Map<string, string>();
+    const localDropNombre = names.get(dropId) || "";
     const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
-    if (afectaStock) normalizedItems.forEach((item) => {
-      const key = `${item.sku}_${item.almacen_id}`;
-      const currentQty = stockMap[key]?.cantidad || 0;
-      if (currentQty < item.cantidad) {
-        throw new Error(`Stock insuficiente para ${item.sku}. Disponible: ${currentQty} uds, solicitado: ${item.cantidad} uds.`);
-      }
-    });
+    const activeWarehouses = new Set(getLocalStorageItem<Almacen[]>("almacenes", []).filter(item => !item.en_papelera).map(item => item.id));
+    normalizedItems = (afectaStock ? asignarExistencias(requestedItems, Object.values(stockMap).filter(item => activeWarehouses.has(item.almacen_id))) : requestedItems).map(item => ({
+      ...item, drop_nombre: names.get(item.drop_id) || "",
+      total_venta: Math.round(item.precio_unitario_venta * item.cantidad * 100) / 100,
+      costo_total: Math.round(item.costo_unitario_venta * item.cantidad * 100) / 100
+    }));
 
     const generatedFolio = firestoreService.getNextLocalFolio("salida");
     const ventaId = `venta_${Math.random().toString(36).slice(2, 11)}`;
@@ -2157,7 +2157,7 @@ export const firestoreService = {
         usuario: usuarioEmail,
         fecha: now,
         estado: "activo",
-        ...(dropId ? { drop_id: dropId, drop_nombre: localDropNombre } : {}),
+        ...(item.drop_id ? { drop_id: item.drop_id, drop_nombre: item.drop_nombre } : {}),
         cliente_nombre: venta.cliente_nombre,
         precio_unitario_venta: item.precio_unitario_venta,
         costo_unitario_venta: item.costo_unitario_venta,
@@ -2187,7 +2187,7 @@ export const firestoreService = {
       folio: generatedFolio,
       fecha: now,
       fecha_str: todayStr,
-      items: normalizedItems.map(item => ({ sku: item.sku, almacen_id: item.almacen_id, cantidad: item.cantidad, precio_unitario: item.precio_unitario_venta, costo_unitario: item.costo_unitario_venta, total: item.total_venta, costo_total: item.costo_total })),
+      items: normalizedItems.map(item => ({ sku: item.sku, almacen_id: item.almacen_id, ...(item.drop_id ? { drop_id: item.drop_id, drop_nombre: item.drop_nombre } : {}), cantidad: item.cantidad, precio_unitario: item.precio_unitario_venta, costo_unitario: item.costo_unitario_venta, total: item.total_venta, costo_total: item.costo_total })),
       total_unidades: totalUnidadesVenta,
       subtotal: ventaSubtotal,
       envio_cobrado_cliente: envioCobrado,
@@ -2202,6 +2202,8 @@ export const firestoreService = {
       cliente_id: venta.cliente_id,
       cliente_nombre: venta.cliente_nombre,
       cliente_tipo: venta.cliente_tipo,
+      drop_ids: dropIds,
+      inventario_por_drop: afectaStock,
       drop_id: dropId || undefined,
       drop_nombre: dropId ? localDropNombre : undefined,
       canal_venta: venta.canal_venta,
@@ -2651,7 +2653,7 @@ export const firestoreService = {
       const saleRef = doc(realDb, "ventas", ventaId);
       const refundRef = doc(collection(realDb, "movimientos"));
       const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
-      await runTransaction(realDb, async transaction => {
+      await runInventoryTransaction(realDb, async transaction => {
         const saleSnap = await transaction.get(saleRef);
         if (!saleSnap.exists()) throw new Error("La venta no existe o es anterior al historial consolidado.");
         const sale = saleSnap.data();
@@ -2661,18 +2663,20 @@ export const firestoreService = {
         const items = Array.isArray(sale.items) ? sale.items : [];
         if (items.length === 0) throw new Error("La venta no contiene partidas válidas.");
 
-        const stockEntries = sale.afecta_stock !== false ? items.map((item: any) => {
+        const stockEntriesRaw = sale.afecta_stock !== false ? items.map((item: any) => {
           const sku = String(item.sku || "").trim().toUpperCase();
           const warehouseId = String(item.almacen_id || "").trim();
           const key = `${sku}_${warehouseId}`;
           return { sku, warehouseId, key, quantity: Number(item.cantidad) || 0, ref: doc(realDb!, "stock", key) };
         }) : [];
-        const summaryEntries = items.map((item: any) => {
+        const summaryEntriesRaw = items.map((item: any) => {
           const sku = String(item.sku || "").trim().toUpperCase();
           const warehouseId = String(item.almacen_id || "").trim();
           const key = `${String(sale.fecha_str || getLocalDateString(sale.fecha))}_${sku}_${warehouseId}`;
           return { quantity: Number(item.cantidad) || 0, ref: doc(realDb!, "resumen_ventas", key) };
         });
+        const stockEntries = agruparCantidades(stockEntriesRaw, item => item.key, item => item.quantity).map(group => ({ ...group.item, quantity: group.cantidad }));
+        const summaryEntries = agruparCantidades(summaryEntriesRaw, item => item.ref.path, item => item.quantity).map(group => ({ ...group.item, quantity: group.cantidad, partidas: group.partidas }));
         const stockSnaps: any[] = [];
         for (const entry of stockEntries) stockSnaps.push(await transaction.get(entry.ref));
         const summarySnaps: any[] = [];
@@ -2688,7 +2692,7 @@ export const firestoreService = {
           if (!summarySnaps[index].exists()) return;
           const current = Number(summarySnaps[index].data()?.cantidad) || 0;
           const transactions = Number(summarySnaps[index].data()?.total_transacciones) || 0;
-          transaction.set(entry.ref, { cantidad: Math.max(0, current - entry.quantity), total_transacciones: Math.max(0, transactions - 1), actualizado: timestamp }, { merge: true });
+          transaction.set(entry.ref, { cantidad: Math.max(0, current - entry.quantity), total_transacciones: Math.max(0, transactions - entry.partidas), actualizado: timestamp }, { merge: true });
         });
 
         const refundAmount = Math.max(0, Number(sale.recibido) || 0);
@@ -2898,7 +2902,8 @@ export const firestoreService = {
 
       let generatedFolio = "";
 
-      await runTransaction(realDb, async (transaction) => {
+      await runInventoryTransaction(realDb, async (transaction) => {
+        if (mov.tipo === "salida") await validateDropDemand([{ sku: cleanSku, cantidad: moveQty, drop_id: mov.drop_id }], transaction);
         // 1. Lectura del contador de folios
         const counterSnap = await transaction.get(counterDocRef);
         let nextNumber = 1;
@@ -3003,6 +3008,7 @@ export const firestoreService = {
           usuario: usuarioEmail,
           fecha: Timestamp.now(),
           estado: "activo",
+          ...(mov.drop_id ? { drop_id: mov.drop_id, drop_nombre: mov.drop_nombre || "" } : {}),
           ...(mov.compra_id ? { compra_id: mov.compra_id } : {}),
           ...(mov.lote_id ? { lote_id: mov.lote_id } : {}),
           ...(typeof mov.costo_unitario === "number" ? { costo_unitario: mov.costo_unitario } : {}),
@@ -3042,6 +3048,7 @@ export const firestoreService = {
     }
 
     // --- MODO EMULADOR LOCAL (SOLO CUANDO FIREBASE NO ESTÁ CONFIGURADO) ---
+    if (mov.tipo === "salida") await validateDropDemand([{ sku: cleanSku, cantidad: moveQty, drop_id: mov.drop_id }]);
     const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
     const originKey = `${cleanSku}_${originAlmId}`;
     const currentOrigin = stockMap[originKey]?.cantidad || 0;
@@ -3177,7 +3184,7 @@ export const firestoreService = {
       const movementRefs = [...ventaSnapshot.docs, ...relatedSnapshot.docs].map((movementDoc) => movementDoc.ref);
       const masterRef = doc(realDb, "ventas", ventaId);
 
-      await runTransaction(realDb, async (transaction) => {
+      await runInventoryTransaction(realDb, async (transaction) => {
         const movementSnaps: any[] = [];
         for (const movementRef of movementRefs) {
           movementSnaps.push(await transaction.get(movementRef));
@@ -3217,13 +3224,13 @@ export const firestoreService = {
           throw new Error("Esta venta ya recibió dinero o fue entregada. Registra una devolución para reintegrar el inventario y dejar el reembolso en Finanzas.");
         }
         const inventoryMovements = saleItemMovements.filter(({ data }) => data.afecta_stock !== false);
-        const stockEntries = inventoryMovements.map(({ data }) => {
+        const stockEntriesRaw = inventoryMovements.map(({ data }) => {
           const sku = String(data.sku || "").trim().toUpperCase();
           const almacenId = String(data.almacen_id || "").trim();
           const key = `${sku}_${almacenId}`;
           return { sku, almacenId, key, ref: doc(realDb!, "stock", key), cantidad: Number(data.cantidad) || 0 };
         });
-        const summaryEntries = saleItemMovements.map(({ data }) => {
+        const summaryEntriesRaw = saleItemMovements.map(({ data }) => {
           const sku = String(data.sku || "").trim().toUpperCase();
           const almacenId = String(data.almacen_id || "").trim();
           const fechaStr = getLocalDateString(data.fecha);
@@ -3233,6 +3240,8 @@ export const firestoreService = {
         const periodoKey = getPeriodoKey(saleItemMovements[0]?.data.fecha);
         const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
 
+        const stockEntries = agruparCantidades(stockEntriesRaw, item => item.key, item => item.cantidad).map(group => ({ ...group.item, cantidad: group.cantidad }));
+        const summaryEntries = agruparCantidades(summaryEntriesRaw, item => item.key, item => item.cantidad).map(group => ({ ...group.item, cantidad: group.cantidad, partidas: group.partidas }));
         const stockSnaps: any[] = [];
         for (const entry of stockEntries) stockSnaps.push(await transaction.get(entry.ref));
         const summarySnaps: any[] = [];
@@ -3282,7 +3291,7 @@ export const firestoreService = {
           const previousTransactions = Number(summarySnaps[index].data()?.total_transacciones) || 0;
           transaction.set(entry.ref, {
             cantidad: Math.max(0, previousQty - entry.cantidad),
-            total_transacciones: Math.max(0, previousTransactions - 1),
+            total_transacciones: Math.max(0, previousTransactions - entry.partidas),
             actualizado: cancellationTimestamp
           }, { merge: true });
         });
@@ -3407,11 +3416,12 @@ export const firestoreService = {
         throw new Error("El movimiento que intentas anular no existe en el sistema.");
       }
       const initialMovementData = initialMovementSnap.data();
-      if (initialMovementData.venta_id && Number(initialMovementData.venta_total_partidas) > 1) {
-        return firestoreService.anularVentaAgrupada(initialMovementData.venta_id, motivo);
+      if (initialMovementData.compra_id) return inventoryOperations.enviarCompraPapelera(initialMovementData.compra_id);
+      if (initialMovementData.venta_id) {
+        return inventoryOperations.anularVentaAgrupada(initialMovementData.venta_id, motivo);
       }
 
-      await runTransaction(realDb, async (transaction) => {
+      await runInventoryTransaction(realDb, async (transaction) => {
         // 1. Leer el movimiento
         const movSnap = await transaction.get(movRef);
         if (!movSnap.exists()) {
@@ -3569,8 +3579,9 @@ export const firestoreService = {
     if (mov.estado === "anulado") {
       throw new Error("Este movimiento ya ha sido anulado previamente. No se puede anular dos veces.");
     }
-    if (mov.venta_id && Number(mov.venta_total_partidas) > 1) {
-      return firestoreService.anularVentaAgrupada(mov.venta_id, motivo);
+    if (mov.compra_id) return inventoryOperations.enviarCompraPapelera(mov.compra_id);
+    if (mov.venta_id) {
+      return inventoryOperations.anularVentaAgrupada(mov.venta_id, motivo);
     }
 
     const sku = (mov.sku || "").trim().toUpperCase();
@@ -3665,7 +3676,7 @@ export const firestoreService = {
       const initial = await getDoc(doc(realDb, "movimientos", id));
       if (!initial.exists()) throw new Error("El movimiento no existe.");
       const initialData = initial.data();
-      if (initialData.compra_id) return firestoreService.enviarCompraPapelera(initialData.compra_id);
+      if (initialData.compra_id) return inventoryOperations.enviarCompraPapelera(initialData.compra_id);
       const masterSaleSnap = initialData.venta_id ? await getDoc(doc(realDb, "ventas", initialData.venta_id)) : null;
       const isReturnedSale = masterSaleSnap?.exists() && masterSaleSnap.data().estado === "devuelto";
       const snapshots = initialData.venta_id
@@ -3677,7 +3688,7 @@ export const firestoreService = {
       const periodoDescontado = !isReturnedSale && snapshots.length > 0
         && snapshots.every(snapshot => snapshot.data().estado !== "anulado")
         && snapshots.some(snapshot => snapshot.data().tipo === "salida");
-      if (!isReturnedSale && initialData.estado !== "anulado") await firestoreService.anularMovimiento(id, "Movimiento enviado a Papelera");
+      if (!isReturnedSale && initialData.estado !== "anulado") await inventoryOperations.anularMovimiento(id, "Movimiento enviado a Papelera");
       const batch = writeBatch(realDb);
       snapshots.forEach(snapshot => batch.set(snapshot.ref, {
         en_papelera: true,
@@ -3698,7 +3709,7 @@ export const firestoreService = {
     const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
     const selected = movimientos.find(movimiento => movimiento.id === id);
     if (!selected) throw new Error("El movimiento no existe.");
-    if (selected.compra_id) return firestoreService.enviarCompraPapelera(selected.compra_id);
+    if (selected.compra_id) return inventoryOperations.enviarCompraPapelera(selected.compra_id);
     const localMasterSales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
     const localMasterSale = selected.venta_id ? localMasterSales.find(item => item.id === selected.venta_id) : undefined;
     const isReturnedSale = localMasterSale?.estado === "devuelto";
@@ -3707,7 +3718,7 @@ export const firestoreService = {
       previousTargets.map(movimiento => [movimiento.id, movimiento.estado === "anulado" ? "anulado" : "activo"])
     );
     const periodoDescontado = !isReturnedSale && previousTargets.length > 0 && previousTargets.every(movimiento => movimiento.estado !== "anulado") && previousTargets.some(movimiento => movimiento.tipo === "salida");
-    if (!isReturnedSale && selected.estado !== "anulado") await firestoreService.anularMovimiento(id, "Movimiento enviado a Papelera");
+    if (!isReturnedSale && selected.estado !== "anulado") await inventoryOperations.anularMovimiento(id, "Movimiento enviado a Papelera");
     const updated = getLocalStorageItem<Movimiento[]>("movimientos", []);
     const now = new Date();
     updated.forEach((movimiento, index) => {
@@ -3736,11 +3747,11 @@ export const firestoreService = {
     if (isConfigured && realDb) {
       const snapshot = await getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", ventaId), limit(1)));
       if (snapshot.empty) throw new Error("No se encontraron las partidas de la venta.");
-      return firestoreService.enviarMovimientoPapelera(snapshot.docs[0].id);
+      return inventoryOperations.enviarMovimientoPapelera(snapshot.docs[0].id);
     }
     const movement = getLocalStorageItem<Movimiento[]>("movimientos", []).find(item => item.venta_id === ventaId);
     if (!movement?.id) throw new Error("No se encontraron las partidas de la venta.");
-    return firestoreService.enviarMovimientoPapelera(movement.id);
+    return inventoryOperations.enviarMovimientoPapelera(movement.id);
   },
 
   restaurarMovimientoPapelera: async (id: string): Promise<void> => {
@@ -3749,7 +3760,7 @@ export const firestoreService = {
       const initial = await getDoc(doc(realDb, "movimientos", id));
       if (!initial.exists()) throw new Error("El movimiento no existe.");
       const initialData = initial.data();
-      if (initialData.compra_id) return firestoreService.restaurarCompraPapelera(initialData.compra_id);
+      if (initialData.compra_id) return inventoryOperations.restaurarCompraPapelera(initialData.compra_id);
       const refs = initialData.venta_id
         ? (await Promise.all([
             getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", initialData.venta_id))),
@@ -3758,7 +3769,7 @@ export const firestoreService = {
         : [doc(realDb, "movimientos", id)];
       const masterRef = initialData.venta_id ? doc(realDb, "ventas", initialData.venta_id) : null;
 
-      await runTransaction(realDb, async transaction => {
+      await runInventoryTransaction(realDb, async transaction => {
         const movementSnaps: any[] = [];
         for (const ref of refs) movementSnaps.push(await transaction.get(ref));
         const masterSnap = masterRef ? await transaction.get(masterRef) : null;
@@ -3766,6 +3777,7 @@ export const firestoreService = {
         if (activeTargets.length === 0) throw new Error("El movimiento ya está activo.");
         const restorableTargets = activeTargets.filter(snapshot => snapshot.data().estado_antes_papelera !== "anulado");
 
+        await validateDropDemand(restorableTargets.map(snapshot => snapshot.data()).filter(data => data.tipo === "salida" && data.afecta_stock !== false && data.drop_id && !data.subtipo).map(data => ({ sku: data.sku, cantidad: Number(data.cantidad) || 0, drop_id: data.drop_id })), transaction, false);
         const stockDeltas = new Map<string, { sku: string; almacenId: string; delta: number; ref: any }>();
         const addDelta = (sku: string, almacenId: string, delta: number) => {
           const key = `${sku}_${almacenId}`;
@@ -3793,12 +3805,13 @@ export const firestoreService = {
         });
 
         const saleTargets = restorableTargets.filter(snapshot => snapshot.data().tipo === "salida" && !snapshot.data().subtipo && String(snapshot.data().sku || "").toUpperCase() !== "ABONO");
-        const summaryEntries = saleTargets.map(snapshot => {
+        const summaryEntriesRaw = saleTargets.map(snapshot => {
           const data = snapshot.data();
           const sku = String(data.sku || "").trim().toUpperCase();
           const key = `${getLocalDateString(data.fecha)}_${sku}_${data.almacen_id}`;
           return { ref: doc(realDb!, "resumen_ventas", key), sku, almacenId: data.almacen_id, fecha: data.fecha, fechaStr: getLocalDateString(data.fecha), qty: Number(data.cantidad) || 0 };
         });
+        const summaryEntries = agruparCantidades(summaryEntriesRaw, item => item.ref.path, item => item.qty).map(group => ({ ...group.item, qty: group.cantidad, partidas: group.partidas }));
         const summarySnaps: any[] = [];
         for (const entry of summaryEntries) summarySnaps.push(await transaction.get(entry.ref));
         const restorePeriodCount = saleTargets.some(snapshot => snapshot.data().periodo_descontado_papelera === true);
@@ -3814,7 +3827,7 @@ export const firestoreService = {
         summaryEntries.forEach((entry, index) => {
           const currentQty = summarySnaps[index].exists() ? Number(summarySnaps[index].data()?.cantidad) || 0 : 0;
           const currentTransactions = summarySnaps[index].exists() ? Number(summarySnaps[index].data()?.total_transacciones) || 0 : 0;
-          transaction.set(entry.ref, { fecha_str: entry.fechaStr, fecha: entry.fecha, sku: entry.sku, almacen_id: entry.almacenId, cantidad: currentQty + entry.qty, total_transacciones: currentTransactions + 1, actualizado: now }, { merge: true });
+          transaction.set(entry.ref, { fecha_str: entry.fechaStr, fecha: entry.fecha, sku: entry.sku, almacen_id: entry.almacenId, cantidad: currentQty + entry.qty, total_transacciones: currentTransactions + entry.partidas, actualizado: now }, { merge: true });
         });
         activeTargets.forEach(snapshot => {
           const wasCancelled = snapshot.data().estado_antes_papelera === "anulado";
@@ -3837,18 +3850,14 @@ export const firestoreService = {
     const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
     const selected = movimientos.find(movimiento => movimiento.id === id);
     if (!selected) throw new Error("El movimiento no existe.");
-    if (selected.compra_id) return firestoreService.restaurarCompraPapelera(selected.compra_id);
+    if (selected.compra_id) return inventoryOperations.restaurarCompraPapelera(selected.compra_id);
     const targets = movimientos.filter(movimiento => movimiento.id === id || (selected.venta_id && (movimiento.venta_id === selected.venta_id || movimiento.venta_relacionada_id === selected.venta_id)));
     const restorableTargets = targets.filter(movimiento => movimiento.estado_antes_papelera !== "anulado");
+    await validateDropDemand(restorableTargets.filter(item => item.tipo === "salida" && item.afecta_stock !== false && item.drop_id && !item.subtipo).map(item => ({ sku: item.sku, cantidad: item.cantidad, drop_id: item.drop_id })), undefined, false);
     const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
     const summaryMap = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
-    restorableTargets.forEach(movimiento => {
-      const sku = movimiento.sku.trim().toUpperCase();
-      const qty = Number(movimiento.cantidad) || 0;
-      const originKey = `${sku}_${movimiento.almacen_id}`;
-      const originQty = stockMap[originKey]?.cantidad || 0;
-      if (((movimiento.tipo === "salida" && movimiento.afecta_stock !== false) || movimiento.tipo === "transferencia") && originQty < qty) throw new Error(`No hay stock suficiente de ${sku} para restaurar la operación.`);
-    });
+    const demand = agruparCantidades(restorableTargets.filter(item => (item.tipo === "salida" && item.afecta_stock !== false) || item.tipo === "transferencia"), item => item.sku.trim().toUpperCase() + "_" + item.almacen_id, item => item.cantidad);
+    demand.forEach(item => { if ((stockMap[item.key]?.cantidad || 0) < item.cantidad) throw new Error("No hay stock físico suficiente para restaurar la operación."); });
     const now = new Date();
     targets.forEach(target => {
       const index = movimientos.findIndex(movimiento => movimiento.id === target.id);
@@ -4354,7 +4363,7 @@ export const firestoreService = {
       let generatedCompraFolio = "";
       let dropNombre = "";
 
-      await runTransaction(realDb, async (transaction) => {
+      await runInventoryTransaction(realDb, async (transaction) => {
         // 1. Obtener consecutivo de compras
         const compraCounterSnap = await transaction.get(compraCounterRef);
         let nextCompraNumber = 1;
@@ -4619,7 +4628,7 @@ export const firestoreService = {
       const movementsSnap = await getDocs(query(collection(realDb, "movimientos"), where("compra_id", "==", compraId)));
       const movementRefs = movementsSnap.docs.map(item => item.ref);
 
-      await runTransaction(realDb, async transaction => {
+      await runInventoryTransaction(realDb, async transaction => {
         const compraSnap = await transaction.get(compraRef);
         if (!compraSnap.exists()) throw new Error("La compra no existe.");
         if (compraSnap.data().estado === "anulada") throw new Error("La compra ya está anulada.");
@@ -4662,6 +4671,7 @@ export const firestoreService = {
           }
         });
 
+        await validatePurchaseRemoval({ ...compraSnap.data(), id: compraId } as Compra);
         const now = Timestamp.now();
         stockEntries.forEach((entry, index) => {
           const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
@@ -4722,6 +4732,7 @@ export const firestoreService = {
     const compraIndex = compras.findIndex(compra => compra.id === compraId);
     if (compraIndex === -1) throw new Error("La compra no existe.");
     if (compras[compraIndex].estado === "anulada") throw new Error("La compra ya está anulada.");
+    await validatePurchaseRemoval(compras[compraIndex]);
     const linked = movimientos.filter(movimiento => movimiento.compra_id === compraId && movimiento.estado !== "anulado");
     const totals = new Map<string, number>();
     linked.forEach(movimiento => {
@@ -4755,7 +4766,7 @@ export const firestoreService = {
       const compraRef = doc(realDb, "compras", compraId);
       const movementsSnap = await getDocs(query(collection(realDb, "movimientos"), where("compra_id", "==", compraId)));
       const movementRefs = movementsSnap.docs.map(item => item.ref);
-      await runTransaction(realDb, async transaction => {
+      await runInventoryTransaction(realDb, async transaction => {
         const compraSnap = await transaction.get(compraRef);
         if (!compraSnap.exists()) throw new Error("La compra no existe.");
         if (compraSnap.data().en_papelera !== true) throw new Error("La compra ya está activa.");
@@ -7552,3 +7563,37 @@ export const firestoreService = {
     return result;
   }
 };
+
+// Las llamadas anidadas usan las operaciones internas para no adquirir dos veces
+// el mismo bloqueo. En Firebase cada operación conserva su transacción remota.
+const inventoryOperations = {
+  registerVentaTransaction: firestoreService.registerVentaTransaction,
+  registerCompraTransaction: firestoreService.registerCompraTransaction,
+  registerMovimientoTransaction: firestoreService.registerMovimientoTransaction,
+  devolverVentaCompleta: firestoreService.devolverVentaCompleta,
+  anularVentaAgrupada: firestoreService.anularVentaAgrupada,
+  anularMovimiento: firestoreService.anularMovimiento,
+  enviarMovimientoPapelera: firestoreService.enviarMovimientoPapelera,
+  enviarVentaPapelera: firestoreService.enviarVentaPapelera,
+  restaurarMovimientoPapelera: firestoreService.restaurarMovimientoPapelera,
+  enviarCompraPapelera: firestoreService.enviarCompraPapelera,
+  restaurarCompraPapelera: firestoreService.restaurarCompraPapelera,
+  updateCompraDropAssociation: firestoreService.updateCompraDropAssociation,
+  updateVentaDropAssociation: firestoreService.updateVentaDropAssociation
+};
+let localInventoryQueue: Promise<unknown> = Promise.resolve();
+const inventoryMethods: Record<keyof typeof inventoryOperations, (...args: any[]) => Promise<any>> = firestoreService;
+for (const name of Object.keys(inventoryOperations) as (keyof typeof inventoryOperations)[]) {
+  const action = inventoryOperations[name] as (...args: any[]) => Promise<any>;
+  inventoryMethods[name] = (...args: any[]) => {
+    if (isConfigured) {
+      if (!realDb) return Promise.reject(new Error("Firebase no está disponible. No se guardaron cambios en modo local."));
+      return action(...args);
+    }
+    const execute = () => action(...args);
+    const result = localInventoryQueue.then(() => typeof navigator !== "undefined" && navigator.locks
+      ? navigator.locks.request("antiorder-local-inventory", execute) : execute());
+    localInventoryQueue = result.then(() => undefined, () => undefined);
+    return result;
+  };
+}

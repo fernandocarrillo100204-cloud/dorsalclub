@@ -150,7 +150,7 @@ const getTabFromPath = (path: string): NavigationTab => {
     return "drops";
   }
   if (normalized === "/dashboard" || normalized === "/inventario") {
-    return "catalogo";
+    return "drops";
   }
   if (normalized === "" || normalized === "/") {
     return "compras";
@@ -188,7 +188,7 @@ const getPathFromTab = (tab: NavigationTab): string => {
     case "catalogo":
       return "/inventario/productos";
     case "drops":
-      return "/inventario/drops";
+      return "/inventario";
     case "clientes":
       return "/clientes";
     case "finanzas":
@@ -234,6 +234,7 @@ export default function App() {
     const searchParams = new URLSearchParams(window.location.search);
     return searchParams.get("almacenId") || "";
   });
+  const [preselectedDropId, setPreselectedDropId] = useState(() => new URLSearchParams(window.location.search).get("dropId") || "");
   const [preselectedClienteId, setPreselectedClienteId] = useState(() => {
     const searchParams = new URLSearchParams(window.location.search);
     return searchParams.get("clienteId") || "";
@@ -250,7 +251,7 @@ export default function App() {
   const [catalogVersion, setCatalogVersion] = useState(0);
 
   // Navigation helper that updates browser history and URL
-  const navigateTo = async (tab: NavigationTab, params?: { sku?: string; almacenId?: string; clienteId?: string; gastoId?: string }) => {
+  const navigateTo = async (tab: NavigationTab, params?: { sku?: string; almacenId?: string; clienteId?: string; gastoId?: string; dropId?: string }) => {
     let targetPath = "";
     if (tab === "finanzas_gastos_editar") {
       const gId = params?.gastoId || preselectedGastoId;
@@ -260,6 +261,7 @@ export default function App() {
     }
     const sp = new URLSearchParams();
     if (params?.sku) sp.set("sku", params.sku);
+    if (params?.dropId) sp.set("dropId", params.dropId);
     if (params?.almacenId) sp.set("almacenId", params.almacenId);
     if (params?.clienteId) sp.set("clienteId", params.clienteId);
     const qs = sp.toString();
@@ -277,6 +279,7 @@ export default function App() {
       window.history.pushState({ antiorderIndex: historyIndex.current }, "", targetPath);
     }
 
+    setPreselectedDropId(params?.dropId || "");
     setPreselectedSku(params?.sku || "");
     setPreselectedAlmacenId(params?.almacenId || "");
     setPreselectedClienteId(params?.clienteId || "");
@@ -307,6 +310,7 @@ export default function App() {
       const tab = getTabFromPath(window.location.pathname);
       const searchParams = new URLSearchParams(window.location.search);
       setPreselectedSku(searchParams.get("sku") || "");
+      setPreselectedDropId(searchParams.get("dropId") || "");
       setPreselectedAlmacenId(searchParams.get("almacenId") || "");
       setPreselectedClienteId(searchParams.get("clienteId") || "");
       setPreselectedGastoId(getGastoIdFromPath(window.location.pathname));
@@ -424,7 +428,7 @@ export default function App() {
     );
   }
 
-  const needsCatalogs = ["compras", "compras_nueva", "movimientos", "ventas_nueva", "ventas_stock", "ventas_bajo_pedido", "ventas_emprendedor", "ventas_mayoreo", "catalogo", "almacenes", "transferencias_nueva", "historial", "ventas_historial", "analisis_clientes"].includes(activeTab);
+  const needsCatalogs = ["compras", "compras_nueva", "movimientos", "ventas_nueva", "ventas_stock", "ventas_bajo_pedido", "ventas_emprendedor", "ventas_mayoreo", "catalogo", "drops", "almacenes", "transferencias_nueva", "historial", "ventas_historial", "analisis_clientes"].includes(activeTab);
   const catalogsLoading = needsCatalogs && ["almacenes", "productos", "stock"].some(key => !catalogReady[key]);
   const catalogsFailed = needsCatalogs && Object.keys(catalogErrors).length > 0;
   return (
@@ -482,10 +486,13 @@ export default function App() {
                     transition={{ duration: 0.25, ease: "easeInOut" }}
                   >
                     <Ventas
+                      stockList={stockList}
+                      stockReady={Boolean(catalogReady.stock)}
+                      stockError={catalogErrors.stock}
                       almacenes={almacenes}
                       productos={productos}
                       preselectedSku={preselectedSku}
-                      preselectedAlmacenId={preselectedAlmacenId}
+                      preselectedDropId={preselectedDropId}
                       preselectedClienteId={preselectedClienteId}
                       canal={activeTab === "ventas_bajo_pedido" ? "bajo_pedido" : activeTab === "ventas_emprendedor" ? "paquete_emprendedor" : activeTab === "ventas_mayoreo" ? "mayoreo" : "stock"}
                       onCanalChange={(nextCanal) => navigateTo(nextCanal === "bajo_pedido" ? "ventas_bajo_pedido" : nextCanal === "paquete_emprendedor" ? "ventas_emprendedor" : nextCanal === "mayoreo" ? "ventas_mayoreo" : "ventas_stock", { clienteId: preselectedClienteId || undefined })}
@@ -628,7 +635,7 @@ export default function App() {
                     exit={{ opacity: 0, y: -15 }}
                     transition={{ duration: 0.25, ease: "easeInOut" }}
                   >
-                    <Drops />
+                    <Drops stock={stockList.filter(item => almacenes.some(warehouse => warehouse.id === item.almacen_id))} stockReady={Boolean(catalogReady.stock)} stockError={catalogErrors.stock} onSell={(dropId, sku) => navigateTo("ventas_stock", { dropId, sku })} onPurchases={() => navigateTo("compras")} />
                   </motion.div>
                 )}
 

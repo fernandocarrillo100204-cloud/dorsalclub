@@ -133,7 +133,8 @@ export interface Movimiento {
 
 export interface VentaPartidaInput {
   sku: string;
-  almacen_id: string;
+  almacen_id?: string; // Compatibilidad; la venta nueva asigna ubicación internamente.
+  drop_id?: string;
   cantidad: number;
   precio_unitario_venta: number;
   costo_unitario_venta: number;
@@ -142,6 +143,8 @@ export interface VentaPartidaInput {
 export interface VentaItem {
   sku: string;
   almacen_id: string;
+  drop_id?: string;
+  drop_nombre?: string;
   cantidad: number;
   precio_unitario: number;
   costo_unitario: number;
@@ -181,6 +184,8 @@ export interface Venta {
   cliente_tipo?: TipoCliente | string;
   drop_id?: string;
   drop_nombre?: string;
+  drop_ids?: string[];
+  inventario_por_drop?: boolean;
   canal_venta: CanalVentaId;
   canal_venta_nombre: string;
   porcentaje_precio: number;

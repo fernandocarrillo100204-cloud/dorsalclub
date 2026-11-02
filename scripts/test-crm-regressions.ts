@@ -43,12 +43,14 @@ assert.equal(construirPedidos([], [legacy, { ...cancelledPayment, estado: "activ
 put("almacenes", [{ id: "warehouse", nombre: "Prueba", ubicacion: "Prueba" }]);
 put("productos", ["SKU-A", "SKU-B"].map(sku => ({ sku, nombre: sku, categoria: "Prueba", unidad: "pieza", stock_minimo: 0, activo: true })));
 put("stock", {});
+const testDrop = await service.addDrop({ nombre: "Drop de prueba local", estado: "en_venta" });
 const purchase = await service.registerCompraTransaction({
-  proveedor: "Proveedor de prueba", almacen_id: "warehouse",
+  proveedor: "Proveedor de prueba", almacen_id: "warehouse", drop_id: testDrop.id,
   items: [{ sku: "SKU-A", cantidad: 2, costo_unitario: 100, subtotal: 200 }, { sku: "SKU-B", cantidad: 2, costo_unitario: 100, subtotal: 200 }],
   costo_envio: 50, comisiones: 10, descuentos: 20
 });
 const input: VentaRegistroInput = {
+  drop_id: testDrop.id,
   items: ["SKU-A", "SKU-B"].map(sku => ({ sku, almacen_id: "warehouse", cantidad: 1, precio_unitario_venta: 500, costo_unitario_venta: 100 })),
   referencia: "Prueba", cliente_id: "client", cliente_nombre: "Cliente de prueba", canal_venta: "stock",
   canal_venta_nombre: "Venta directa", porcentaje_precio: 0, afecta_stock: true,
@@ -102,5 +104,10 @@ await service.enviarCompraPapelera(purchase.id);
 assert.equal((await service.getComprasPaginated()).items.some(item => item.id === purchase.id), false);
 await service.restaurarCompraPapelera(purchase.id);
 assert.equal((await service.getComprasPaginated()).items.some(item => item.id === purchase.id), true);
+const localCompeting = await Promise.allSettled([
+  service.registerVentaTransaction({ ...input, items: [{ ...input.items[0], cantidad: 2 }] }),
+  service.registerVentaTransaction({ ...input, items: [{ ...input.items[0], cantidad: 2 }] })
+]);
+assert.equal(localCompeting.filter(item => item.status === "fulfilled").length, 1, "Las escrituras locales también deben serializar la validación del drop.");
 clearFinanzasCache();
 console.log("Regresiones CRM: fechas, clientes, pedidos, compras, cobros, devolución y finanzas aprobadas (solo memoria local).");

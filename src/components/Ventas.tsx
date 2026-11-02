@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
 import { Almacen, Producto, StockItem, Cliente, TipoCliente, VentaPartidaInput, UbicacionEntregaCatalogo, RepartidorCatalogo, CanalVentaId, ConfiguracionVentas, OpcionListaConfigurable, Drop, normalizeOptionalMoney } from "../types";
+import { calcularInventarioDrop, disponibilidadFisica, validarDemandaDrops, type InventarioDropFila } from "../lib/inventarioDrops";
 import ClienteModal from "./ClienteModal";
 import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 import { PageHeader } from "./ui/Page";
@@ -23,7 +24,6 @@ import {
   Users,
   Hash,
   ArrowRight,
-  Warehouse,
   Plus,
   AlertTriangle,
   ChevronDown,
@@ -38,7 +38,7 @@ import {
 interface VentaItemDraft {
   id: string;
   sku: string;
-  almacenId: string;
+  dropId: string;
   cantidad: number | string;
   precioUnitario: number | string;
   costoUnitario: number | string;
@@ -46,10 +46,10 @@ interface VentaItemDraft {
 
 let nextVentaItemId = 0;
 
-const createVentaItem = (sku = "", almacenId = "", precioUnitario: number | string = "", costoUnitario: number | string = ""): VentaItemDraft => ({
+const createVentaItem = (sku = "", dropId = "", precioUnitario: number | string = "", costoUnitario: number | string = ""): VentaItemDraft => ({
   id: `venta-item-${++nextVentaItemId}`,
   sku,
-  almacenId,
+  dropId,
   cantidad: 1,
   precioUnitario,
   costoUnitario
@@ -58,8 +58,11 @@ const createVentaItem = (sku = "", almacenId = "", precioUnitario: number | stri
 interface VentasProps {
   almacenes: Almacen[];
   productos: Producto[];
+  stockList: StockItem[];
+  stockReady: boolean;
+  stockError?: string;
   preselectedSku?: string;
-  preselectedAlmacenId?: string;
+  preselectedDropId?: string;
   preselectedClienteId?: string;
   onSuccess?: () => void;
   onCancel?: () => void;
@@ -70,8 +73,11 @@ interface VentasProps {
 export default function Ventas({
   almacenes,
   productos,
+  stockList,
+  stockReady,
+  stockError,
   preselectedSku = "",
-  preselectedAlmacenId = "",
+  preselectedDropId = "",
   preselectedClienteId = "",
   onSuccess,
   onCancel,
@@ -85,7 +91,7 @@ export default function Ventas({
     const initialProduct = productos.find((product) => product.sku === preselectedSku);
     return [createVentaItem(
       preselectedSku,
-      preselectedAlmacenId,
+      preselectedDropId,
       initialProduct?.precio_venta ?? "",
       initialProduct?.precio_costo ?? ""
     )];
@@ -111,7 +117,9 @@ export default function Ventas({
   const [metodosPago, setMetodosPago] = useState<OpcionListaConfigurable[]>([]);
   const [metodoPagoInicial, setMetodoPagoInicial] = useState("");
   const [drops, setDrops] = useState<Drop[]>([]);
-  const [selectedDropId, setSelectedDropId] = useState("");
+  const [dropInventories, setDropInventories] = useState<Record<string, { data?: InventarioDropFila[]; loading?: boolean; error?: string }>>({});
+  const inventoryRequests = useRef(new Map<string, number>());
+  const [dropsLoading, setDropsLoading] = useState(true);
   const [dropsError, setDropsError] = useState<string | null>(null);
 
   // Client Selection State
@@ -122,18 +130,17 @@ export default function Ventas({
   const [isClienteModalOpen, setIsClienteModalOpen] = useState(false);
   const clientDropdownRef = useRef<HTMLDivElement>(null);
 
-  const [stockList, setStockList] = useState<StockItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
-  const markSaved = useUnsavedChanges(!formSuccess && Boolean(items.some(item => item.sku || item.almacenId || item.precioUnitario !== "" || item.cantidad !== 1) || selectedClienteId || comentariosVenta || envioCobradoCliente || otrosCargosCliente || costoEnvioVenta || otrosCostosVenta || conceptoOtrosCargos || conceptoOtrosCostos || customMarkup || ubicacionEntregaId || repartidorId || metodoPagoInicial || selectedDropId), loading);
+  const markSaved = useUnsavedChanges(!formSuccess && Boolean(items.some(item => item.sku || item.dropId || item.precioUnitario !== "" || item.cantidad !== 1) || selectedClienteId || comentariosVenta || envioCobradoCliente || otrosCargosCliente || costoEnvioVenta || otrosCostosVenta || conceptoOtrosCargos || conceptoOtrosCostos || customMarkup || ubicacionEntregaId || repartidorId || metodoPagoInicial), loading);
 
   // Sync initial props
   useEffect(() => {
-    const key = JSON.stringify([preselectedSku, preselectedAlmacenId, preselectedClienteId]);
+    const key = JSON.stringify([preselectedSku, preselectedDropId, preselectedClienteId]);
     if (preselectionRef.current === key) return;
     preselectionRef.current = key;
-    if (preselectedSku || preselectedAlmacenId) {
+    if (preselectedSku || preselectedDropId) {
       setItems((current) => current.map((item, index) => {
         if (index !== 0) return item;
         const nextSku = preselectedSku || item.sku;
@@ -141,14 +148,14 @@ export default function Ventas({
         return {
           ...item,
           sku: nextSku,
-          almacenId: preselectedAlmacenId || item.almacenId,
+          dropId: preselectedDropId || item.dropId,
           precioUnitario: preselectedSku ? calculateChannelPrice(selectedProduct) : item.precioUnitario,
           costoUnitario: preselectedSku ? (selectedProduct?.precio_costo ?? "") : item.costoUnitario
         };
       }));
     }
     if (preselectedClienteId) setSelectedClienteId(preselectedClienteId);
-  }, [preselectedSku, preselectedAlmacenId, preselectedClienteId, productos]);
+  }, [preselectedSku, preselectedDropId, preselectedClienteId, productos]);
 
   // Close client dropdown when clicking outside
   useEffect(() => {
@@ -159,14 +166,6 @@ export default function Ventas({
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  // Subscribe to stock
-  useEffect(() => {
-    const unsub = firestoreService.getStockRealtime((items) => {
-      setStockList(items);
-    });
-    return () => unsub();
   }, []);
 
   // Subscribe to clientes
@@ -203,13 +202,14 @@ export default function Ventas({
   }, []);
 
   const loadDrops = async () => {
+    setDropsLoading(true);
     setDropsError(null);
     try {
       const items = await firestoreService.getDrops();
       setDrops(items.filter(item => item.estado === "en_venta"));
     } catch (error: any) {
       setDropsError(error?.message || "No se pudieron cargar los drops.");
-    }
+    } finally { setDropsLoading(false); }
   };
 
   useEffect(() => { loadDrops(); }, []);
@@ -236,6 +236,22 @@ export default function Ventas({
       return item.sku ? { ...item, precioUnitario: calculateChannelPrice(product), costoUnitario: product?.precio_costo ?? item.costoUnitario } : item;
     }));
   }, [canal, channelConfig, customMarkup, productos]);
+
+  const loadDropInventory = async (id: string, force = false) => {
+    if (!id || (!force && inventoryRequests.current.has(id))) return;
+    const request = (inventoryRequests.current.get(id) || 0) + 1;
+    inventoryRequests.current.set(id, request);
+    setDropInventories(current => ({ ...current, [id]: { loading: true } }));
+    try {
+      const data = calcularInventarioDrop(id, await firestoreService.getDropDetail(id));
+      if (inventoryRequests.current.get(id) === request) setDropInventories(current => ({ ...current, [id]: { data } }));
+    } catch (error: any) {
+      if (inventoryRequests.current.get(id) === request) setDropInventories(current => ({ ...current, [id]: { error: error?.message || "No fue posible consultar la disponibilidad del drop." } }));
+    }
+  };
+  const selectedDropKeys = JSON.stringify([...new Set(items.map(item => item.dropId).filter(Boolean))].sort());
+  useEffect(() => { if (affectsStock) (JSON.parse(selectedDropKeys) as string[]).forEach(id => { void loadDropInventory(id); }); }, [selectedDropKeys, affectsStock]);
+  const physicalStock = stockList.filter(item => almacenes.some(warehouse => warehouse.id === item.almacen_id && !warehouse.en_papelera));
 
   // Selected client details
   const selectedCliente = useMemo(() => {
@@ -287,11 +303,10 @@ export default function Ventas({
   };
 
   const getAvailableStock = (item: VentaItemDraft): number | null => {
-    if (!item.sku || !item.almacenId) return null;
-    const stockItem = stockList.find(
-      (stock) => stock.sku.toLowerCase() === item.sku.toLowerCase() && stock.almacen_id === item.almacenId
-    );
-    return stockItem ? stockItem.cantidad : 0;
+    const inventory = dropInventories[item.dropId];
+    if (!item.sku || !item.dropId || !drops.some(drop => drop.id === item.dropId) || !inventory?.data || !stockReady || stockError) return null;
+    const balance = inventory.data.find(row => row.sku === item.sku)?.saldo || 0;
+    return Math.max(0, Math.min(balance, disponibilidadFisica(item.sku, physicalStock)));
   };
 
   const totalUnidades = items.reduce((sum, item) => sum + (Number(item.cantidad) || 0), 0);
@@ -347,7 +362,9 @@ export default function Ventas({
     }
 
     const normalizedItems: VentaPartidaInput[] = [];
-    const usedStockKeys = new Set<string>();
+    if (affectsStock && (dropsLoading || dropsError || !stockReady || stockError)) {
+      setFormError("No se puede validar el inventario todavía. Reintenta la carga antes de guardar."); return;
+    }
 
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index];
@@ -360,8 +377,8 @@ export default function Ventas({
         setFormError(`Selecciona el producto de la partida ${index + 1}.`);
         return;
       }
-      if (affectsStock && !item.almacenId) {
-        setFormError(`Selecciona el almacén de la partida ${index + 1}.`);
+      if (affectsStock && !item.dropId) {
+        setFormError(`Selecciona el drop de origen de la partida ${index + 1}.`);
         return;
       }
       if (!Number.isInteger(quantity) || quantity <= 0) {
@@ -377,29 +394,30 @@ export default function Ventas({
         return;
       }
 
-      const itemWarehouse = affectsStock ? item.almacenId : "bajo_pedido";
-      const stockKey = `${cleanSku}_${itemWarehouse}`;
-      if (usedStockKeys.has(stockKey)) {
-        setFormError(`El producto ${cleanSku} está repetido para el mismo almacén. Unifica su cantidad en una sola partida.`);
-        return;
-      }
-      usedStockKeys.add(stockKey);
-
       const availableStock = affectsStock ? getAvailableStock(item) : null;
-      if (affectsStock && availableStock !== null && availableStock < quantity) {
+      if (affectsStock && (availableStock === null || availableStock < quantity)) {
         setFormError(
-          `Stock insuficiente para ${cleanSku}. Disponible: ${availableStock} uds, solicitado: ${quantity} uds.`
+          `Stock insuficiente para ${cleanSku}. Disponible: ${availableStock ?? "por consultar"} uds, solicitado: ${quantity} uds.`
         );
         return;
       }
 
       normalizedItems.push({
         sku: cleanSku,
-        almacen_id: itemWarehouse,
+        ...(affectsStock ? { drop_id: item.dropId } : {}),
         cantidad: quantity,
         precio_unitario_venta: unitPrice,
         costo_unitario_venta: unitCost
       });
+    }
+
+    if (affectsStock) {
+      try {
+        validarDemandaDrops(normalizedItems, new Map(Object.keys(dropInventories).map(id => [id, dropInventories[id].data || []])));
+        const quantities = new Map<string, number>();
+        normalizedItems.forEach(item => quantities.set(item.sku, (quantities.get(item.sku) || 0) + item.cantidad));
+        quantities.forEach((qty, sku) => { if (disponibilidadFisica(sku, physicalStock) < qty) throw new Error("La cantidad total de " + sku + " supera el stock físico disponible."); });
+      } catch (error: any) { setFormError(error.message); return; }
     }
 
     // Validar importes y costos opcionales con normalizeOptionalMoney
@@ -470,7 +488,6 @@ export default function Ventas({
         cliente_id: clienteId,
         cliente_nombre: clienteNombre,
         cliente_tipo: clienteTipo,
-        drop_id: selectedDropId || undefined,
         envio_cobrado_cliente: envioCobradoFinal,
         otros_cargos_cliente: otrosCargosFinal,
         concepto_otros_cargos: conceptoOtrosCargosFinal,
@@ -510,7 +527,6 @@ export default function Ventas({
       setUbicacionEntregaId("");
       setRepartidorId("");
       setMetodoPagoInicial("");
-      setSelectedDropId("");
       setIsAjustesOpen(false);
 
       onSuccess?.();
@@ -650,17 +666,37 @@ export default function Ventas({
                       </button>
                     </div>
 
+                    {affectsStock && <div>
+                      <label htmlFor={"drop-" + item.id} className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">Drop de origen *</label>
+                      <div className="flex gap-2">
+                        <select id={"drop-" + item.id} value={item.dropId} onChange={event => updateItem(item.id, { dropId: event.target.value, sku: "", precioUnitario: "", costoUnitario: "" })} disabled={dropsLoading || Boolean(dropsError)} className="w-full min-w-0 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white focus:ring-2 focus:ring-emerald-500">
+                          <option value="">{dropsLoading ? "Cargando drops…" : "Seleccionar drop de origen"}</option>
+                          {item.dropId && !drops.some(drop => drop.id === item.dropId) && <option value={item.dropId} disabled>Drop no disponible para venta</option>}
+                          {drops.map(drop => <option key={drop.id} value={drop.id}>{drop.nombre}</option>)}
+                        </select>
+                        {item.dropId && <button type="button" onClick={() => { void loadDrops(); void loadDropInventory(item.dropId, true); }} disabled={dropInventories[item.dropId]?.loading} className="btn-secondary text-xs" title="Actualizar disponibilidad">Actualizar</button>}
+                      </div>
+                      <div className="text-xs mt-2 text-zinc-500" aria-live="polite">
+                        {dropsError ? <span className="text-rose-500">{dropsError} <button type="button" onClick={loadDrops} className="underline">Reintentar</button></span> : !dropsLoading && !drops.length ? "No hay drops En venta. Crea o activa uno desde Inventario y asocia sus compras." : null}
+                        {item.dropId && dropInventories[item.dropId]?.loading && "Consultando disponibilidad…"}
+                        {dropInventories[item.dropId]?.error && <span className="text-rose-500">{dropInventories[item.dropId].error} <button type="button" onClick={() => loadDropInventory(item.dropId, true)} className="underline">Reintentar</button></span>}
+                        {item.dropId && dropInventories[item.dropId]?.data && !dropInventories[item.dropId].data!.some(row => row.saldo > 0) && "Este drop no tiene piezas disponibles. Revisa sus compras en Inventario."}
+                        {stockError && <span className="text-rose-500">No se pudo validar el stock físico. Reintenta la carga del inventario.</span>}
+                      </div>
+                    </div>}
                     <div>
                       <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
                         Producto / Variante
                       </label>
                       <select
                         value={item.sku}
+                        disabled={affectsStock && (!item.dropId || !dropInventories[item.dropId]?.data)}
+                        aria-label={`Producto de la partida ${index + 1}`}
                         onChange={(event) => handleItemSkuChange(item.id, event.target.value)}
                         className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white font-mono"
                       >
                         <option value="">-- Seleccionar producto por SKU o nombre --</option>
-                        {productos.map((product) => (
+                        {productos.filter(product => !affectsStock || product.sku === item.sku || (dropInventories[item.dropId]?.data?.some(row => row.sku === product.sku && row.saldo > 0) && disponibilidadFisica(product.sku, physicalStock) > 0)).map((product) => (
                           <option key={product.sku} value={product.sku}>
                             [{product.sku}] {product.nombre} {product.talla ? `- Talla: ${product.talla}` : ""}{" "}
                             {product.color ? `(${product.color})` : ""}{hasValidMarkup ? ` - $${calculateChannelPrice(product) || 0}` : ""}
@@ -669,22 +705,8 @@ export default function Ventas({
                       </select>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-                      {affectsStock && <div className="lg:col-span-2">
-                        <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                          Almacén de despacho
-                        </label>
-                        <select
-                          value={item.almacenId}
-                          onChange={(event) => updateItem(item.id, { almacenId: event.target.value })}
-                          className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
-                        >
-                          <option value="">-- Seleccionar almacén --</option>
-                          {almacenes.map((warehouse) => (
-                            <option key={warehouse.id} value={warehouse.id}>{warehouse.nombre}</option>
-                          ))}
-                        </select>
-                      </div>}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+
 
                       <div>
                         <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
@@ -756,7 +778,7 @@ export default function Ventas({
                               ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400"
                               : "bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-400"
                           }`}>
-                            Stock: {availableStock ?? 0} uds
+                            Disponible en drop: {availableStock === null ? "por consultar" : availableStock + " uds"}
                           </span>
                         )}
                         {selectedProduct && Number.isFinite(Number(selectedProduct.precio_costo)) && (
@@ -932,23 +954,6 @@ export default function Ventas({
 
             {/* Datos opcionales de entrega */}
             <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="sm:col-span-2">
-                <label htmlFor="venta-drop" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                  Drop relacionado (Opcional)
-                </label>
-                <select
-                  id="venta-drop"
-                  value={selectedDropId}
-                  onChange={(event) => setSelectedDropId(event.target.value)}
-                  disabled={Boolean(dropsError)}
-                  className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white disabled:opacity-60"
-                >
-                  <option value="">Sin drop</option>
-                  {drops.map(item => <option key={item.id} value={item.id}>{item.nombre}</option>)}
-                </select>
-                {dropsError && <div className="flex items-center gap-2 mt-1 text-[10px] text-rose-500"><span>{dropsError}</span><button type="button" onClick={loadDrops} className="font-bold underline">Reintentar</button></div>}
-                {!dropsError && drops.length === 0 && <p className="text-[10px] text-zinc-400 mt-1">No hay drops en estado En venta. Puedes administrarlos desde Inventario → Drops.</p>}
-              </div>
               <div className="sm:col-span-2">
                 <label htmlFor="metodo-pago-venta" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
                   Método de pago del importe recibido {totalRecibido > 0 ? "*" : "(Opcional)"}

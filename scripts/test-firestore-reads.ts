@@ -42,6 +42,7 @@ export const orderBy = (field, direction) => ({ kind: "order", field, direction 
 export const limit = value => ({ kind: "limit", value });
 export const startAfter = doc => ({ kind: "after", doc });
 export const getDocs = request => globalThis.__crmReadTest.read(request);
+export const getDocsFromServer = getDocs;
 export const Timestamp = { now: () => new Date(), fromDate: date => date };
 export const onSnapshot = (request, update, error) => globalThis.__crmReadTest.listen(request, update, error);
 export const doc = () => ({}), getDoc = () => {}, setDoc = () => {}, addDoc = () => {}, runTransaction = () => {}, writeBatch = () => {}, deleteField = () => {};

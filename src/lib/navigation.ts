@@ -16,8 +16,8 @@ export const navigationGroups = [
     { id: "analisis_clientes" as NavigationTab, label: "Análisis de clientes", icon: UserRoundSearch, keywords: "actividad compras comportamiento" }
   ] },
   { id: "inventario", label: "Inventario", icon: Boxes, items: [
-    { id: "catalogo" as NavigationTab, label: "Productos", icon: Package, keywords: "stock variantes marcas catálogo SKU" },
-    { id: "drops" as NavigationTab, label: "Drops", icon: Layers, keywords: "colecciones lotes pedidos" },
+    { id: "drops" as NavigationTab, label: "Inventario por drops", icon: Layers, keywords: "stock disponibilidad existencias colecciones lotes pedidos" },
+    { id: "catalogo" as NavigationTab, label: "Catálogo de productos", icon: Package, keywords: "variantes marcas catálogo SKU" },
     { id: "transferencias_nueva" as NavigationTab, label: "Transferencias", icon: ArrowLeftRight, keywords: "almacenes mover" },
     { id: "historial" as NavigationTab, label: "Movimientos de inventario", icon: History, keywords: "entradas salidas ajustes historial" }
   ] },

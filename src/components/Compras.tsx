@@ -574,7 +574,7 @@ export default function Compras({
               {/* Drop comercial */}
               <div>
                 <label htmlFor="compra-drop" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                  Drop relacionado (Opcional)
+                  Drop de inventario
                 </label>
                 <select
                   id="compra-drop"
@@ -587,7 +587,8 @@ export default function Compras({
                   {drops.filter(item => item.estado !== "cerrado").map(item => <option key={item.id} value={item.id}>{item.nombre} — {item.estado === "en_venta" ? "En venta" : "Preparación"}</option>)}
                 </select>
                 {dropsError && <p className="text-[10px] text-rose-500 mt-1">{dropsError}</p>}
-                {!dropsError && drops.length === 0 && <p className="text-[10px] text-zinc-400 mt-1">Puedes crear uno desde Inventario → Drops.</p>}
+                {!dropId && <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">Sin drop, estas piezas quedan pendientes de asignar y no se pueden vender. Puedes asignarlas después desde el historial de compras.</p>}
+                {!dropsError && drops.length === 0 && <p className="text-[10px] text-zinc-400 mt-1">Crea uno desde Inventario → Inventario por drops.</p>}
               </div>
 
               {/* Notas */}
@@ -1121,6 +1122,7 @@ export default function Compras({
                           <option value="">Sin drop</option>
                           {drops.map(drop => <option key={drop.id} value={drop.id}>{drop.nombre}</option>)}
                         </select>
+                        {!compra.drop_id && <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">Pendiente de asignar a inventario</p>}
                       </td>
 
                       {/* Referencia */}

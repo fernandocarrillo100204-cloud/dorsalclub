@@ -22,8 +22,11 @@ import {
   X
 } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
-import { Compra, Drop, EstadoDrop, Venta } from "../types";
+import { Compra, Drop, EstadoDrop, Venta, Movimiento, StockItem } from "../types";
 import { useWorkspace } from "../context/WorkspaceContext";
+
+import { calcularInventarioDrop, disponibilidadFisica } from "../lib/inventarioDrops";
+import { searchText } from "../lib/presentation";
 
 type DetailTab = "productos" | "ventas";
 
@@ -33,6 +36,8 @@ interface ProductDropRow {
   compradas: number;
   vendidas: number;
   restantes: number;
+  disponible: number;
+  fisico: number;
   costoTotal: number;
   ventaTotal: number;
   costoPromedio: number;
@@ -69,12 +74,17 @@ const toDate = (value: any): Date => {
   return new Date(value || Date.now());
 };
 
-export default function Drops() {
+export default function Drops({ stock, stockReady, stockError, onSell, onPurchases }: { stock: StockItem[]; stockReady: boolean; stockError?: string; onSell: (dropId: string, sku: string) => void; onPurchases: () => void }) {
   const { confirm } = useWorkspace();
   const [drops, setDrops] = useState<Drop[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [compras, setCompras] = useState<Compra[]>([]);
   const [ventas, setVentas] = useState<Venta[]>([]);
+  const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
+  const [detailVersion, setDetailVersion] = useState(0);
+  const [detailId, setDetailId] = useState("");
+  const [search, setSearch] = useState("");
+  const [availability, setAvailability] = useState("todos");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -101,6 +111,7 @@ export default function Drops() {
     try {
       const items = await firestoreService.getDrops();
       setDrops(items);
+      if (manual) setDetailVersion(value => value + 1);
       setSelectedId(current => current && items.some(item => item.id === current) ? current : items[0]?.id || "");
     } catch (err: any) {
       setError(err?.message || "No se pudieron cargar los drops.");
@@ -120,10 +131,13 @@ export default function Drops() {
       return () => { active = false; };
     }
     setDetailLoading(true);
+    setCompras([]); setVentas([]); setMovimientos([]); setDetailId("");
     setDetailError(null);
     firestoreService.getDropDetail(selectedId)
       .then(result => {
         if (!active) return;
+        setDetailId(selectedId);
+        setMovimientos(result.movimientos);
         setCompras(result.compras);
         setVentas(result.ventas);
       })
@@ -135,75 +149,25 @@ export default function Drops() {
       })
       .finally(() => { if (active) setDetailLoading(false); });
     return () => { active = false; };
-  }, [selectedId]);
+  }, [selectedId, detailVersion]);
 
-  const activePurchases = useMemo(() => compras.filter(item =>
-    (item.estado || "completada") !== "anulada" && item.en_papelera !== true
-  ), [compras]);
-
-  const activeSales = useMemo(() => ventas.filter(item =>
-    item.estado !== "anulado" && item.estado !== "devuelto" && item.en_papelera !== true
-  ), [ventas]);
-
+  const activeSales = useMemo(() => ventas.filter(item => item.estado !== "anulado" && item.estado !== "devuelto" && !item.en_papelera), [ventas]);
   const products = useMemo<ProductDropRow[]>(() => {
-    const map = new Map<string, ProductDropRow>();
-    activePurchases.forEach(compra => {
-      compra.items.forEach(item => {
-        const sku = String(item.sku || "").trim().toUpperCase();
-        if (!sku) return;
-        const current = map.get(sku) || {
-          sku,
-          nombre: item.nombre_producto || sku,
-          compradas: 0,
-          vendidas: 0,
-          restantes: 0,
-          costoTotal: 0,
-          ventaTotal: 0,
-          costoPromedio: 0,
-          ventaPromedio: 0,
-          porcentajeSobreCosto: null
-        };
-        current.nombre = item.nombre_producto || current.nombre;
-        current.compradas += Number(item.cantidad) || 0;
-        current.costoTotal += (Number(item.costo_unitario) || 0) * (Number(item.cantidad) || 0);
-        map.set(sku, current);
-      });
-    });
-    activeSales.forEach(venta => {
-      venta.items.forEach(item => {
-        const sku = String(item.sku || "").trim().toUpperCase();
-        if (!sku) return;
-        const current = map.get(sku) || {
-          sku,
-          nombre: sku,
-          compradas: 0,
-          vendidas: 0,
-          restantes: 0,
-          costoTotal: 0,
-          ventaTotal: 0,
-          costoPromedio: 0,
-          ventaPromedio: 0,
-          porcentajeSobreCosto: null
-        };
-        current.vendidas += Number(item.cantidad) || 0;
-        current.ventaTotal += (Number(item.precio_unitario) || 0) * (Number(item.cantidad) || 0);
-        map.set(sku, current);
-      });
-    });
-    return [...map.values()].map(item => {
+    if (detailId !== selectedId) return [];
+    return calcularInventarioDrop(selectedId, { compras, ventas, movimientos }).map(item => {
       const costoPromedio = item.compradas > 0 ? item.costoTotal / item.compradas : 0;
       const ventaPromedio = item.vendidas > 0 ? item.ventaTotal / item.vendidas : 0;
-      return {
-        ...item,
-        restantes: Math.max(0, item.compradas - item.vendidas),
-        costoPromedio,
-        ventaPromedio,
-        porcentajeSobreCosto: item.vendidas > 0 && costoPromedio > 0
-          ? ((ventaPromedio - costoPromedio) / costoPromedio) * 100
-          : null
+      const fisico = disponibilidadFisica(item.sku, stock);
+      return { ...item, restantes: item.saldo, fisico,
+        disponible: selectedDrop?.estado === "en_venta" ? Math.max(0, Math.min(item.saldo, fisico)) : 0,
+        costoPromedio, ventaPromedio,
+        porcentajeSobreCosto: item.vendidas > 0 && costoPromedio > 0 ? (ventaPromedio - costoPromedio) / costoPromedio * 100 : null
       };
-    }).sort((a, b) => b.vendidas - a.vendidas || a.nombre.localeCompare(b.nombre, "es"));
-  }, [activePurchases, activeSales]);
+    });
+  }, [selectedId, detailId, compras, ventas, movimientos, stock, selectedDrop?.estado]);
+  const visibleProducts = products.filter(item => searchText(item.sku + " " + item.nombre).includes(searchText(search)) &&
+    (availability === "todos" || (availability === "disponibles" && item.disponible > 0) || (availability === "agotados" && item.restantes === 0) || (availability === "revisar" && (item.restantes < 0 || item.fisico < item.restantes))));
+  const detailReady = !detailLoading && !detailError && detailId === selectedId;
 
   const summary = useMemo(() => {
     const compradas = products.reduce((sum, item) => sum + item.compradas, 0);
@@ -214,7 +178,8 @@ export default function Drops() {
     return {
       compradas,
       vendidas,
-      restantes: Math.max(0, compradas - vendidas),
+      restantes: compradas - vendidas,
+      disponibles: products.reduce((sum, item) => sum + item.disponible, 0),
       avance: compradas > 0 ? (vendidas / compradas) * 100 : 0,
       costo,
       ventasTotal,
@@ -305,10 +270,10 @@ export default function Drops() {
         <div>
           <p className="page-eyebrow">Inventario</p>
           <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
-            Drops
+            Inventario por drops
           </h1>
           <p className="page-description">
-            Sigue compras, inventario y ventas por pedido comercial, sin ligarlo a un mes.
+            Consulta las piezas de cada drop, valida su disponibilidad y registra ventas desde aquí.
           </p>
         </div>
         <div className="flex gap-2">
@@ -338,18 +303,23 @@ export default function Drops() {
           const Icon = card.icon;
           return <div key={card.label} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
             <div className="flex items-center justify-between text-zinc-400"><span className="text-[11px] font-bold uppercase tracking-wider">{card.label}</span><Icon className="w-4 h-4" /></div>
-            <div className="text-2xl font-bold text-zinc-900 dark:text-white mt-2">{loading ? "—" : card.value}</div>
+            <div className="text-2xl font-bold text-zinc-900 dark:text-white mt-2">{loading || error ? "—" : card.value}</div>
           </div>;
         })}
       </section>
 
+      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-3 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between text-xs text-zinc-500">
+        <span>La disponibilidad parte de compras reales menos salidas, y se contrasta con las existencias físicas. Los pedidos sin stock no descuentan piezas.</span>
+        <button type="button" onClick={onPurchases} className="btn-secondary shrink-0">Asignar compras a un drop</button>
+      </div>
+      {stockError && <p role="alert" className="text-sm text-rose-500">No se pudo comprobar el stock físico. La venta permanecerá deshabilitada hasta recuperar la conexión.</p>}
       {loading ? (
         <div className="min-h-72 flex items-center justify-center text-zinc-400"><Loader2 className="w-6 h-6 animate-spin mr-2" /> Cargando drops…</div>
-      ) : drops.length === 0 ? (
+      ) : error && drops.length === 0 ? null : drops.length === 0 ? (
         <div className="min-h-72 rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-700 flex flex-col items-center justify-center text-center p-8">
           <Layers3 className="w-10 h-10 text-zinc-300 dark:text-zinc-600 mb-3" />
           <h2 className="font-bold text-zinc-900 dark:text-white">Aún no hay drops</h2>
-          <p className="text-xs text-zinc-500 mt-1 max-w-md">Crea el primero y después relaciónalo desde una compra o una venta. No necesita fechas de inicio o fin.</p>
+          <p className="text-xs text-zinc-500 mt-1 max-w-md">Crea un drop, asocia sus compras y cámbialo a En venta cuando esté listo. Los drops no dependen de un mes.</p>
           <button type="button" onClick={() => setIsCreateOpen(true)} className="mt-4 px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold">Crear primer drop</button>
         </div>
       ) : (
@@ -395,7 +365,7 @@ export default function Drops() {
                 {[
                   { label: "Compradas", value: `${summary.compradas} uds`, icon: Boxes },
                   { label: "Vendidas", value: `${summary.vendidas} uds`, icon: ShoppingCart },
-                  { label: "Restantes", value: `${summary.restantes} uds`, icon: PackageCheck },
+                  { label: "Disponibles", value: stockReady && !stockError ? `${summary.disponibles} uds` : "Sin validar", icon: PackageCheck },
                   { label: "Avance", value: `${summary.avance.toFixed(1)}%`, icon: TrendingUp },
                   { label: "Compra mercancía", value: money(summary.costo), icon: CircleDollarSign },
                   { label: "Venta mercancía", value: money(summary.ventasTotal), icon: CircleDollarSign },
@@ -405,7 +375,7 @@ export default function Drops() {
                   return <div key={card.label} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
                     <Icon className="w-4 h-4 text-emerald-500" />
                     <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mt-3">{card.label}</p>
-                    <p className="text-lg font-bold text-zinc-900 dark:text-white mt-1">{detailLoading ? "—" : card.value}</p>
+                    <p className="text-lg font-bold text-zinc-900 dark:text-white mt-1">{!detailReady ? "—" : card.value}</p>
                   </div>;
                 })}
               </section>
@@ -416,31 +386,34 @@ export default function Drops() {
                   <button type="button" onClick={() => setActiveTab("ventas")} className={`px-4 py-2.5 text-xs font-bold border-b-2 ${activeTab === "ventas" ? "border-emerald-500 text-emerald-600 dark:text-emerald-400" : "border-transparent text-zinc-500"}`}>Ventas relacionadas ({activeSales.length})</button>
                 </div>
 
-                {detailLoading ? (
+                {detailError ? <div className="p-8 text-center"><p className="text-sm text-rose-500">No se pudo validar este drop.</p><button type="button" onClick={() => setDetailVersion(value => value + 1)} className="btn-secondary mt-3">Reintentar</button></div> : !detailReady ? (
                   <div className="h-56 flex items-center justify-center text-zinc-400 text-xs"><Loader2 className="w-5 h-5 animate-spin mr-2" />Cargando registros reales…</div>
                 ) : activeTab === "productos" ? (
                   products.length === 0 ? <div className="p-10 text-center text-xs text-zinc-500">Este drop todavía no tiene compras ni ventas relacionadas.</div> :
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
+                  <div>
+                    <div className="flex flex-col sm:flex-row gap-2 p-3"><input aria-label="Buscar producto en el drop" value={search} onChange={event => setSearch(event.target.value)} placeholder="Buscar por producto o SKU" className="min-w-0 flex-1 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" /><select aria-label="Filtrar disponibilidad" value={availability} onChange={event => setAvailability(event.target.value)} className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs"><option value="todos">Todos los productos</option><option value="disponibles">Disponibles</option><option value="agotados">Agotados</option><option value="revisar">Por revisar</option></select></div>
+                    <div className="overflow-x-auto"><table className="w-full text-left text-xs">
                       <thead className="bg-zinc-50 dark:bg-zinc-800/60 text-[10px] uppercase tracking-wider text-zinc-500">
-                        <tr><th className="px-4 py-3">Producto</th><th className="px-3 py-3 text-center">Compradas</th><th className="px-3 py-3 text-center">Vendidas</th><th className="px-3 py-3 text-center">Restantes</th><th className="px-3 py-3 text-right">Precio compra prom.</th><th className="px-3 py-3 text-right">Precio venta prom.</th><th className="px-4 py-3 text-right">% sobre costo</th></tr>
+                        <tr><th className="px-4 py-3">Producto</th><th className="px-3 py-3 text-center">Compradas</th><th className="px-3 py-3 text-center">Vendidas</th><th className="px-3 py-3 text-center">Saldo del drop</th><th className="px-3 py-3 text-center">Disponibles</th><th className="px-3 py-3 text-right">Precio compra prom.</th><th className="px-3 py-3 text-right">Precio venta prom.</th><th className="px-4 py-3 text-right">% sobre costo</th><th className="px-3 py-3">Acción</th></tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                        {products.map(item => <tr key={item.sku} className="hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30">
+                        {visibleProducts.map(item => <tr key={item.sku} className="hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30">
                           <td className="px-4 py-3"><p className="font-bold text-zinc-900 dark:text-white">{item.nombre}</p><p className="font-mono text-[10px] text-zinc-400 mt-0.5">{item.sku}</p></td>
-                          <td className="px-3 py-3 text-center font-semibold">{item.compradas}</td><td className="px-3 py-3 text-center font-semibold text-emerald-600 dark:text-emerald-400">{item.vendidas}</td><td className="px-3 py-3 text-center font-semibold">{item.restantes}</td>
+                          <td className="px-3 py-3 text-center font-semibold">{item.compradas}</td><td className="px-3 py-3 text-center font-semibold text-emerald-600 dark:text-emerald-400">{item.vendidas}</td><td className="px-3 py-3 text-center font-semibold">{item.restantes}</td><td className="px-3 py-3 text-center"><strong className="text-emerald-600 dark:text-emerald-400">{stockReady && !stockError ? item.disponible : "—"}</strong>{item.restantes < 0 || item.fisico < item.restantes ? <p className="text-[10px] text-amber-600">Revisar existencias</p> : selectedDrop.estado !== "en_venta" ? <p className="text-[10px] text-zinc-500">{STATUS_META[selectedDrop.estado].label}</p> : item.disponible === 0 ? <p className="text-[10px] text-zinc-500">Agotado</p> : null}</td>
                           <td className="px-3 py-3 text-right font-mono">{item.compradas ? money(item.costoPromedio) : "—"}</td><td className="px-3 py-3 text-right font-mono">{item.vendidas ? money(item.ventaPromedio) : "—"}</td>
                           <td className="px-4 py-3 text-right"><span className={`font-bold ${item.porcentajeSobreCosto === null ? "text-zinc-400" : item.porcentajeSobreCosto >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>{item.porcentajeSobreCosto === null ? "—" : `${item.porcentajeSobreCosto.toFixed(1)}%`}</span></td>
+                          <td className="px-3 py-3"><button type="button" onClick={() => onSell(selectedId, item.sku)} disabled={!stockReady || Boolean(stockError) || item.disponible <= 0} className="btn-secondary text-xs" aria-label={`Vender ${item.nombre} del drop ${selectedDrop.nombre}`}>Vender</button></td>
                         </tr>)}
                       </tbody>
-                    </table>
+                    </table></div>
+                    {visibleProducts.length === 0 && <p className="p-8 text-center text-xs text-zinc-500">No hay productos que coincidan con los filtros.</p>}
                   </div>
                 ) : (
                   activeSales.length === 0 ? <div className="p-10 text-center text-xs text-zinc-500">Todavía no hay ventas relacionadas con este drop.</div> :
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
                       <thead className="bg-zinc-50 dark:bg-zinc-800/60 text-[10px] uppercase tracking-wider text-zinc-500"><tr><th className="px-4 py-3">Folio</th><th className="px-3 py-3">Fecha</th><th className="px-3 py-3">Cliente</th><th className="px-3 py-3">Canal</th><th className="px-3 py-3 text-center">Unidades</th><th className="px-4 py-3 text-right">Total mercancía</th></tr></thead>
-                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">{activeSales.sort((a, b) => toDate(b.fecha).getTime() - toDate(a.fecha).getTime()).map(venta => <tr key={venta.id}><td className="px-4 py-3 font-mono font-bold">{venta.folio}</td><td className="px-3 py-3 text-zinc-500">{toDate(venta.fecha).toLocaleDateString("es-MX")}</td><td className="px-3 py-3 font-semibold">{venta.cliente_nombre}</td><td className="px-3 py-3">{venta.canal_venta_nombre}</td><td className="px-3 py-3 text-center font-bold">{venta.total_unidades}</td><td className="px-4 py-3 text-right font-mono font-bold">{money(venta.subtotal)}</td></tr>)}</tbody>
+                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">{[...activeSales].sort((a, b) => toDate(b.fecha).getTime() - toDate(a.fecha).getTime()).map(venta => <tr key={venta.id}><td className="px-4 py-3 font-mono font-bold">{venta.folio}</td><td className="px-3 py-3 text-zinc-500">{toDate(venta.fecha).toLocaleDateString("es-MX")}</td><td className="px-3 py-3 font-semibold">{venta.cliente_nombre}</td><td className="px-3 py-3">{venta.canal_venta_nombre}</td><td className="px-3 py-3 text-center font-bold">{venta.items.filter(item => (item.drop_id || venta.drop_id) === selectedId).reduce((sum, item) => sum + item.cantidad, 0)}</td><td className="px-4 py-3 text-right font-mono font-bold">{money(venta.items.filter(item => (item.drop_id || venta.drop_id) === selectedId).reduce((sum, item) => sum + item.precio_unitario * item.cantidad, 0))}</td></tr>)}</tbody>
                     </table>
                   </div>
                 )}
@@ -458,7 +431,7 @@ export default function Drops() {
           <form onSubmit={handleCreate} className="w-full max-w-lg rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-2xl overflow-hidden">
             <div className="p-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between"><div><h2 id="new-drop-title" className="font-bold text-zinc-900 dark:text-white">Nuevo drop</h2><p className="text-xs text-zinc-500 mt-0.5">No está ligado a un mes ni requiere fecha de cierre.</p></div><button type="button" onClick={() => setIsCreateOpen(false)} aria-label="Cerrar" className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"><X className="w-4 h-4" /></button></div>
             <div className="p-5 space-y-4">
-              <div><label htmlFor="drop-name" className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">Nombre *</label><input id="drop-name" required maxLength={100} value={nombre} onChange={event => setNombre(event.target.value)} placeholder="Ej. Drop 3 — Octubre" className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2.5 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" /></div>
+              <div><label htmlFor="drop-name" className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">Nombre *</label><input id="drop-name" required maxLength={100} value={nombre} onChange={event => setNombre(event.target.value)} placeholder="Ej. Drop 3 — Streetwear" className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2.5 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" /></div>
               <div><label htmlFor="drop-description" className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">Descripción (Opcional)</label><textarea id="drop-description" maxLength={500} rows={3} value={descripcion} onChange={event => setDescripcion(event.target.value)} placeholder="Notas internas sobre este pedido o lanzamiento" className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2.5 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none" /></div>
               <p className="text-[11px] text-zinc-500">Se creará en estado <strong>Preparación</strong>. Cuando estés listo para registrar ventas, cámbialo a <strong>En venta</strong>.</p>
             </div>
