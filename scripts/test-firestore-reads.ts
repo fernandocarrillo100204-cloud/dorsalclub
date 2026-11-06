@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 
 const indexConfig = JSON.parse(readFileSync("firestore.indexes.json", "utf8"));
 assert.equal(indexConfig.indexes.every((index: any) => index.fields.length >= 2), true, "Los índices compuestos deben tener al menos dos campos.");
-for (const [collection, field] of [["compras", "almacen_id"], ["movimientos", "estado"]]) {
+for (const [collection, field] of [["movimientos", "estado"]]) {
   assert.equal(indexConfig.indexes.some((index: any) => index.collectionGroup === collection &&
     index.fields.some((entry: any) => entry.fieldPath === field) &&
     index.fields.some((entry: any) => entry.fieldPath === "fecha" && entry.order === "DESCENDING")), true);
@@ -89,7 +89,7 @@ assert.equal(calls.length, 2, "Los eventos legados deben consultarse por lotes y
 const originalConsoleError = console.error;
 try {
   console.error = () => {};
-  for (const [collection, method] of [["almacenes", "getAlmacenesRealtime"], ["productos", "getProductosRealtime"], ["stock", "getStockRealtime"]]) {
+  for (const [collection, method] of [["productos", "getProductosRealtime"]]) {
     const updates: any[] = []; const errors: any[] = [];
     const unsubscribe = service[method]((data: any[]) => updates.push(data), (error: any) => errors.push(error));
     const subscription = subscriptions.get(collection)!;

@@ -9,14 +9,13 @@ import { mensajeError } from "../lib/errores";
 import { useUnsavedChanges, useWorkspace } from "../context/WorkspaceContext";
 import { StatCard, FilterSummary, ErrorState } from "./ui/Page";
 import { downloadCsv, searchText } from "../lib/presentation";
-import { Compra, CompraItem, Almacen, Producto, OpcionListaConfigurable, Drop } from "../types";
+import { Compra, CompraItem, Producto, OpcionListaConfigurable, Drop } from "../types";
 import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 import {
   ShoppingBag,
   Plus,
   Search,
   Calendar,
-  Warehouse,
   Truck,
   DollarSign,
   FileText,
@@ -41,13 +40,11 @@ import {
 } from "lucide-react";
 
 interface ComprasProps {
-  almacenes: Almacen[];
   productos: Producto[];
   isNewView?: boolean; // true if on /compras/nueva
   onNavigate?: (tab: "compras" | "compras_nueva") => void;
   onNavigateToNew?: () => void;
   onNavigateToHistory?: () => void;
-  onManageWarehouses?: () => void;
 }
 
 interface NewItemRow {
@@ -67,13 +64,11 @@ const createEmptyPurchaseItem = (): NewItemRow => ({
 });
 
 export default function Compras({
-  almacenes,
   productos,
   isNewView = false,
   onNavigate,
   onNavigateToNew,
   onNavigateToHistory,
-  onManageWarehouses
 }: ComprasProps) {
   const { confirm, notify } = useWorkspace();
   const navigateToHistory = () => {
@@ -95,14 +90,6 @@ export default function Compras({
     return map;
   }, [productos]);
 
-  const almacenesMap = useMemo(() => {
-    const map = new Map<string, Almacen>();
-    for (let i = 0; i < almacenes.length; i++) {
-      map.set(almacenes[i].id, almacenes[i]);
-    }
-    return map;
-  }, [almacenes]);
-
   // Compras list state with pagination
   const [compras, setCompras] = useState<Compra[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -113,19 +100,19 @@ export default function Compras({
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedWarehouseFilter, setSelectedWarehouseFilter] = useState("all");
+  const [selectedDropFilter, setSelectedDropFilter] = useState("all");
   const [selectedCompraDetail, setSelectedCompraDetail] = useState<Compra | null>(null);
   const [archivingCompraId, setArchivingCompraId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [proveedores, setProveedores] = useState<OpcionListaConfigurable[]>([]);
   const [drops, setDrops] = useState<Drop[]>([]);
   const [dropsError, setDropsError] = useState<string | null>(null);
+  const [dropsLoading, setDropsLoading] = useState(true);
 
   // Form state (/compras/nueva)
   const [proveedor, setProveedor] = useState("");
   const [fecha, setFecha] = useState(() => getLocalDateString(new Date()));
   const requestRef = useRef(0);
-  const [almacenId, setAlmacenId] = useState("");
   const [dropId, setDropId] = useState("");
   const [notas, setNotas] = useState("");
   const [costoEnvio, setCostoEnvio] = useState<number | "">("");
@@ -139,13 +126,12 @@ export default function Compras({
     if (!isNewView) return false;
     const today = getLocalDateString(new Date());
     return Boolean(
-      proveedor || almacenId || dropId || notas.trim() || costoEnvio !== "" || comisiones !== "" || descuentos !== "" || fecha !== today || clasificacionFinanciera !== "operacion" ||
+      proveedor || dropId || notas.trim() || costoEnvio !== "" || comisiones !== "" || descuentos !== "" || fecha !== today || clasificacionFinanciera !== "operacion" ||
       items.some(item => item.sku || item.nombre_producto || item.variante_label || item.costo_unitario !== "" || item.cantidad !== 1)
     );
-  }, [isNewView, proveedor, almacenId, dropId, notas, costoEnvio, comisiones, descuentos, fecha, clasificacionFinanciera, items]);
+  }, [isNewView, proveedor, dropId, notas, costoEnvio, comisiones, descuentos, fecha, clasificacionFinanciera, items]);
 
   const goToHistory = navigateToHistory;
-  const manageWarehouses = () => onManageWarehouses?.();
 
   const loadPurchaseSettings = async () => {
     try {
@@ -158,11 +144,19 @@ export default function Compras({
 
   useEffect(() => { loadPurchaseSettings(); }, []);
 
-  useEffect(() => {
-    firestoreService.getDrops()
-      .then(setDrops)
-      .catch((error: any) => setDropsError(error?.message || "No se pudieron cargar los drops."));
-  }, []);
+  const loadDrops = async () => {
+    setDropsLoading(true);
+    setDropsError(null);
+    try {
+      setDrops(await firestoreService.getDrops());
+    } catch (error) {
+      setDropsError(mensajeError(error, "No se pudieron cargar los drops."));
+    } finally {
+      setDropsLoading(false);
+    }
+  };
+
+  useEffect(() => { loadDrops(); }, []);
 
   const updateCompraDrop = async (compra: Compra, nextDropId: string) => {
     if (!compra.id) return;
@@ -202,7 +196,6 @@ export default function Compras({
     try {
       const res = await firestoreService.getComprasPaginated({
         pageSize: 50,
-        warehouseFilter: selectedWarehouseFilter
       });
       if (request !== requestRef.current) return;
       setCompras(res.items);
@@ -221,7 +214,7 @@ export default function Compras({
   useEffect(() => {
     loadFirstPage(compras.length === 0);
     return () => { requestRef.current += 1; };
-  }, [selectedWarehouseFilter]);
+  }, []);
 
   // Load next 50 compras
   const loadNextPage = async () => {
@@ -234,7 +227,6 @@ export default function Compras({
       const res = await firestoreService.getComprasPaginated({
         pageSize: 50,
         lastDoc: lastDocCursor,
-        warehouseFilter: selectedWarehouseFilter
       });
       if (request !== requestRef.current) return;
       setCompras((prev) => [...prev, ...res.items]);
@@ -252,11 +244,6 @@ export default function Compras({
   // Helper product details using O(1) map
   const getProductBySku = (sku: string) => {
     return productosMap.get(sku.toLowerCase());
-  };
-
-  const getWarehouseName = (id: string) => {
-    const alm = almacenesMap.get(id);
-    return alm ? `${alm.nombre} (${alm.ubicacion})` : id || "Almacén principal";
   };
 
   const handleEnviarCompraPapelera = async (compra: Compra) => {
@@ -360,8 +347,8 @@ export default function Compras({
       return;
     }
 
-    if (!almacenId) {
-      setFormError("Por favor selecciona el almacén de recepción.");
+    if (!dropId) {
+      setFormError("Selecciona el drop que recibirá la mercancía.");
       return;
     }
 
@@ -403,7 +390,6 @@ export default function Compras({
       const res = await firestoreService.registerCompraTransaction({
         proveedor: prov,
         fecha: parsedDate,
-        almacen_id: almacenId,
         items: formattedItems,
         costo_envio: typeof costoEnvio === "number" ? costoEnvio : 0,
         comisiones: typeof comisiones === "number" ? comisiones : 0,
@@ -423,7 +409,6 @@ export default function Compras({
       setCostoEnvio("");
       setComisiones("");
       setDescuentos("");
-      setAlmacenId("");
       setDropId("");
       setClasificacionFinanciera("operacion");
       setItems([createEmptyPurchaseItem()]);
@@ -441,8 +426,8 @@ export default function Compras({
   const filteredCompras = useMemo(() => {
     const term = searchText(searchTerm);
     return compras.filter((c) => {
-      const matchWarehouse = selectedWarehouseFilter === "all" || c.almacen_id === selectedWarehouseFilter;
-      if (!matchWarehouse) return false;
+      const matchDrop = selectedDropFilter === "all" || (selectedDropFilter === "unassigned" ? !c.drop_id : c.drop_id === selectedDropFilter);
+      if (!matchDrop) return false;
 
       if (!term) return true;
       const inFolio = searchText(c.folio || "").includes(term);
@@ -455,7 +440,7 @@ export default function Compras({
 
       return inFolio || inProveedor || inDrop || inRef || inItems;
     });
-  }, [compras, searchTerm, selectedWarehouseFilter]);
+  }, [compras, searchTerm, selectedDropFilter]);
 
   // View: Formulario para registrar una compra (/compras/nueva)
   if (isNewView) {
@@ -478,10 +463,10 @@ export default function Compras({
               Registrar compra
             </h1>
             <p className="page-description">
-              Registra la mercancía recibida, su costo y el almacén de destino.
+              Registra la mercancía recibida, su costo y el drop de destino.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setIsSettingsOpen(true)} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"><Settings className="w-4 h-4" />Proveedores</button>{onManageWarehouses && <button type="button" onClick={manageWarehouses} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"><Warehouse className="w-4 h-4" />Almacenes</button>}<button type="button" onClick={goToHistory} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-xs">Volver al historial</button></div>
+          <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setIsSettingsOpen(true)} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"><Settings className="w-4 h-4" />Proveedores</button><button type="button" onClick={goToHistory} className="self-start sm:self-auto px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-xs">Volver al historial</button></div>
         </div>
 
         {/* Feedback Messages */}
@@ -546,49 +531,24 @@ export default function Compras({
                 </div>
               </div>
 
-              {/* Almacén de recepción */}
-              <div>
-                <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                  Almacén de Recepción <span className="text-rose-500">*</span>
-                </label>
-                <div className="relative flex items-center">
-                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-zinc-400">
-                    <Warehouse className="h-4 w-4" />
-                  </span>
-                  <select
-                    required
-                    value={almacenId}
-                    onChange={(e) => setAlmacenId(e.target.value)}
-                    className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl py-2 pl-9 pr-3 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white transition-all font-medium"
-                  >
-                    <option value="">-- Seleccionar almacén --</option>
-                    {almacenes.map((alm) => (
-                      <option key={alm.id} value={alm.id}>
-                        {alm.nombre} — {alm.ubicacion}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
               {/* Drop comercial */}
               <div>
                 <label htmlFor="compra-drop" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                  Drop de inventario
+                  Drop de inventario <span className="text-rose-500">*</span>
                 </label>
                 <select
                   id="compra-drop"
+                  required
                   value={dropId}
                   onChange={(event) => setDropId(event.target.value)}
-                  disabled={Boolean(dropsError)}
+                  disabled={dropsLoading || Boolean(dropsError)}
                   className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white disabled:opacity-60"
                 >
-                  <option value="">Sin drop</option>
+                  <option value="">{dropsLoading ? "Cargando drops..." : "Seleccionar drop"}</option>
                   {drops.filter(item => item.estado !== "cerrado").map(item => <option key={item.id} value={item.id}>{item.nombre} — {item.estado === "en_venta" ? "En venta" : "Preparación"}</option>)}
                 </select>
-                {dropsError && <p className="text-[10px] text-rose-500 mt-1">{dropsError}</p>}
-                {!dropId && <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">Sin drop, estas piezas quedan pendientes de asignar y no se pueden vender. Puedes asignarlas después desde el historial de compras.</p>}
-                {!dropsError && drops.length === 0 && <p className="text-[10px] text-zinc-400 mt-1">Crea uno desde Inventario → Inventario por drops.</p>}
+                {dropsError && <p role="alert" className="text-xs text-rose-500 mt-1">{dropsError} <button type="button" onClick={loadDrops} className="underline">Reintentar</button></p>}
+                {!dropsLoading && !dropsError && !drops.some(item => item.estado !== "cerrado") && <p className="text-xs text-zinc-500 mt-1">No hay drops abiertos. Crea o abre uno desde Inventario por drops.</p>}
               </div>
 
               {/* Notas */}
@@ -918,7 +878,7 @@ export default function Compras({
           </p>
         </div>
 
-        <div className="page-actions"><button type="button" onClick={() => setIsSettingsOpen(true)} className="btn-secondary" aria-label="Configurar proveedores"><Settings className="w-4 h-4" /><span className="hidden xl:inline">Proveedores</span></button><button type="button" className="btn-secondary" onClick={() => loadFirstPage(true)} disabled={initialLoading || refreshing} aria-label="Actualizar compras"><RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} /></button><button type="button" className="btn-secondary" disabled={initialLoading || !filteredCompras.length} title="Exportar únicamente los resultados cargados y filtrados" onClick={() => downloadCsv("antiorder-compras.csv", ["Folio", "Fecha", "Proveedor", "Almacén", "Unidades", "Total MXN", "Estado"], filteredCompras.map(compra => [compra.folio, getLocalDateString(compra.fecha), compra.proveedor, getWarehouseName(compra.almacen_id), compra.total_unidades, compra.total, compra.estado || "activo"]))}><Download className="h-4 w-4" />Exportar</button><button
+        <div className="page-actions"><button type="button" onClick={() => setIsSettingsOpen(true)} className="btn-secondary" aria-label="Configurar proveedores"><Settings className="w-4 h-4" /><span className="hidden xl:inline">Proveedores</span></button><button type="button" className="btn-secondary" onClick={() => loadFirstPage(true)} disabled={initialLoading || refreshing} aria-label="Actualizar compras"><RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} /></button><button type="button" className="btn-secondary" disabled={initialLoading || !filteredCompras.length} title="Exportar únicamente los resultados cargados y filtrados" onClick={() => downloadCsv("antiorder-compras.csv", ["Folio", "Fecha", "Proveedor", "Drop", "Unidades", "Total MXN", "Estado"], filteredCompras.map(compra => [compra.folio, getLocalDateString(compra.fecha), compra.proveedor, drops.find(drop => drop.id === compra.drop_id)?.nombre || compra.drop_nombre || "Sin drop asignado", compra.total_unidades, compra.total, compra.estado || "activo"]))}><Download className="h-4 w-4" />Exportar</button><button
           onClick={goToNew}
           className="btn-primary"
         >
@@ -974,18 +934,19 @@ export default function Compras({
             />
           </div>
 
-          {/* Warehouse filter */}
+          {/* Drop filter */}
           <div className="relative flex items-center">
             <select
-              aria-label="Filtrar compras por almacén"
-              value={selectedWarehouseFilter}
-              onChange={(e) => setSelectedWarehouseFilter(e.target.value)}
+              aria-label="Filtrar compras por drop"
+              value={selectedDropFilter}
+              onChange={(e) => setSelectedDropFilter(e.target.value)}
               className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white rounded-xl py-2 px-3 text-xs focus:outline-none font-medium"
             >
-              <option value="all">Todos los almacenes de recepción</option>
-              {almacenes.map((alm) => (
-                <option key={alm.id} value={alm.id}>
-                  {alm.nombre} ({alm.ubicacion})
+              <option value="all">Todos los drops</option>
+              <option value="unassigned">Sin drop asignado</option>
+              {drops.map((drop) => (
+                <option key={drop.id} value={drop.id}>
+                  {drop.nombre}
                 </option>
               ))}
             </select>
@@ -993,7 +954,8 @@ export default function Compras({
         </div>
       </div>
 
-      <FilterSummary count={filteredCompras.length} noun="compras" partial={hasMore} active={Boolean(searchTerm || selectedWarehouseFilter !== "all")} onClear={() => { setSearchTerm(""); setSelectedWarehouseFilter("all"); }} />
+      <FilterSummary count={filteredCompras.length} noun="compras" partial={hasMore} active={Boolean(searchTerm || selectedDropFilter !== "all")} onClear={() => { setSearchTerm(""); setSelectedDropFilter("all"); }} />
+      {dropsError && <p role="alert" className="text-sm text-rose-500">{dropsError} <button type="button" onClick={loadDrops} className="underline">Reintentar</button></p>}
       {hasMore && <p className="text-xs text-zinc-500">Los filtros y la exportación incluyen solo los registros cargados. Carga más para consultar compras anteriores.</p>}
       {/* Compras Table */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-xs">
@@ -1007,11 +969,11 @@ export default function Compras({
             <ShoppingBag className="w-10 h-10 mx-auto text-zinc-300 dark:text-zinc-600" />
             <div>
               <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200">
-                {searchTerm || selectedWarehouseFilter !== "all" ? "No hay compras con estos filtros" : "No hay compras registradas aún"}
+                {searchTerm || selectedDropFilter !== "all" ? "No hay compras con estos filtros" : "No hay compras registradas aún"}
               </p>
               <p className="text-xs text-zinc-400 mt-0.5">
-                {searchTerm || selectedWarehouseFilter !== "all"
-                  ? (hasMore ? "Puede haber resultados anteriores. Carga más o limpia los filtros." : "Prueba modificando los filtros de búsqueda o almacén.")
+                {searchTerm || selectedDropFilter !== "all"
+                  ? (hasMore ? "Puede haber resultados anteriores. Carga más o limpia los filtros." : "Prueba modificando los filtros de búsqueda o drop.")
                   : "Registra tu primer lote de mercancía para comenzar el control de costos."}
               </p>
             </div>
@@ -1033,7 +995,6 @@ export default function Compras({
                   <th className="py-3 px-3">Folio Lote</th>
                   <th className="py-3 px-3">Fecha</th>
                   <th className="py-3 px-3">Proveedor</th>
-                  <th className="py-3 px-3">Almacén Destino</th>
                   <th className="py-3 px-3 text-center">Partidas / Uds</th>
                   <th className="py-3 px-3 text-right">Total Compra</th>
                   <th className="py-3 px-3">Drop</th>
@@ -1087,14 +1048,6 @@ export default function Compras({
                         )}
                       </td>
 
-                      {/* Almacén */}
-                      <td className="py-3 px-3 whitespace-nowrap">
-                        <div className="font-medium text-zinc-800 dark:text-zinc-200 text-xs flex items-center gap-1.5">
-                          <Warehouse className="w-3.5 h-3.5 text-zinc-400" />
-                          <span>{getWarehouseName(compra.almacen_id)}</span>
-                        </div>
-                      </td>
-
                       {/* Partidas / Uds */}
                       <td className="py-3 px-3 text-center whitespace-nowrap">
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-bold text-[11px]">
@@ -1118,8 +1071,9 @@ export default function Compras({
 
                       {/* Drop */}
                       <td className="py-3 px-3 min-w-44">
-                        <select value={compra.drop_id || ""} onChange={event => updateCompraDrop(compra, event.target.value)} disabled={updatingCompraDropId === compra.id} aria-label={`Drop de ${compra.folio}`} className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-[11px] disabled:opacity-60">
-                          <option value="">Sin drop</option>
+                        <select value={compra.drop_id || ""} onChange={event => updateCompraDrop(compra, event.target.value)} disabled={updatingCompraDropId === compra.id || dropsLoading || Boolean(dropsError)} aria-label={`Drop de ${compra.folio}`} className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-[11px] disabled:opacity-60">
+                          <option value="">Sin drop asignado</option>
+                          {compra.drop_id && !drops.some(drop => drop.id === compra.drop_id) && <option value={compra.drop_id}>{compra.drop_nombre || "Drop no disponible"}</option>}
                           {drops.map(drop => <option key={drop.id} value={drop.id}>{drop.nombre}</option>)}
                         </select>
                         {!compra.drop_id && <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">Pendiente de asignar a inventario</p>}
@@ -1193,8 +1147,8 @@ export default function Compras({
                   <span className="font-bold text-zinc-900 dark:text-white text-xs">{selectedCompraDetail.proveedor}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Almacén Recepción</span>
-                  <span className="font-semibold text-zinc-800 dark:text-zinc-200 text-xs">{getWarehouseName(selectedCompraDetail.almacen_id)}</span>
+                  <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Drop de inventario</span>
+                  <span className="font-semibold text-zinc-800 dark:text-zinc-200 text-xs">{selectedCompraDetail.drop_nombre || "Sin drop asignado"}</span>
                 </div>
                 <div>
                   <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Fecha Compra</span>

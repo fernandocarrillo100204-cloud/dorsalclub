@@ -36,9 +36,7 @@ import {
   User as FirebaseUser
 } from "firebase/auth";
 import { 
-  Almacen, 
   Producto, 
-  StockItem, 
   Movimiento, 
   VentaRegistroInput,
   Venta,
@@ -56,7 +54,6 @@ import {
   ConfiguracionVentas,
   CanalVentaId,
   OpcionListaConfigurable,
-  ResumenVentaDiaria,
   Compra,
   CompraItem,
   Cliente,
@@ -93,7 +90,7 @@ import {
 } from "./periodosFinancieros";
 import { allocateRecognizedSaleIncome, calculateSaleTotals, requiresSaleRefund } from "./ventasCore";
 import { construirPedidos, fechaRegistro, leerMovimiento, leerVenta } from "./lecturasVentas";
-import { agruparCantidades, asignarExistencias, calcularInventarioDrop, dropsDeVenta, validarDemandaDrops } from "./inventarioDrops";
+import { calcularInventarioDrop, dropsDeVenta, validarDemandaDrops } from "./inventarioDrops";
 import type { DetalleInventarioDrop, InventarioDropFila } from "./inventarioDrops";
 
 // Detect if Firebase config is present in environment variables
@@ -207,19 +204,20 @@ async function validatePurchaseRemoval(compra: Compra) {
   }
 }
 
-async function readStockForSale(skus: string[], transaction: Transaction): Promise<StockItem[]> {
+async function validateSaleProducts(skus: string[], transaction?: Transaction) {
   const unique = [...new Set(skus)];
-  const products = await Promise.all(unique.map(sku => transaction.get(doc(realDb, "productos", sku))));
-  if (products.some(item => !item.exists() || item.data()?.en_papelera)) throw new Error("Uno de los productos ya no está disponible en el catálogo. Revisa la venta.");
-  const chunks: string[][] = [];
-  for (let index = 0; index < unique.length; index += 10) chunks.push(unique.slice(index, index + 10));
-  const results = await Promise.all(chunks.map(chunk => getDocsFromServer(query(collection(realDb, "stock"), where("sku", "in", chunk)))));
-  if (results.some(snapshot => snapshot.metadata?.hasPendingWrites)) throw new Error("Hay existencias pendientes de sincronizar. Vuelve a intentarlo en unos segundos.");
-  const snapshots = await Promise.all(results.flatMap(result => result.docs).map(item => transaction.get(item.ref)));
-  const stock = snapshots.filter(item => item.exists()).map(item => ({ ...item.data(), id: item.id } as StockItem));
-  const warehouses = await Promise.all([...new Set(stock.map(item => item.almacen_id))].map(async id => ({ id, snapshot: await transaction.get(doc(realDb, "almacenes", id)) })));
-  const active = new Set(warehouses.filter(item => item.snapshot.exists() && !item.snapshot.data()?.en_papelera).map(item => item.id));
-  return stock.filter(item => active.has(item.almacen_id));
+  const products = transaction
+    ? await Promise.all(unique.map(async sku => (await transaction.get(doc(realDb, "productos", sku))).data()))
+    : unique.map(sku => getLocalStorageItem<Producto[]>("productos", []).find(item => item.sku === sku));
+  if (products.some(item => !item || item.en_papelera)) throw new Error("Uno de los productos ya no está disponible en el catálogo. Revisa la operación.");
+}
+
+async function validateHistoricalMovementRemoval(mov: Movimiento) {
+  if (mov.tipo === "transferencia") throw new Error("Este movimiento histórico es de solo lectura.");
+  if (!mov.drop_id || mov.tipo !== "entrada") return;
+  const detail = await readDropInventoryData(mov.drop_id);
+  detail.movimientos = detail.movimientos.filter(item => item.id !== mov.id);
+  if (calcularInventarioDrop(mov.drop_id, detail).some(item => item.saldo < 0)) throw new Error("No puedes retirar esta entrada: dejaría el drop sin existencias para sus ventas.");
 }
 
 // --- HELPER PARA FECHAS LOCALES Y-M-D ---
@@ -269,9 +267,9 @@ export const setLocalStorageItem = <T>(key: string, value: T): void => {
 
 // Listeners for local emulator reactivity
 const listeners = {
-  almacenes: [] as ((data: Almacen[]) => void)[],
+
   productos: [] as ((data: Producto[]) => void)[],
-  stock: [] as ((data: StockItem[]) => void)[],
+
   movimientos: [] as ((data: Movimiento[]) => void)[],
   compras: [] as ((data: Compra[]) => void)[],
   categorias: [] as ((data: CategoriaCatalogo[]) => void)[],
@@ -334,14 +332,8 @@ const getLocalClientes = (): Cliente[] => (
 const initializeLocalEmulator = () => {
   if (isConfigured) return;
 
-  if (localStorage.getItem(STORAGE_PREFIX + "almacenes") === null) {
-    setLocalStorageItem("almacenes", []);
-  }
   if (localStorage.getItem(STORAGE_PREFIX + "productos") === null) {
     setLocalStorageItem("productos", []);
-  }
-  if (localStorage.getItem(STORAGE_PREFIX + "stock") === null) {
-    setLocalStorageItem("stock", {});
   }
   if (localStorage.getItem(STORAGE_PREFIX + "movimientos") === null) {
     setLocalStorageItem("movimientos", []);
@@ -349,14 +341,11 @@ const initializeLocalEmulator = () => {
   if (localStorage.getItem(STORAGE_PREFIX + "compras") === null) {
     setLocalStorageItem("compras", []);
   }
-  if (localStorage.getItem(STORAGE_PREFIX + "resumen_ventas") === null) {
-    setLocalStorageItem("resumen_ventas", {});
-  }
   if (localStorage.getItem(STORAGE_PREFIX + "contadores_movimientos") === null) {
     setLocalStorageItem("contadores_movimientos", {
       entrada: 0,
       salida: 0,
-      transferencia: 0,
+
       ajuste: 0,
       compra: 0
     });
@@ -808,7 +797,7 @@ export const firestoreService = {
           getDocs(query(collection(realDb, "ventas"), where("drop_id", "==", cleanId))),
           getDocs(query(collection(realDb, "movimientos"), where("drop_id", "==", cleanId)))
         ]);
-        const linkedRefs = linkedSnapshots.flatMap(linked => linked.docs.map(item => item.ref));
+        const linkedRefs = linkedSnapshots.flatMap(linked => linked.docs.filter(item => item.data().tipo !== "transferencia").map(item => item.ref));
         for (let index = 0; index < linkedRefs.length; index += 400) {
           const batch = writeBatch(realDb);
           linkedRefs.slice(index, index + 400).forEach(ref => batch.set(ref, { drop_nombre: updates.nombre }, { merge: true }));
@@ -826,7 +815,7 @@ export const firestoreService = {
     if (updates.nombre) {
       const compras = getLocalStorageItem<Compra[]>("compras", []).map(item => item.drop_id === cleanId ? { ...item, drop_nombre: updates.nombre } : item);
       const ventas = getLocalStorageItem<Venta[]>("ventas_maestras", []).map(item => item.drop_id === cleanId ? { ...item, drop_nombre: updates.nombre } : item);
-      const movements = getLocalStorageItem<Movimiento[]>("movimientos", []).map(item => item.drop_id === cleanId ? { ...item, drop_nombre: updates.nombre } : item);
+      const movements = getLocalStorageItem<Movimiento[]>("movimientos", []).map(item => item.drop_id === cleanId && item.tipo !== "transferencia" ? { ...item, drop_nombre: updates.nombre } : item);
       setLocalStorageItem("compras", compras);
       setLocalStorageItem("ventas_maestras", ventas);
       setLocalStorageItem("movimientos", movements); notifyListeners("movimientos", movements);
@@ -838,22 +827,21 @@ export const firestoreService = {
     if (!cleanId) throw new Error("Selecciona un drop válido.");
 
     if (isConfigured && realDb) {
-      const [dropSnapshot, comprasSnapshot, ventasSnapshot, multiSnapshot] = await Promise.all([
-        getDoc(doc(realDb, "drops", cleanId)),
-        getDocs(query(collection(realDb, "compras"), where("drop_id", "==", cleanId))),
-        getDocs(query(collection(realDb, "ventas"), where("drop_id", "==", cleanId))),
-        getDocs(query(collection(realDb, "ventas"), where("drop_ids", "array-contains", cleanId)))
-      ]);
-      if (!dropSnapshot.exists() || dropSnapshot.data().en_papelera === true) throw new Error("El drop ya no está disponible.");
-      if (!comprasSnapshot.empty || !ventasSnapshot.empty || !multiSnapshot.empty) {
-        throw new Error("Este drop todavía tiene compras o ventas asociadas. Reasigna esos registros antes de enviarlo a la Papelera.");
-      }
-      await setDoc(doc(realDb, "drops", cleanId), {
-        en_papelera: true,
-        desactivado_at: Timestamp.now(),
-        estado_antes_papelera: dropSnapshot.data().estado || "preparacion",
-        actualizado_at: Timestamp.now()
-      }, { merge: true });
+      await runInventoryTransaction(realDb, async transaction => {
+        const dropRef = doc(realDb, "drops", cleanId);
+        const dropSnapshot = await transaction.get(dropRef);
+        if (!dropSnapshot.exists() || dropSnapshot.data().en_papelera === true) throw new Error("El drop ya no está disponible.");
+        const detail = await readDropInventoryData(cleanId);
+        if (detail.compras.length || detail.ventas.length || detail.movimientos.some(item => item.tipo !== "transferencia")) {
+          throw new Error("Este drop todavía tiene compras, ventas o movimientos asociados. Revisa esos registros antes de enviarlo a la Papelera.");
+        }
+        transaction.update(dropRef, {
+          en_papelera: true,
+          desactivado_at: Timestamp.now(),
+          estado_antes_papelera: dropSnapshot.data().estado || "preparacion",
+          actualizado_at: Timestamp.now()
+        });
+      });
       return;
     }
 
@@ -862,7 +850,8 @@ export const firestoreService = {
     if (index < 0) throw new Error("El drop ya no está disponible.");
     const hasLinkedPurchases = getLocalStorageItem<Compra[]>("compras", []).some(item => item.drop_id === cleanId);
     const hasLinkedSales = getLocalStorageItem<Venta[]>("ventas_maestras", []).some(item => dropsDeVenta(item).includes(cleanId));
-    if (hasLinkedPurchases || hasLinkedSales) throw new Error("Este drop todavía tiene compras o ventas asociadas. Reasigna esos registros antes de enviarlo a la Papelera.");
+    const hasLinkedMovements = getLocalStorageItem<Movimiento[]>("movimientos", []).some(item => item.drop_id === cleanId && item.tipo !== "transferencia");
+    if (hasLinkedPurchases || hasLinkedSales || hasLinkedMovements) throw new Error("Este drop todavía tiene compras, ventas o movimientos asociados. Revisa esos registros antes de enviarlo a la Papelera.");
     const now = new Date();
     drops[index] = { ...drops[index], en_papelera: true, desactivado_at: now, estado_antes_papelera: drops[index].estado, actualizado_at: now };
     setLocalStorageItem("drops", drops);
@@ -976,157 +965,6 @@ export const firestoreService = {
   getDropDetail: async (dropId: string): Promise<DetalleInventarioDrop> => {
     const cleanId = (dropId || "").trim();
     return cleanId ? readDropInventoryData(cleanId) : { compras: [], ventas: [], movimientos: [] };
-  },
-
-  // --- ALMACENES ---
-  getAlmacenes: async (): Promise<Almacen[]> => {
-    if (isConfigured && realDb) {
-      const snap = await getDocs(collection(realDb, "almacenes"));
-      const list: Almacen[] = [];
-      snap.forEach(d => {
-        list.push({ id: d.id, ...d.data() } as Almacen);
-      });
-      return list.filter(almacen => almacen.en_papelera !== true);
-    }
-    return getLocalStorageItem<Almacen[]>("almacenes", []).filter(almacen => almacen.en_papelera !== true);
-  },
-
-  getAlmacenesRealtime: (onUpdate: (almacenes: Almacen[]) => void, onError?: (error: any) => void): (() => void) => {
-    if (isConfigured && realDb) {
-      return onSnapshot(
-        collection(realDb, "almacenes"),
-        (snap) => {
-          const list: Almacen[] = [];
-          snap.forEach(d => {
-            list.push({ id: d.id, ...d.data() } as Almacen);
-          });
-          onUpdate(list.filter(almacen => almacen.en_papelera !== true));
-        },
-        (error) => {
-          console.error("Error en listener de almacenes:", error);
-          if (onError) onError(error);
-        }
-      );
-    }
-
-    const update = () => {
-      const list = getLocalStorageItem<Almacen[]>("almacenes", []);
-      onUpdate(list.filter(almacen => almacen.en_papelera !== true));
-    };
-    update();
-    listeners.almacenes.push(update);
-    return () => {
-      listeners.almacenes = listeners.almacenes.filter(cb => cb !== update);
-    };
-  },
-
-  addAlmacen: async (almacen: Omit<Almacen, "id">): Promise<string> => {
-    const nombre = almacen.nombre.trim();
-    const ubicacion = almacen.ubicacion.trim();
-    if (!nombre || nombre.length > 100) {
-      throw new Error("El nombre del almacén es obligatorio y no puede superar 100 caracteres.");
-    }
-    if (!ubicacion || ubicacion.length > 500) {
-      throw new Error("La ubicación física es obligatoria y no puede superar 500 caracteres.");
-    }
-    const normalizedWarehouse = { ...almacen, nombre, ubicacion };
-    if (isConfigured && realDb) {
-      const docRef = await addDoc(collection(realDb, "almacenes"), normalizedWarehouse);
-      return docRef.id;
-    }
-    const list = getLocalStorageItem<Almacen[]>("almacenes", []);
-    const newId = "alm_" + Math.random().toString(36).substr(2, 9);
-    const newItem: Almacen = { id: newId, ...normalizedWarehouse };
-    list.push(newItem);
-    setLocalStorageItem("almacenes", list);
-    notifyListeners("almacenes", list);
-    return newId;
-  },
-
-  updateAlmacen: async (id: string, data: Partial<Omit<Almacen, "id">>): Promise<void> => {
-    const normalizedData = { ...data };
-    if (typeof data.nombre === "string") {
-      normalizedData.nombre = data.nombre.trim();
-      if (!normalizedData.nombre || normalizedData.nombre.length > 100) {
-        throw new Error("El nombre del almacén es obligatorio y no puede superar 100 caracteres.");
-      }
-    }
-    if (typeof data.ubicacion === "string") {
-      normalizedData.ubicacion = data.ubicacion.trim();
-      if (!normalizedData.ubicacion || normalizedData.ubicacion.length > 500) {
-        throw new Error("La ubicación física es obligatoria y no puede superar 500 caracteres.");
-      }
-    }
-    if (isConfigured && realDb) {
-      const docRef = doc(realDb, "almacenes", id);
-      await setDoc(docRef, normalizedData, { merge: true });
-      return;
-    }
-    const list = getLocalStorageItem<Almacen[]>("almacenes", []);
-    const index = list.findIndex(a => a.id === id);
-    if (index !== -1) {
-      list[index] = { ...list[index], ...normalizedData };
-      setLocalStorageItem("almacenes", list);
-      notifyListeners("almacenes", list);
-    }
-  },
-
-  deleteAlmacen: async (id: string): Promise<void> => {
-    if (isConfigured && realDb) {
-      const warehouseSnap = await getDoc(doc(realDb, "almacenes", id));
-      const warehouseName = String(warehouseSnap.data()?.nombre || "").trim();
-      const warehouseAliases = [...new Set([id, warehouseName].filter(Boolean))];
-      const stockSnaps = await Promise.all(warehouseAliases.map(alias => getDocs(query(
-        collection(realDb, "stock"),
-        where("almacen_id", "==", alias)
-      ))));
-      const stockDocs = new Map<string, any>();
-      stockSnaps.forEach(snapshot => snapshot.docs.forEach(stockDoc => stockDocs.set(stockDoc.id, stockDoc)));
-      const totalStock = [...stockDocs.values()].reduce(
-        (total, stockDoc) => total + Math.max(0, Number(stockDoc.data()?.cantidad) || 0),
-        0
-      );
-      if (totalStock > 0) {
-        throw new Error(
-          `No se puede enviar este almacén a la papelera porque todavía contiene ${totalStock} unidades. Transfiere o corrige sus existencias primero.`
-        );
-      }
-      await setDoc(doc(realDb, "almacenes", id), {
-        activo: false,
-        en_papelera: true,
-        desactivado_at: Timestamp.now()
-      }, { merge: true });
-      return;
-    }
-    const list = getLocalStorageItem<Almacen[]>("almacenes", []);
-    const warehouseName = list.find(warehouse => warehouse.id === id)?.nombre?.trim() || "";
-    const warehouseAliases = new Set([id, warehouseName].filter(Boolean));
-    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
-    const totalStock = Object.values(stockMap).reduce(
-      (total, item) => warehouseAliases.has(item.almacen_id)
-        ? total + Math.max(0, Number(item.cantidad) || 0)
-        : total,
-      0
-    );
-    if (totalStock > 0) {
-      throw new Error(
-        `No se puede enviar este almacén a la papelera porque todavía contiene ${totalStock} unidades. Transfiere o corrige sus existencias primero.`
-      );
-    }
-    const index = list.findIndex(a => a.id === id);
-    if (index !== -1) list[index] = { ...list[index], activo: false, en_papelera: true, desactivado_at: new Date() };
-    setLocalStorageItem("almacenes", list);
-    notifyListeners("almacenes", list);
-  },
-
-  normalizeWarehouseId: (rawId: string, almacenesList: Almacen[] = []): string => {
-    if (!rawId) return "";
-    const clean = rawId.trim();
-    const exact = almacenesList.find(a => a.id === clean);
-    if (exact) return exact.id;
-    const matchName = almacenesList.find(a => a.nombre.toLowerCase().trim() === clean.toLowerCase().trim());
-    if (matchName) return matchName.id;
-    return clean;
   },
 
   // --- CLIENTES ---
@@ -1642,7 +1480,6 @@ export const firestoreService = {
           ...(item.codigo_barras ? { codigo_barras: item.codigo_barras } : {}),
           ...(item.precio_venta_sugerido !== undefined ? { precio_venta_sugerido: item.precio_venta_sugerido } : {}),
           stock_minimo: item.stock_minimo,
-          ...(item.stock_minimo_almacenes ? { stock_minimo_almacenes: item.stock_minimo_almacenes } : {}),
           unidad: item.unidad,
           activo: item.activo !== false,
           creado_at: Timestamp.now()
@@ -1722,72 +1559,26 @@ export const firestoreService = {
   },
 
   deleteProducts: async (skus: string[]): Promise<void> => {
-    const cleanSkus = [...new Set(
-      skus.map(sku => sku.trim().toUpperCase()).filter(Boolean)
-    )];
-    if (cleanSkus.length === 0) return;
-
+    const cleanSkus = [...new Set(skus.map(sku => sku.trim().toUpperCase()).filter(Boolean))];
+    if (!cleanSkus.length) return;
+    const validate = async () => {
+      // Deletion is infrequent; inspect each drop once, never one query per product.
+      const drops = isConfigured && realDb
+        ? (await getDocsFromServer(collection(realDb, "drops"))).docs.map(item => ({ ...item.data(), id: item.id } as Drop)).filter(item => !item.en_papelera)
+        : await firestoreService.getDrops();
+      const inventories = await Promise.all(drops.map(async drop => calcularInventarioDrop(drop.id, await readDropInventoryData(drop.id))));
+      const pending = inventories.flat().filter(row => cleanSkus.includes(row.sku) && row.saldo > 0);
+      if (pending.length) throw new Error("No se puede enviar el producto a la papelera: todavía tiene existencias en un drop. Revisa Inventario.");
+    };
     if (isConfigured && realDb) {
-      const stockSnaps = await Promise.all(cleanSkus.map(sku => getDocs(query(
-        collection(realDb, "stock"),
-        where("sku", "==", sku)
-      ))));
-      const productsWithStock = cleanSkus.flatMap((sku, index) => {
-        const units = stockSnaps[index].docs.reduce(
-          (total, stockDoc) => total + Math.max(0, Number(stockDoc.data()?.cantidad) || 0),
-          0
-        );
-        return units > 0 ? [{ sku, units }] : [];
+      await runInventoryTransaction(realDb, async transaction => {
+        await validate();
+        cleanSkus.forEach(sku => transaction.set(doc(realDb, "productos", sku), { activo: false, en_papelera: true, desactivado_at: Timestamp.now() }, { merge: true }));
       });
-      if (productsWithStock.length > 0) {
-        const detail = productsWithStock
-          .map(item => `${item.sku} (${item.units} uds)`)
-          .join(", ");
-        throw new Error(
-          `No se puede enviar a la papelera porque aún hay existencias: ${detail}. Vende, transfiere o corrige ese stock primero.`
-        );
-      }
-
-      const batch = writeBatch(realDb);
-      const disabledAt = Timestamp.now();
-      cleanSkus.forEach(sku => {
-        batch.set(doc(realDb, "productos", sku), {
-          activo: false,
-          en_papelera: true,
-          desactivado_at: disabledAt
-        }, { merge: true });
-      });
-      await batch.commit();
       return;
     }
-
-    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
-    const productsWithStock = cleanSkus.flatMap(sku => {
-      const units = Object.values(stockMap).reduce(
-        (total, item) => item.sku?.trim().toUpperCase() === sku
-          ? total + Math.max(0, Number(item.cantidad) || 0)
-          : total,
-        0
-      );
-      return units > 0 ? [{ sku, units }] : [];
-    });
-    if (productsWithStock.length > 0) {
-      const detail = productsWithStock
-        .map(item => `${item.sku} (${item.units} uds)`)
-        .join(", ");
-      throw new Error(
-        `No se puede enviar a la papelera porque aún hay existencias: ${detail}. Vende, transfiere o corrige ese stock primero.`
-      );
-    }
-
-    const list = getLocalStorageItem<Producto[]>("productos", []);
-    const disabledAt = new Date();
-    cleanSkus.forEach(sku => {
-      const index = list.findIndex(p => p.sku.trim().toUpperCase() === sku);
-      if (index !== -1) {
-        list[index] = { ...list[index], activo: false, en_papelera: true, desactivado_at: disabledAt };
-      }
-    });
+    await validate();
+    const list = getLocalStorageItem<Producto[]>("productos", []).map(product => cleanSkus.includes(product.sku.trim().toUpperCase()) ? { ...product, activo: false, en_papelera: true, desactivado_at: new Date() } : product);
     setLocalStorageItem("productos", list);
     notifyListeners("productos", list);
   },
@@ -1798,10 +1589,6 @@ export const firestoreService = {
 
   deleteProducto: async (sku: string): Promise<void> => {
     return firestoreService.deleteProduct(sku);
-  },
-
-  registrarMovimiento: async (mov: Omit<Movimiento, "fecha" | "usuario">): Promise<{ id: string; folio: string }> => {
-    return firestoreService.registerMovimientoTransaction(mov);
   },
 
   registerVentaTransaction: async (
@@ -1820,7 +1607,6 @@ export const firestoreService = {
     const afectaStock = venta.afecta_stock !== false;
     let normalizedItems = venta.items.map((item, index) => {
       const sku = (item.sku || "").trim().toUpperCase();
-      const almacenId = afectaStock ? "" : "bajo_pedido";
       const dropId = afectaStock ? (item.drop_id || venta.drop_id || "").trim() : "";
       const cantidad = Number(item.cantidad);
       const precioUnitario = Number(item.precio_unitario_venta);
@@ -1840,7 +1626,6 @@ export const firestoreService = {
 
       return {
         sku,
-        almacen_id: almacenId,
         drop_id: dropId,
         drop_nombre: "",
         cantidad,
@@ -1912,47 +1697,19 @@ export const firestoreService = {
 
       await runInventoryTransaction(realDb, async (transaction) => {
         const names = afectaStock ? await validateDropDemand(requestedItems, transaction) : new Map<string, string>();
-        const physicalStock = afectaStock ? await readStockForSale(requestedItems.map(item => item.sku), transaction) : [];
-        normalizedItems = (afectaStock ? asignarExistencias(requestedItems, physicalStock) : requestedItems).map(item => ({
-          ...item, drop_nombre: names.get(item.drop_id) || "",
-          total_venta: Math.round(item.precio_unitario_venta * item.cantidad * 100) / 100,
-          costo_total: Math.round(item.costo_unitario_venta * item.cantidad * 100) / 100
-        }));
+        await validateSaleProducts(requestedItems.map(item => item.sku), transaction);
+        normalizedItems = requestedItems.map(item => ({ ...item, drop_nombre: names.get(item.drop_id) || "" }));
         dropNombre = names.get(dropId) || "";
         const movementRefs = normalizedItems.map(() => doc(collection(realDb, "movimientos")));
-        const groups = agruparCantidades(normalizedItems, item => item.sku + "_" + item.almacen_id, item => item.cantidad);
-        const stockRefs = afectaStock ? groups.map(group => ({ ...group, ref: doc(realDb, "stock", group.key) })) : [];
-        const summaryRefs = groups.map(group => ({ ...group, key: todayStr + "_" + group.key, ref: doc(realDb, "resumen_ventas", todayStr + "_" + group.key) }));
         const counterSnap = await transaction.get(counterRef);
         const nextNumber = counterSnap.exists() && typeof counterSnap.data()?.ultimo_consecutivo === "number"
           ? counterSnap.data()!.ultimo_consecutivo + 1
           : 1;
         generatedFolio = `Salida-${nextNumber}`;
 
-        const stockSnaps: any[] = [];
-        for (const stockEntry of stockRefs) {
-          stockSnaps.push(await transaction.get(stockEntry.ref));
-        }
-
-        const summarySnaps: any[] = [];
-        for (const summaryEntry of summaryRefs) {
-          summarySnaps.push(await transaction.get(summaryEntry.ref));
-        }
-
         const periodSnap = periodRef ? await transaction.get(periodRef) : null;
         const operationTimestamp = Timestamp.now();
 
-        stockRefs.forEach((entry, index) => transaction.set(entry.ref, {
-          id: entry.key, sku: entry.item.sku, almacen_id: entry.item.almacen_id,
-          cantidad: (Number(stockSnaps[index].data()?.cantidad) || 0) - entry.cantidad, actualizado: operationTimestamp
-        }, { merge: true }));
-        summaryRefs.forEach((entry, index) => transaction.set(entry.ref, {
-          id: entry.key, fecha_str: todayStr, fecha: operationTimestamp,
-          sku: entry.item.sku, almacen_id: entry.item.almacen_id,
-          cantidad: (Number(summarySnaps[index].data()?.cantidad) || 0) + entry.cantidad,
-          total_transacciones: (Number(summarySnaps[index].data()?.total_transacciones) || 0) + entry.partidas,
-          actualizado: operationTimestamp
-        }, { merge: true }));
         normalizedItems.forEach((item, index) => {
           const isPrimaryItem = index === 0;
           transaction.set(movementRefs[index], {
@@ -1974,7 +1731,7 @@ export const firestoreService = {
             ...(!afectaStock ? { pedido_estado: estadoPago === "pagado" ? "pagado" : "pedido" } : {}),
             ...(isPrimaryItem ? { ingreso_reconocido: ventaTotalRecibido } : {}),
             sku: item.sku,
-            almacen_id: item.almacen_id,
+
             tipo: "salida",
             cantidad: item.cantidad,
             referencia: venta.referencia,
@@ -2017,7 +1774,7 @@ export const firestoreService = {
           fecha_str: todayStr,
           items: normalizedItems.map(item => ({
             sku: item.sku,
-            almacen_id: item.almacen_id,
+
             ...(item.drop_id ? { drop_id: item.drop_id, drop_nombre: item.drop_nombre } : {}),
             cantidad: item.cantidad,
             precio_unitario: item.precio_unitario_venta,
@@ -2088,47 +1845,15 @@ export const firestoreService = {
 
     const names = afectaStock ? await validateDropDemand(requestedItems) : new Map<string, string>();
     const localDropNombre = names.get(dropId) || "";
-    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
-    const activeWarehouses = new Set(getLocalStorageItem<Almacen[]>("almacenes", []).filter(item => !item.en_papelera).map(item => item.id));
-    normalizedItems = (afectaStock ? asignarExistencias(requestedItems, Object.values(stockMap).filter(item => activeWarehouses.has(item.almacen_id))) : requestedItems).map(item => ({
-      ...item, drop_nombre: names.get(item.drop_id) || "",
-      total_venta: Math.round(item.precio_unitario_venta * item.cantidad * 100) / 100,
-      costo_total: Math.round(item.costo_unitario_venta * item.cantidad * 100) / 100
-    }));
+    await validateSaleProducts(requestedItems.map(item => item.sku));
+    normalizedItems = requestedItems.map(item => ({ ...item, drop_nombre: names.get(item.drop_id) || "" }));
 
     const generatedFolio = firestoreService.getNextLocalFolio("salida");
     const ventaId = `venta_${Math.random().toString(36).slice(2, 11)}`;
     const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
-    const summaryMap = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
 
     normalizedItems.forEach((item, index) => {
-      const stockKey = `${item.sku}_${item.almacen_id}`;
-      const currentQty = stockMap[stockKey]?.cantidad || 0;
-      const summaryKey = `${todayStr}_${item.sku}_${item.almacen_id}`;
-      const previousSummary = summaryMap[summaryKey];
       const isPrimaryItem = index === 0;
-
-      if (afectaStock) {
-        stockMap[stockKey] = {
-          id: stockKey,
-          sku: item.sku,
-          almacen_id: item.almacen_id,
-          cantidad: currentQty - item.cantidad,
-          actualizado: now
-        };
-
-      }
-
-      summaryMap[summaryKey] = {
-        id: summaryKey,
-        fecha_str: todayStr,
-        fecha: now,
-        sku: item.sku,
-        almacen_id: item.almacen_id,
-        cantidad: (previousSummary?.cantidad || 0) + item.cantidad,
-        total_transacciones: (previousSummary?.total_transacciones || 0) + 1,
-        actualizado: now
-      };
 
       movimientos.push({
         id: `${ventaId}_${index + 1}`,
@@ -2150,7 +1875,7 @@ export const firestoreService = {
         ...(!afectaStock ? { pedido_estado: estadoPago === "pagado" ? "pagado" : "pedido" } : {}),
         ...(isPrimaryItem ? { ingreso_reconocido: ventaTotalRecibido } : {}),
         sku: item.sku,
-        almacen_id: item.almacen_id,
+
         tipo: "salida",
         cantidad: item.cantidad,
         referencia: venta.referencia,
@@ -2178,8 +1903,6 @@ export const firestoreService = {
       });
     });
 
-    setLocalStorageItem("stock", stockMap);
-    setLocalStorageItem("resumen_ventas", summaryMap);
     setLocalStorageItem("movimientos", movimientos);
     const ventas = getLocalStorageItem<Venta[]>("ventas_maestras", []);
     ventas.unshift({
@@ -2187,7 +1910,7 @@ export const firestoreService = {
       folio: generatedFolio,
       fecha: now,
       fecha_str: todayStr,
-      items: normalizedItems.map(item => ({ sku: item.sku, almacen_id: item.almacen_id, ...(item.drop_id ? { drop_id: item.drop_id, drop_nombre: item.drop_nombre } : {}), cantidad: item.cantidad, precio_unitario: item.precio_unitario_venta, costo_unitario: item.costo_unitario_venta, total: item.total_venta, costo_total: item.costo_total })),
+      items: normalizedItems.map(item => ({ sku: item.sku, ...(item.drop_id ? { drop_id: item.drop_id, drop_nombre: item.drop_nombre } : {}), cantidad: item.cantidad, precio_unitario: item.precio_unitario_venta, costo_unitario: item.costo_unitario_venta, total: item.total_venta, costo_total: item.costo_total })),
       total_unidades: totalUnidadesVenta,
       subtotal: ventaSubtotal,
       envio_cobrado_cliente: envioCobrado,
@@ -2229,7 +1952,6 @@ export const firestoreService = {
       en_papelera: false
     });
     setLocalStorageItem("ventas_maestras", ventas);
-    notifyListeners("stock", stockMap);
     notifyListeners("movimientos", movimientos);
     clearFinanzasCache();
     clearPeriodosFinancierosCache();
@@ -2381,7 +2103,7 @@ export const firestoreService = {
             venta_relacionada_id: ventaId,
             subtipo: "abono_venta",
             sku: "ABONO",
-            almacen_id: "bajo_pedido",
+
             tipo: "salida",
             cantidad: 1,
             referencia: `Pago de ${data.folio || ventaId}`,
@@ -2444,7 +2166,7 @@ export const firestoreService = {
           venta_relacionada_id: ventaId,
           subtipo: "abono_venta",
           sku: "ABONO",
-          almacen_id: "bajo_pedido",
+
           tipo: "salida",
           cantidad: 1,
           referencia: `Pago de ${data.folio || ventaId}`,
@@ -2485,7 +2207,7 @@ export const firestoreService = {
         const nuevoRecibido = Math.round((sale.recibido + cleanAmount + Number.EPSILON) * 100) / 100;
         const nuevoSaldo = Math.max(0, Math.round((sale.total - nuevoRecibido + Number.EPSILON) * 100) / 100);
         masterSales[masterIndex] = { ...sale, recibido: nuevoRecibido, saldo: nuevoSaldo, estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo", estado_pedido: nuevoSaldo === 0 ? "pagado" : "pedido", actualizado_at: now, pagos: [...sale.pagos, { id: paymentId, monto: cleanAmount, metodo_pago: cleanMethod, fecha: now, usuario: user?.email || "Sistema", estado: "activo" }] };
-        movimientos.push({ id: paymentId, folio: `Abono-${sale.folio}`, venta_relacionada_id: ventaId, subtipo: "abono_venta", sku: "ABONO", almacen_id: "bajo_pedido", tipo: "salida", cantidad: 1, referencia: `Pago de ${sale.folio}`, usuario: user?.email || "Sistema", fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, venta_total_recibido: cleanAmount, venta_saldo_pendiente: nuevoSaldo, ingreso_reconocido: cleanAmount, venta_subtotal: sale.subtotal, venta_total_cobrado: sale.total, envio_cobrado_cliente: sale.envio_cobrado_cliente, otros_cargos_cliente: sale.otros_cargos_cliente, total_venta: 0, total_cobrado: cleanAmount, estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo" });
+        movimientos.push({ id: paymentId, folio: `Abono-${sale.folio}`, venta_relacionada_id: ventaId, subtipo: "abono_venta", sku: "ABONO", tipo: "salida", cantidad: 1, referencia: `Pago de ${sale.folio}`, usuario: user?.email || "Sistema", fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, venta_total_recibido: cleanAmount, venta_saldo_pendiente: nuevoSaldo, ingreso_reconocido: cleanAmount, venta_subtotal: sale.subtotal, venta_total_cobrado: sale.total, envio_cobrado_cliente: sale.envio_cobrado_cliente, otros_cargos_cliente: sale.otros_cargos_cliente, total_venta: 0, total_cobrado: cleanAmount, estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo" });
         setLocalStorageItem("ventas_maestras", masterSales);
         setLocalStorageItem("movimientos", movimientos);
         notifyListeners("movimientos", movimientos);
@@ -2508,7 +2230,7 @@ export const firestoreService = {
         venta_relacionada_id: ventaId,
         subtipo: "abono_venta",
         sku: "ABONO",
-        almacen_id: "bajo_pedido",
+
         tipo: "salida",
         cantidad: 1,
         referencia: `Pago de ${principal.folio}`,
@@ -2583,7 +2305,7 @@ export const firestoreService = {
         cliente_id: principal.data().cliente_id || "",
         cliente_nombre: principal.data().cliente_nombre || "Cliente",
         sku: "SEGUIMIENTO",
-        almacen_id: "bajo_pedido",
+
         tipo: "ajuste",
         cantidad: 1,
         referencia: `Seguimiento de ${principal.data().folio || ventaId}`,
@@ -2627,7 +2349,7 @@ export const firestoreService = {
       cliente_id: principal.cliente_id,
       cliente_nombre: principal.cliente_nombre,
       sku: "SEGUIMIENTO",
-      almacen_id: "bajo_pedido",
+
       tipo: "ajuste",
       cantidad: 1,
       referencia: `Seguimiento de ${principal.folio}`,
@@ -2663,37 +2385,8 @@ export const firestoreService = {
         const items = Array.isArray(sale.items) ? sale.items : [];
         if (items.length === 0) throw new Error("La venta no contiene partidas válidas.");
 
-        const stockEntriesRaw = sale.afecta_stock !== false ? items.map((item: any) => {
-          const sku = String(item.sku || "").trim().toUpperCase();
-          const warehouseId = String(item.almacen_id || "").trim();
-          const key = `${sku}_${warehouseId}`;
-          return { sku, warehouseId, key, quantity: Number(item.cantidad) || 0, ref: doc(realDb!, "stock", key) };
-        }) : [];
-        const summaryEntriesRaw = items.map((item: any) => {
-          const sku = String(item.sku || "").trim().toUpperCase();
-          const warehouseId = String(item.almacen_id || "").trim();
-          const key = `${String(sale.fecha_str || getLocalDateString(sale.fecha))}_${sku}_${warehouseId}`;
-          return { quantity: Number(item.cantidad) || 0, ref: doc(realDb!, "resumen_ventas", key) };
-        });
-        const stockEntries = agruparCantidades(stockEntriesRaw, item => item.key, item => item.quantity).map(group => ({ ...group.item, quantity: group.cantidad }));
-        const summaryEntries = agruparCantidades(summaryEntriesRaw, item => item.ref.path, item => item.quantity).map(group => ({ ...group.item, quantity: group.cantidad, partidas: group.partidas }));
-        const stockSnaps: any[] = [];
-        for (const entry of stockEntries) stockSnaps.push(await transaction.get(entry.ref));
-        const summarySnaps: any[] = [];
-        for (const entry of summaryEntries) summarySnaps.push(await transaction.get(entry.ref));
         const periodSnap = periodRef ? await transaction.get(periodRef) : null;
         const timestamp = Timestamp.now();
-
-        stockEntries.forEach((entry: any, index: number) => {
-          const current = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
-          transaction.set(entry.ref, { id: entry.key, sku: entry.sku, almacen_id: entry.warehouseId, cantidad: current + entry.quantity, actualizado: timestamp }, { merge: true });
-        });
-        summaryEntries.forEach((entry: any, index: number) => {
-          if (!summarySnaps[index].exists()) return;
-          const current = Number(summarySnaps[index].data()?.cantidad) || 0;
-          const transactions = Number(summarySnaps[index].data()?.total_transacciones) || 0;
-          transaction.set(entry.ref, { cantidad: Math.max(0, current - entry.quantity), total_transacciones: Math.max(0, transactions - entry.partidas), actualizado: timestamp }, { merge: true });
-        });
 
         const refundAmount = Math.max(0, Number(sale.recibido) || 0);
         transaction.update(saleRef, {
@@ -2711,7 +2404,7 @@ export const firestoreService = {
             venta_relacionada_id: ventaId,
             subtipo: "reembolso_venta",
             sku: "REEMBOLSO",
-            almacen_id: "devoluciones",
+
             tipo: "salida",
             cantidad: 1,
             unidades_devueltas: Number(sale.total_unidades) || 0,
@@ -2746,21 +2439,11 @@ export const firestoreService = {
     if (index === -1) throw new Error("La venta no existe o es anterior al historial consolidado.");
     const sale = sales[index];
     if (sale.estado === "anulado" || sale.estado === "devuelto") throw new Error("Esta venta no está disponible para devolución.");
-    const stock = getLocalStorageItem<Record<string, StockItem>>("stock", {});
-    const summaries = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
-    if (sale.afecta_stock) sale.items.forEach(item => {
-      const key = `${item.sku}_${item.almacen_id}`;
-      stock[key] = { ...(stock[key] || { id: key, sku: item.sku, almacen_id: item.almacen_id }), cantidad: (stock[key]?.cantidad || 0) + item.cantidad, actualizado: now } as StockItem;
-    });
-    sale.items.forEach(item => {
-      const key = `${sale.fecha_str}_${item.sku}_${item.almacen_id}`;
-      if (summaries[key]) summaries[key] = { ...summaries[key], cantidad: Math.max(0, summaries[key].cantidad - item.cantidad), total_transacciones: Math.max(0, summaries[key].total_transacciones - 1), actualizado: now };
-    });
     sales[index] = { ...sale, estado: "devuelto", monto_reembolsado: sale.recibido, motivo_devolucion: cleanReason, devuelto_at: now, devuelto_por: userEmail, saldo: 0, actualizado_at: now };
     const movements = getLocalStorageItem<Movimiento[]>("movimientos", []);
-    if (sale.recibido > 0) movements.push({ id: `refund_${Math.random().toString(36).slice(2, 11)}`, folio: `Reembolso-${sale.folio}`, venta_relacionada_id: ventaId, subtipo: "reembolso_venta", sku: "REEMBOLSO", almacen_id: "devoluciones", tipo: "salida", cantidad: 1, unidades_devueltas: sale.total_unidades, referencia: `Devolución de ${sale.folio}: ${cleanReason}`, usuario: userEmail, fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, venta_total_recibido: -sale.recibido, ingreso_reconocido: -sale.recibido, venta_subtotal: sale.subtotal, venta_total_cobrado: sale.total, envio_cobrado_cliente: sale.envio_cobrado_cliente, otros_cargos_cliente: sale.otros_cargos_cliente, total_venta: -sale.recibido, total_cobrado: -sale.recibido, metodo_pago: sale.metodo_pago_inicial });
-    setLocalStorageItem("ventas_maestras", sales); setLocalStorageItem("stock", stock); setLocalStorageItem("resumen_ventas", summaries); setLocalStorageItem("movimientos", movements);
-    notifyListeners("stock", stock); notifyListeners("movimientos", movements); clearFinanzasCache(); clearPeriodosFinancierosCache();
+    if (sale.recibido > 0) movements.push({ id: `refund_${Math.random().toString(36).slice(2, 11)}`, folio: `Reembolso-${sale.folio}`, venta_relacionada_id: ventaId, subtipo: "reembolso_venta", sku: "REEMBOLSO", tipo: "salida", cantidad: 1, unidades_devueltas: sale.total_unidades, referencia: `Devolución de ${sale.folio}: ${cleanReason}`, usuario: userEmail, fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, venta_total_recibido: -sale.recibido, ingreso_reconocido: -sale.recibido, venta_subtotal: sale.subtotal, venta_total_cobrado: sale.total, envio_cobrado_cliente: sale.envio_cobrado_cliente, otros_cargos_cliente: sale.otros_cargos_cliente, total_venta: -sale.recibido, total_cobrado: -sale.recibido, metodo_pago: sale.metodo_pago_inicial });
+    setLocalStorageItem("ventas_maestras", sales); setLocalStorageItem("movimientos", movements);
+    notifyListeners("movimientos", movements); clearFinanzasCache(); clearPeriodosFinancierosCache();
   },
 
   ensureProductExists: async (sku: string, nombre: string, categoria = "General", stockMinimo = 5, unidad = "uds"): Promise<Producto> => {
@@ -2784,51 +2467,12 @@ export const firestoreService = {
   },
 
   // --- ATOMIC REAL-TIME STOCK ---
-  getStockRealtime: (onUpdate: (stock: StockItem[]) => void, onError?: (error: any) => void): (() => void) => {
-    if (isConfigured && realDb) {
-      return onSnapshot(
-        collection(realDb, "stock"),
-        (snap) => {
-          const list: StockItem[] = [];
-          snap.forEach(d => {
-            const data = d.data();
-            list.push({
-              id: d.id,
-              sku: data.sku,
-              almacen_id: data.almacen_id,
-              cantidad: Number(data.cantidad) || 0,
-              actualizado: data.actualizado ? (data.actualizado as Timestamp).toDate() : new Date()
-            });
-          });
-          onUpdate(list);
-        },
-        (error) => {
-          console.error("Error en listener de stock:", error);
-          if (onError) onError(error);
-        }
-      );
-    }
-
-    const update = () => {
-      const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
-      onUpdate(Object.values(stockMap));
-    };
-
-    update();
-    listeners.stock.push(update);
-    return () => {
-      listeners.stock = listeners.stock.filter(cb => cb !== update);
-    };
-  },
-
   getFolioPrefix: (tipo: Movimiento["tipo"]): string => {
     switch (tipo) {
       case "entrada":
         return "Entrada-";
       case "salida":
         return "Salida-";
-      case "transferencia":
-        return "Transferencia-";
       case "ajuste":
         return "Ajuste-";
       default:
@@ -2841,7 +2485,7 @@ export const firestoreService = {
     const counters = getLocalStorageItem<Record<string, number>>("contadores_movimientos", {
       entrada: 0,
       salida: 0,
-      transferencia: 0,
+
       ajuste: 0
     });
 
@@ -2854,318 +2498,6 @@ export const firestoreService = {
   },
 
   // --- REGISTRO ATÓMICO DE MOVIMIENTO VÍA RUNTRANSACTION ---
-  registerMovimientoTransaction: async (mov: Omit<Movimiento, "fecha" | "usuario">): Promise<{ id: string; folio: string }> => {
-    const user = authService.getCurrentUser();
-    const usuarioEmail = user ? user.email : "sistema@empresa.com";
-    const prefix = firestoreService.getFolioPrefix(mov.tipo);
-    const cleanSku = mov.sku.trim().toUpperCase();
-    const originAlmId = mov.almacen_id.trim();
-    const destAlmId = mov.almacen_destino_id ? mov.almacen_destino_id.trim() : undefined;
-    const moveQty = Number(mov.cantidad);
-
-    if (isNaN(moveQty) || moveQty <= 0) {
-      throw new Error("La cantidad debe ser un número positivo mayor a cero.");
-    }
-
-    if (!cleanSku) {
-      throw new Error("El SKU del producto es obligatorio.");
-    }
-
-    if (!originAlmId) {
-      throw new Error("El almacén de origen es obligatorio.");
-    }
-
-    // Fecha local YYYY-MM-DD para resúmenes de ventas
-    const now = new Date();
-    const todayStr = getLocalDateString(now);
-
-    if (isConfigured && realDb) {
-      // EN MODO FIREBASE: Ejecución 100% transaccional en la nube.
-      // Si falla, el error se propaga hacia arriba y NUNCA se escribe en localStorage.
-      const counterDocRef = doc(realDb, "contadores", mov.tipo);
-      const movRef = doc(collection(realDb, "movimientos"));
-      const docId = movRef.id;
-
-      const originStockKey = `${cleanSku}_${originAlmId}`;
-      const originStockRef = doc(realDb, "stock", originStockKey);
-
-      const destStockKey = destAlmId ? `${cleanSku}_${destAlmId}` : null;
-      const destStockRef = destStockKey ? doc(realDb, "stock", destStockKey) : null;
-
-      // Resumen de ventas para salidas
-      const summaryKey = `${todayStr}_${cleanSku}_${originAlmId}`;
-      const resumenDocRef = mov.tipo === "salida" ? doc(realDb, "resumen_ventas", summaryKey) : null;
-
-      // Índice de periodos financieros para ventas
-      const periodoKey = mov.tipo === "salida" ? getPeriodoKey(now) : null;
-      const periodRef = (mov.tipo === "salida" && periodoKey) ? doc(realDb, "periodos_financieros", periodoKey) : null;
-
-      let generatedFolio = "";
-
-      await runInventoryTransaction(realDb, async (transaction) => {
-        if (mov.tipo === "salida") await validateDropDemand([{ sku: cleanSku, cantidad: moveQty, drop_id: mov.drop_id }], transaction);
-        // 1. Lectura del contador de folios
-        const counterSnap = await transaction.get(counterDocRef);
-        let nextNumber = 1;
-        if (counterSnap.exists()) {
-          const data = counterSnap.data();
-          if (typeof data?.ultimo_consecutivo === "number") {
-            nextNumber = data.ultimo_consecutivo + 1;
-          }
-        }
-        generatedFolio = `${prefix}${nextNumber}`;
-
-        // 2. Lectura del stock de origen
-        const originStockSnap = await transaction.get(originStockRef);
-        const currentOriginQty = originStockSnap.exists() ? (Number(originStockSnap.data()?.cantidad) || 0) : 0;
-
-        let newOriginQty = currentOriginQty;
-        let newDestQty = 0;
-
-        // 3. Procesamiento y validación de stock
-        if (mov.tipo === "entrada") {
-          newOriginQty = currentOriginQty + moveQty;
-        } else if (mov.tipo === "salida") {
-          if (currentOriginQty < moveQty) {
-            throw new Error(`Stock insuficiente en el almacén seleccionado. Stock disponible: ${currentOriginQty} uds, solicitado: ${moveQty} uds.`);
-          }
-          newOriginQty = currentOriginQty - moveQty;
-        } else if (mov.tipo === "transferencia") {
-          if (!destStockRef || !destAlmId) {
-            throw new Error("El almacén de destino es obligatorio para realizar una transferencia.");
-          }
-          if (originAlmId === destAlmId) {
-            throw new Error("El almacén de origen y destino no pueden ser iguales.");
-          }
-          if (currentOriginQty < moveQty) {
-            throw new Error(`Stock insuficiente en el almacén de origen. Stock disponible: ${currentOriginQty} uds, solicitado: ${moveQty} uds.`);
-          }
-
-          const destStockSnap = await transaction.get(destStockRef);
-          const currentDestQty = destStockSnap.exists() ? (Number(destStockSnap.data()?.cantidad) || 0) : 0;
-
-          newOriginQty = currentOriginQty - moveQty;
-          newDestQty = currentDestQty + moveQty;
-
-          // Escritura de stock en destino
-          transaction.set(destStockRef, {
-            id: destStockKey,
-            sku: cleanSku,
-            almacen_id: destAlmId,
-            cantidad: newDestQty,
-            actualizado: Timestamp.now()
-          }, { merge: true });
-        }
-
-        // 4. Lectura de resumen de ventas e índice de periodos si es salida
-        let prevResumenQty = 0;
-        let prevResumenTotal = 0;
-        if (mov.tipo === "salida" && resumenDocRef) {
-          const resumenSnap = await transaction.get(resumenDocRef);
-          prevResumenQty = resumenSnap.exists() ? (Number(resumenSnap.data()?.cantidad) || 0) : 0;
-          prevResumenTotal = resumenSnap.exists() ? (Number(resumenSnap.data()?.total_transacciones) || 0) : 0;
-        }
-
-        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
-
-        if (mov.tipo === "salida" && resumenDocRef) {
-          transaction.set(resumenDocRef, {
-            id: summaryKey,
-            fecha_str: todayStr,
-            fecha: Timestamp.now(),
-            sku: cleanSku,
-            almacen_id: originAlmId,
-            cantidad: prevResumenQty + moveQty,
-            total_transacciones: prevResumenTotal + 1,
-            actualizado: Timestamp.now()
-          }, { merge: true });
-        }
-
-        // 5. Escritura de stock en origen
-        transaction.set(originStockRef, {
-          id: originStockKey,
-          sku: cleanSku,
-          almacen_id: originAlmId,
-          cantidad: newOriginQty,
-          actualizado: Timestamp.now()
-        }, { merge: true });
-
-        // 6. Actualización del contador secuencial
-        transaction.set(counterDocRef, {
-          tipo: mov.tipo,
-          ultimo_consecutivo: nextNumber,
-          actualizado: Timestamp.now()
-        }, { merge: true });
-
-        // 7. Escritura del documento de movimiento
-        transaction.set(movRef, {
-          folio: generatedFolio,
-          sku: cleanSku,
-          almacen_id: originAlmId,
-          tipo: mov.tipo,
-          cantidad: moveQty,
-          referencia: mov.referencia,
-          usuario: usuarioEmail,
-          fecha: Timestamp.now(),
-          estado: "activo",
-          ...(mov.drop_id ? { drop_id: mov.drop_id, drop_nombre: mov.drop_nombre || "" } : {}),
-          ...(mov.compra_id ? { compra_id: mov.compra_id } : {}),
-          ...(mov.lote_id ? { lote_id: mov.lote_id } : {}),
-          ...(typeof mov.costo_unitario === "number" ? { costo_unitario: mov.costo_unitario } : {}),
-          ...(mov.cliente_id ? { cliente_id: mov.cliente_id } : {}),
-          ...(mov.cliente_nombre ? { cliente_nombre: mov.cliente_nombre } : {}),
-          ...(mov.cliente_tipo ? { cliente_tipo: mov.cliente_tipo } : {}),
-          ...(typeof mov.precio_unitario_venta === "number" ? { precio_unitario_venta: mov.precio_unitario_venta } : {}),
-          ...(typeof mov.total_venta === "number" ? { total_venta: mov.total_venta } : {}),
-          ...(typeof mov.envio_cobrado_cliente === "number" ? { envio_cobrado_cliente: mov.envio_cobrado_cliente } : {}),
-          ...(typeof mov.otros_cargos_cliente === "number" ? { otros_cargos_cliente: mov.otros_cargos_cliente } : {}),
-          ...(mov.concepto_otros_cargos ? { concepto_otros_cargos: mov.concepto_otros_cargos } : {}),
-          ...(typeof mov.costo_envio_venta === "number" ? { costo_envio_venta: mov.costo_envio_venta } : {}),
-          ...(typeof mov.otros_costos_venta === "number" ? { otros_costos_venta: mov.otros_costos_venta } : {}),
-          ...(mov.concepto_otros_costos ? { concepto_otros_costos: mov.concepto_otros_costos } : {}),
-          ...(typeof mov.total_cobrado === "number" ? { total_cobrado: mov.total_cobrado } : {}),
-          ...(typeof mov.total_costos_venta === "number" ? { total_costos_venta: mov.total_costos_venta } : {}),
-          ...(mov.comentarios_venta ? { comentarios_venta: mov.comentarios_venta } : {}),
-          ...(destAlmId ? { almacen_destino_id: destAlmId } : {})
-        });
-
-        // 8. Actualización atómica del índice de periodos financieros si es venta
-        if (periodRef && periodoKey) {
-          const updatedPeriod = computeNewPeriodIndexData(
-            periodSnap?.exists() ? periodSnap.data() : null,
-            periodoKey,
-            1,
-            0,
-            0
-          );
-          transaction.set(periodRef, updatedPeriod, { merge: true });
-        }
-      });
-
-      clearFinanzasCache();
-      clearPeriodosFinancierosCache();
-      return { id: docId, folio: generatedFolio };
-    }
-
-    // --- MODO EMULADOR LOCAL (SOLO CUANDO FIREBASE NO ESTÁ CONFIGURADO) ---
-    if (mov.tipo === "salida") await validateDropDemand([{ sku: cleanSku, cantidad: moveQty, drop_id: mov.drop_id }]);
-    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
-    const originKey = `${cleanSku}_${originAlmId}`;
-    const currentOrigin = stockMap[originKey]?.cantidad || 0;
-
-    if (mov.tipo === "salida" && currentOrigin < moveQty) {
-      throw new Error(`Stock insuficiente en el almacén seleccionado. Stock disponible: ${currentOrigin} uds, solicitado: ${moveQty} uds.`);
-    }
-
-    if (mov.tipo === "transferencia") {
-      if (!destAlmId) throw new Error("El almacén de destino es obligatorio para transferencias.");
-      if (originAlmId === destAlmId) throw new Error("El almacén de origen y destino no pueden ser iguales.");
-      if (currentOrigin < moveQty) {
-        throw new Error(`Stock insuficiente en el almacén de origen. Stock disponible: ${currentOrigin} uds, solicitado: ${moveQty} uds.`);
-      }
-    }
-
-    const generatedFolio = firestoreService.getNextLocalFolio(mov.tipo);
-    const docId = "mov_" + Math.random().toString(36).substr(2, 9);
-
-    if (mov.tipo === "entrada") {
-      stockMap[originKey] = {
-        id: originKey,
-        sku: cleanSku,
-        almacen_id: originAlmId,
-        cantidad: currentOrigin + moveQty,
-        actualizado: new Date()
-      };
-    } else if (mov.tipo === "salida") {
-      stockMap[originKey] = {
-        id: originKey,
-        sku: cleanSku,
-        almacen_id: originAlmId,
-        cantidad: currentOrigin - moveQty,
-        actualizado: new Date()
-      };
-
-      // Actualizar resumen incremental local
-      const summaryMap = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
-      const summaryKey = `${todayStr}_${cleanSku}_${originAlmId}`;
-      const prev = summaryMap[summaryKey];
-      summaryMap[summaryKey] = {
-        id: summaryKey,
-        fecha_str: todayStr,
-        fecha: new Date(),
-        sku: cleanSku,
-        almacen_id: originAlmId,
-        cantidad: (prev?.cantidad || 0) + moveQty,
-        total_transacciones: (prev?.total_transacciones || 0) + 1,
-        actualizado: new Date()
-      };
-      setLocalStorageItem("resumen_ventas", summaryMap);
-    } else if (mov.tipo === "transferencia" && destAlmId) {
-      const destKey = `${cleanSku}_${destAlmId}`;
-      const currentDest = stockMap[destKey]?.cantidad || 0;
-
-      stockMap[originKey] = {
-        id: originKey,
-        sku: cleanSku,
-        almacen_id: originAlmId,
-        cantidad: currentOrigin - moveQty,
-        actualizado: new Date()
-      };
-
-      stockMap[destKey] = {
-        id: destKey,
-        sku: cleanSku,
-        almacen_id: destAlmId,
-        cantidad: currentDest + moveQty,
-        actualizado: new Date()
-      };
-    }
-
-    setLocalStorageItem("stock", stockMap);
-    notifyListeners("stock", stockMap);
-
-    const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
-    const nuevoMovimiento: Movimiento = {
-      id: docId,
-      folio: generatedFolio,
-      sku: cleanSku,
-      almacen_id: originAlmId,
-      tipo: mov.tipo,
-      cantidad: moveQty,
-      referencia: mov.referencia,
-      usuario: usuarioEmail,
-      fecha: new Date(),
-      estado: "activo",
-      ...(mov.compra_id ? { compra_id: mov.compra_id } : {}),
-      ...(mov.lote_id ? { lote_id: mov.lote_id } : {}),
-      ...(typeof mov.costo_unitario === "number" ? { costo_unitario: mov.costo_unitario } : {}),
-      ...(mov.cliente_id ? { cliente_id: mov.cliente_id } : {}),
-      ...(mov.cliente_nombre ? { cliente_nombre: mov.cliente_nombre } : {}),
-      ...(mov.cliente_tipo ? { cliente_tipo: mov.cliente_tipo } : {}),
-      ...(typeof mov.precio_unitario_venta === "number" ? { precio_unitario_venta: mov.precio_unitario_venta } : {}),
-      ...(typeof mov.total_venta === "number" ? { total_venta: mov.total_venta } : {}),
-      ...(typeof mov.envio_cobrado_cliente === "number" ? { envio_cobrado_cliente: mov.envio_cobrado_cliente } : {}),
-      ...(typeof mov.otros_cargos_cliente === "number" ? { otros_cargos_cliente: mov.otros_cargos_cliente } : {}),
-      ...(mov.concepto_otros_cargos ? { concepto_otros_cargos: mov.concepto_otros_cargos } : {}),
-      ...(typeof mov.costo_envio_venta === "number" ? { costo_envio_venta: mov.costo_envio_venta } : {}),
-      ...(typeof mov.otros_costos_venta === "number" ? { otros_costos_venta: mov.otros_costos_venta } : {}),
-      ...(mov.concepto_otros_costos ? { concepto_otros_costos: mov.concepto_otros_costos } : {}),
-      ...(typeof mov.total_cobrado === "number" ? { total_cobrado: mov.total_cobrado } : {}),
-      ...(typeof mov.total_costos_venta === "number" ? { total_costos_venta: mov.total_costos_venta } : {}),
-      ...(mov.comentarios_venta ? { comentarios_venta: mov.comentarios_venta } : {}),
-      ...(destAlmId ? { almacen_destino_id: destAlmId } : {})
-    };
-
-    movimientos.push(nuevoMovimiento);
-    setLocalStorageItem("movimientos", movimientos);
-    notifyListeners("movimientos", movimientos);
-
-    clearFinanzasCache();
-    clearPeriodosFinancierosCache();
-    return { id: docId, folio: generatedFolio };
-  },
-
-  // --- ANULACIÓN ATÓMICA DE UNA VENTA CON VARIAS PARTIDAS ---
   anularVentaAgrupada: async (ventaId: string, motivo = "Anulado por el usuario"): Promise<void> => {
     const user = authService.getCurrentUser();
     const usuarioEmail = user ? user.email : "sistema@empresa.com";
@@ -3223,29 +2555,9 @@ export const firestoreService = {
         if (requiresSaleRefund(receivedAmount, orderStatus)) {
           throw new Error("Esta venta ya recibió dinero o fue entregada. Registra una devolución para reintegrar el inventario y dejar el reembolso en Finanzas.");
         }
-        const inventoryMovements = saleItemMovements.filter(({ data }) => data.afecta_stock !== false);
-        const stockEntriesRaw = inventoryMovements.map(({ data }) => {
-          const sku = String(data.sku || "").trim().toUpperCase();
-          const almacenId = String(data.almacen_id || "").trim();
-          const key = `${sku}_${almacenId}`;
-          return { sku, almacenId, key, ref: doc(realDb!, "stock", key), cantidad: Number(data.cantidad) || 0 };
-        });
-        const summaryEntriesRaw = saleItemMovements.map(({ data }) => {
-          const sku = String(data.sku || "").trim().toUpperCase();
-          const almacenId = String(data.almacen_id || "").trim();
-          const fechaStr = getLocalDateString(data.fecha);
-          const key = `${fechaStr}_${sku}_${almacenId}`;
-          return { key, ref: doc(realDb!, "resumen_ventas", key), cantidad: Number(data.cantidad) || 0 };
-        });
         const periodoKey = getPeriodoKey(saleItemMovements[0]?.data.fecha);
         const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
 
-        const stockEntries = agruparCantidades(stockEntriesRaw, item => item.key, item => item.cantidad).map(group => ({ ...group.item, cantidad: group.cantidad }));
-        const summaryEntries = agruparCantidades(summaryEntriesRaw, item => item.key, item => item.cantidad).map(group => ({ ...group.item, cantidad: group.cantidad, partidas: group.partidas }));
-        const stockSnaps: any[] = [];
-        for (const entry of stockEntries) stockSnaps.push(await transaction.get(entry.ref));
-        const summarySnaps: any[] = [];
-        for (const entry of summaryEntries) summarySnaps.push(await transaction.get(entry.ref));
         const periodSnap = periodRef ? await transaction.get(periodRef) : null;
 
         if (masterSnap.exists() && masterSnap.data().estado === "devuelto") {
@@ -3270,31 +2582,6 @@ export const firestoreService = {
             actualizado_at: cancellationTimestamp
           });
         }
-
-        stockEntries.forEach((entry, index) => {
-          const currentQty = stockSnaps[index].exists()
-            ? Number(stockSnaps[index].data()?.cantidad) || 0
-            : 0;
-          transaction.set(entry.ref, {
-            id: entry.key,
-            sku: entry.sku,
-            almacen_id: entry.almacenId,
-            cantidad: currentQty + entry.cantidad,
-            actualizado: cancellationTimestamp
-          }, { merge: true });
-
-        });
-
-        summaryEntries.forEach((entry, index) => {
-          if (!summarySnaps[index].exists()) return;
-          const previousQty = Number(summarySnaps[index].data()?.cantidad) || 0;
-          const previousTransactions = Number(summarySnaps[index].data()?.total_transacciones) || 0;
-          transaction.set(entry.ref, {
-            cantidad: Math.max(0, previousQty - entry.cantidad),
-            total_transacciones: Math.max(0, previousTransactions - entry.partidas),
-            actualizado: cancellationTimestamp
-          }, { merge: true });
-        });
 
         if (periodRef && periodoKey && !hadPreviouslyCancelledItems) {
           const updatedPeriod = computeNewPeriodIndexData(
@@ -3341,36 +2628,9 @@ export const firestoreService = {
       throw new Error("Esta venta ya recibió dinero o fue entregada. Registra una devolución para reintegrar el inventario y dejar el reembolso en Finanzas.");
     }
 
-    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
-    const summaryMap = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
     const cancellationDate = new Date();
 
     activeItems.forEach(({ movement, index }) => {
-      const sku = movement.sku.trim().toUpperCase();
-      const isSaleItem = movement.venta_id === ventaId && !movement.subtipo;
-      if (isSaleItem && movement.afecta_stock !== false) {
-        const stockKey = `${sku}_${movement.almacen_id}`;
-        const currentQty = stockMap[stockKey]?.cantidad || 0;
-        stockMap[stockKey] = {
-          id: stockKey,
-          sku,
-          almacen_id: movement.almacen_id,
-          cantidad: currentQty + (Number(movement.cantidad) || 0),
-          actualizado: cancellationDate
-        };
-
-      }
-
-      const summaryKey = `${getLocalDateString(movement.fecha)}_${sku}_${movement.almacen_id}`;
-      if (isSaleItem && summaryMap[summaryKey]) {
-        summaryMap[summaryKey] = {
-          ...summaryMap[summaryKey],
-          cantidad: Math.max(0, summaryMap[summaryKey].cantidad - (Number(movement.cantidad) || 0)),
-          total_transacciones: Math.max(0, summaryMap[summaryKey].total_transacciones - 1),
-          actualizado: cancellationDate
-        };
-      }
-
       movimientos[index] = {
         ...movement,
         estado: "anulado",
@@ -3394,10 +2654,7 @@ export const firestoreService = {
       setLocalStorageItem("ventas_maestras", masterSales);
     }
 
-    setLocalStorageItem("stock", stockMap);
-    setLocalStorageItem("resumen_ventas", summaryMap);
     setLocalStorageItem("movimientos", movimientos);
-    notifyListeners("stock", stockMap);
     notifyListeners("movimientos", movimientos);
     clearFinanzasCache();
     clearPeriodosFinancierosCache();
@@ -3435,111 +2692,11 @@ export const firestoreService = {
           throw new Error("Este movimiento ya ha sido anulado previamente. No se puede anular dos veces.");
         }
 
-        const sku = (movData.sku || "").trim().toUpperCase();
-        const originAlmId = movData.almacen_id;
-        const destAlmId = movData.almacen_destino_id;
-        const qty = Number(movData.cantidad) || 0;
+        await validateHistoricalMovementRemoval({ ...movData, id } as Movimiento);
         const tipo = movData.tipo;
-
-        // 3. Construir las referencias necesarias según su tipo
-        const originStockKey = `${sku}_${originAlmId}`;
-        const originStockRef = doc(realDb, "stock", originStockKey);
-
-        const destStockKey = (tipo === "transferencia" && destAlmId) ? `${sku}_${destAlmId}` : null;
-        const destStockRef = destStockKey ? doc(realDb, "stock", destStockKey) : null;
-
-        const dateStr = tipo === "salida" ? getLocalDateString(movData.fecha) : null;
-        const summaryKey = (tipo === "salida" && dateStr) ? `${dateStr}_${sku}_${originAlmId}` : null;
-        const resumenDocRef = summaryKey ? doc(realDb, "resumen_ventas", summaryKey) : null;
-
         const periodoKey = tipo === "salida" ? getPeriodoKey(movData.fecha) : null;
-        const periodRef = (tipo === "salida" && periodoKey) ? doc(realDb, "periodos_financieros", periodoKey) : null;
-
-        // 4. Leer el stock de origen
-        const originSnap = await transaction.get(originStockRef);
-        const currentOrigin = originSnap.exists() ? (Number(originSnap.data()?.cantidad) || 0) : 0;
-
-        // 5. Si es transferencia, leer el stock de destino
-        let destSnap: any = null;
-        if (tipo === "transferencia") {
-          if (!destAlmId || !destStockRef) {
-            throw new Error("Datos de transferencia incompletos: falta almacén de destino.");
-          }
-          destSnap = await transaction.get(destStockRef);
-        }
-
-        // 6. Si es una venta, leer resumen_ventas
-        let resumenSnap: any = null;
-        if (tipo === "salida" && resumenDocRef) {
-          resumenSnap = await transaction.get(resumenDocRef);
-        }
-
-        // 7. Si es una venta, leer el documento correspondiente de periodos_financieros
-        let periodSnap: any = null;
-        if (tipo === "salida" && periodRef) {
-          periodSnap = await transaction.get(periodRef);
-        }
-
-        // 8. Completar todas las validaciones antes de cualquier escritura
-        if (tipo === "entrada") {
-          if (currentOrigin < qty) {
-            throw new Error(`No se puede anular la entrada: el stock actual (${currentOrigin} uds) en el almacén es menor a la cantidad a revertir (${qty} uds).`);
-          }
-        } else if (tipo === "transferencia") {
-          const currentDest = destSnap && destSnap.exists() ? (Number(destSnap.data()?.cantidad) || 0) : 0;
-          if (currentDest < qty) {
-            throw new Error(`No se puede anular la transferencia: el almacén de destino no tiene suficiente stock (${currentDest} uds) para devolver las ${qty} uds.`);
-          }
-        }
-
-        // 9. Solamente después comenzar escrituras (cero lecturas a partir de aquí):
-
-        // 9.1 Actualización de stock
-        if (tipo === "entrada") {
-          transaction.set(originStockRef, {
-            id: originStockKey,
-            sku,
-            almacen_id: originAlmId,
-            cantidad: currentOrigin - qty,
-            actualizado: Timestamp.now()
-          }, { merge: true });
-        } else if (tipo === "salida") {
-          transaction.set(originStockRef, {
-            id: originStockKey,
-            sku,
-            almacen_id: originAlmId,
-            cantidad: currentOrigin + qty,
-            actualizado: Timestamp.now()
-          }, { merge: true });
-        } else if (tipo === "transferencia") {
-          const currentDest = destSnap && destSnap.exists() ? (Number(destSnap.data()?.cantidad) || 0) : 0;
-          transaction.set(originStockRef, {
-            id: originStockKey,
-            sku,
-            almacen_id: originAlmId,
-            cantidad: currentOrigin + qty,
-            actualizado: Timestamp.now()
-          }, { merge: true });
-
-          transaction.set(destStockRef!, {
-            id: destStockKey!,
-            sku,
-            almacen_id: destAlmId,
-            cantidad: currentDest - qty,
-            actualizado: Timestamp.now()
-          }, { merge: true });
-        }
-
-        // 9.2 Actualización de resumen_ventas
-        if (tipo === "salida" && resumenDocRef && resumenSnap && resumenSnap.exists()) {
-          const prevQty = Number(resumenSnap.data()?.cantidad) || 0;
-          const prevTotal = Number(resumenSnap.data()?.total_transacciones) || 0;
-          transaction.set(resumenDocRef, {
-            cantidad: Math.max(0, prevQty - qty),
-            total_transacciones: Math.max(0, prevTotal - 1),
-            actualizado: Timestamp.now()
-          }, { merge: true });
-        }
+        const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
 
         // 9.3 Decremento del índice financiero
         if (tipo === "salida" && periodRef && periodoKey) {
@@ -3584,73 +2741,7 @@ export const firestoreService = {
       return inventoryOperations.anularVentaAgrupada(mov.venta_id, motivo);
     }
 
-    const sku = (mov.sku || "").trim().toUpperCase();
-    const qty = Number(mov.cantidad) || 0;
-    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
-    const originKey = `${sku}_${mov.almacen_id}`;
-    const currentOrigin = stockMap[originKey]?.cantidad || 0;
-
-    if (mov.tipo === "entrada") {
-      if (currentOrigin < qty) {
-        throw new Error(`No se puede anular la entrada: el stock actual (${currentOrigin} uds) en el almacén es menor a la cantidad a revertir (${qty} uds).`);
-      }
-      stockMap[originKey] = {
-        id: originKey,
-        sku,
-        almacen_id: mov.almacen_id,
-        cantidad: currentOrigin - qty,
-        actualizado: new Date()
-      };
-    } else if (mov.tipo === "salida") {
-      stockMap[originKey] = {
-        id: originKey,
-        sku,
-        almacen_id: mov.almacen_id,
-        cantidad: currentOrigin + qty,
-        actualizado: new Date()
-      };
-
-      // Descontar del resumen incremental
-      const summaryMap = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
-      const dateStr = getLocalDateString(mov.fecha);
-      const summaryKey = `${dateStr}_${sku}_${mov.almacen_id}`;
-      if (summaryMap[summaryKey]) {
-        const prev = summaryMap[summaryKey];
-        summaryMap[summaryKey] = {
-          ...prev,
-          cantidad: Math.max(0, prev.cantidad - qty),
-          total_transacciones: Math.max(0, prev.total_transacciones - 1),
-          actualizado: new Date()
-        };
-        setLocalStorageItem("resumen_ventas", summaryMap);
-      }
-    } else if (mov.tipo === "transferencia" && mov.almacen_destino_id) {
-      const destKey = `${sku}_${mov.almacen_destino_id}`;
-      const currentDest = stockMap[destKey]?.cantidad || 0;
-
-      if (currentDest < qty) {
-        throw new Error(`No se puede anular la transferencia: el almacén de destino no tiene suficiente stock (${currentDest} uds) para devolver las ${qty} uds.`);
-      }
-
-      stockMap[originKey] = {
-        id: originKey,
-        sku,
-        almacen_id: mov.almacen_id,
-        cantidad: currentOrigin + qty,
-        actualizado: new Date()
-      };
-
-      stockMap[destKey] = {
-        id: destKey,
-        sku,
-        almacen_id: mov.almacen_destino_id,
-        cantidad: currentDest - qty,
-        actualizado: new Date()
-      };
-    }
-
-    setLocalStorageItem("stock", stockMap);
-    notifyListeners("stock", stockMap);
+    await validateHistoricalMovementRemoval(mov);
 
     movimientos[movIndex] = {
       ...mov,
@@ -3676,6 +2767,7 @@ export const firestoreService = {
       const initial = await getDoc(doc(realDb, "movimientos", id));
       if (!initial.exists()) throw new Error("El movimiento no existe.");
       const initialData = initial.data();
+      if (initialData.tipo === "transferencia") throw new Error("Este movimiento histórico es de solo lectura.");
       if (initialData.compra_id) return inventoryOperations.enviarCompraPapelera(initialData.compra_id);
       const masterSaleSnap = initialData.venta_id ? await getDoc(doc(realDb, "ventas", initialData.venta_id)) : null;
       const isReturnedSale = masterSaleSnap?.exists() && masterSaleSnap.data().estado === "devuelto";
@@ -3709,6 +2801,7 @@ export const firestoreService = {
     const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
     const selected = movimientos.find(movimiento => movimiento.id === id);
     if (!selected) throw new Error("El movimiento no existe.");
+    if (selected.tipo === "transferencia") throw new Error("Este movimiento histórico es de solo lectura.");
     if (selected.compra_id) return inventoryOperations.enviarCompraPapelera(selected.compra_id);
     const localMasterSales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
     const localMasterSale = selected.venta_id ? localMasterSales.find(item => item.id === selected.venta_id) : undefined;
@@ -3760,6 +2853,7 @@ export const firestoreService = {
       const initial = await getDoc(doc(realDb, "movimientos", id));
       if (!initial.exists()) throw new Error("El movimiento no existe.");
       const initialData = initial.data();
+      if (initialData.tipo === "transferencia") throw new Error("Este movimiento histórico es de solo lectura.");
       if (initialData.compra_id) return inventoryOperations.restaurarCompraPapelera(initialData.compra_id);
       const refs = initialData.venta_id
         ? (await Promise.all([
@@ -3778,57 +2872,13 @@ export const firestoreService = {
         const restorableTargets = activeTargets.filter(snapshot => snapshot.data().estado_antes_papelera !== "anulado");
 
         await validateDropDemand(restorableTargets.map(snapshot => snapshot.data()).filter(data => data.tipo === "salida" && data.afecta_stock !== false && data.drop_id && !data.subtipo).map(data => ({ sku: data.sku, cantidad: Number(data.cantidad) || 0, drop_id: data.drop_id })), transaction, false);
-        const stockDeltas = new Map<string, { sku: string; almacenId: string; delta: number; ref: any }>();
-        const addDelta = (sku: string, almacenId: string, delta: number) => {
-          const key = `${sku}_${almacenId}`;
-          const current = stockDeltas.get(key);
-          stockDeltas.set(key, { sku, almacenId, delta: (current?.delta || 0) + delta, ref: doc(realDb!, "stock", key) });
-        };
-        restorableTargets.forEach(snapshot => {
-          const data = snapshot.data();
-          const sku = String(data.sku || "").trim().toUpperCase();
-          const qty = Number(data.cantidad) || 0;
-          if (data.tipo === "salida" && data.afecta_stock !== false) addDelta(sku, data.almacen_id, -qty);
-          if (data.tipo === "entrada") addDelta(sku, data.almacen_id, qty);
-          if (data.tipo === "transferencia") {
-            addDelta(sku, data.almacen_id, -qty);
-            if (!data.almacen_destino_id) throw new Error("La transferencia no tiene almacén de destino.");
-            addDelta(sku, data.almacen_destino_id, qty);
-          }
-        });
-        const stockEntries = [...stockDeltas.values()];
-        const stockSnaps: any[] = [];
-        for (const entry of stockEntries) stockSnaps.push(await transaction.get(entry.ref));
-        stockEntries.forEach((entry, index) => {
-          const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
-          if (currentQty + entry.delta < 0) throw new Error(`No hay stock suficiente de ${entry.sku} para reactivar la operación.`);
-        });
-
         const saleTargets = restorableTargets.filter(snapshot => snapshot.data().tipo === "salida" && !snapshot.data().subtipo && String(snapshot.data().sku || "").toUpperCase() !== "ABONO");
-        const summaryEntriesRaw = saleTargets.map(snapshot => {
-          const data = snapshot.data();
-          const sku = String(data.sku || "").trim().toUpperCase();
-          const key = `${getLocalDateString(data.fecha)}_${sku}_${data.almacen_id}`;
-          return { ref: doc(realDb!, "resumen_ventas", key), sku, almacenId: data.almacen_id, fecha: data.fecha, fechaStr: getLocalDateString(data.fecha), qty: Number(data.cantidad) || 0 };
-        });
-        const summaryEntries = agruparCantidades(summaryEntriesRaw, item => item.ref.path, item => item.qty).map(group => ({ ...group.item, qty: group.cantidad, partidas: group.partidas }));
-        const summarySnaps: any[] = [];
-        for (const entry of summaryEntries) summarySnaps.push(await transaction.get(entry.ref));
         const restorePeriodCount = saleTargets.some(snapshot => snapshot.data().periodo_descontado_papelera === true);
         const periodoKey = restorePeriodCount ? getPeriodoKey(saleTargets[0].data().fecha) : null;
         const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
         const periodSnap = periodRef ? await transaction.get(periodRef) : null;
         const now = Timestamp.now();
 
-        stockEntries.forEach((entry, index) => {
-          const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
-          transaction.set(entry.ref, { id: `${entry.sku}_${entry.almacenId}`, sku: entry.sku, almacen_id: entry.almacenId, cantidad: currentQty + entry.delta, actualizado: now }, { merge: true });
-        });
-        summaryEntries.forEach((entry, index) => {
-          const currentQty = summarySnaps[index].exists() ? Number(summarySnaps[index].data()?.cantidad) || 0 : 0;
-          const currentTransactions = summarySnaps[index].exists() ? Number(summarySnaps[index].data()?.total_transacciones) || 0 : 0;
-          transaction.set(entry.ref, { fecha_str: entry.fechaStr, fecha: entry.fecha, sku: entry.sku, almacen_id: entry.almacenId, cantidad: currentQty + entry.qty, total_transacciones: currentTransactions + entry.partidas, actualizado: now }, { merge: true });
-        });
         activeTargets.forEach(snapshot => {
           const wasCancelled = snapshot.data().estado_antes_papelera === "anulado";
           transaction.update(snapshot.ref, wasCancelled
@@ -3850,14 +2900,12 @@ export const firestoreService = {
     const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
     const selected = movimientos.find(movimiento => movimiento.id === id);
     if (!selected) throw new Error("El movimiento no existe.");
+    if (selected.tipo === "transferencia") throw new Error("Este movimiento histórico es de solo lectura.");
+    if (!selected.en_papelera) throw new Error("El movimiento ya está activo.");
     if (selected.compra_id) return inventoryOperations.restaurarCompraPapelera(selected.compra_id);
     const targets = movimientos.filter(movimiento => movimiento.id === id || (selected.venta_id && (movimiento.venta_id === selected.venta_id || movimiento.venta_relacionada_id === selected.venta_id)));
     const restorableTargets = targets.filter(movimiento => movimiento.estado_antes_papelera !== "anulado");
     await validateDropDemand(restorableTargets.filter(item => item.tipo === "salida" && item.afecta_stock !== false && item.drop_id && !item.subtipo).map(item => ({ sku: item.sku, cantidad: item.cantidad, drop_id: item.drop_id })), undefined, false);
-    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
-    const summaryMap = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
-    const demand = agruparCantidades(restorableTargets.filter(item => (item.tipo === "salida" && item.afecta_stock !== false) || item.tipo === "transferencia"), item => item.sku.trim().toUpperCase() + "_" + item.almacen_id, item => item.cantidad);
-    demand.forEach(item => { if ((stockMap[item.key]?.cantidad || 0) < item.cantidad) throw new Error("No hay stock físico suficiente para restaurar la operación."); });
     const now = new Date();
     targets.forEach(target => {
       const index = movimientos.findIndex(movimiento => movimiento.id === target.id);
@@ -3868,27 +2916,11 @@ export const firestoreService = {
         movimientos[index] = restoredCancelled;
         return;
       }
-      const sku = target.sku.trim().toUpperCase();
-      const qty = Number(target.cantidad) || 0;
-      const originKey = `${sku}_${target.almacen_id}`;
-      const originQty = stockMap[originKey]?.cantidad || 0;
-      if (target.tipo === "salida" && target.afecta_stock !== false) stockMap[originKey] = { ...(stockMap[originKey] || { id: originKey, sku, almacen_id: target.almacen_id }), cantidad: originQty - qty, actualizado: now } as StockItem;
-      if (target.tipo === "entrada") stockMap[originKey] = { ...(stockMap[originKey] || { id: originKey, sku, almacen_id: target.almacen_id }), cantidad: originQty + qty, actualizado: now } as StockItem;
-      if (target.tipo === "transferencia" && target.almacen_destino_id) {
-        const destKey = `${sku}_${target.almacen_destino_id}`;
-        stockMap[originKey] = { ...stockMap[originKey], cantidad: originQty - qty, actualizado: now };
-        stockMap[destKey] = { ...(stockMap[destKey] || { id: destKey, sku, almacen_id: target.almacen_destino_id }), cantidad: (stockMap[destKey]?.cantidad || 0) + qty, actualizado: now } as StockItem;
-      }
-      if (target.tipo === "salida" && !target.subtipo) {
-        const summaryKey = `${getLocalDateString(target.fecha)}_${sku}_${target.almacen_id}`;
-        const previous = summaryMap[summaryKey];
-        summaryMap[summaryKey] = { id: summaryKey, fecha_str: getLocalDateString(target.fecha), fecha: target.fecha, sku, almacen_id: target.almacen_id, cantidad: (previous?.cantidad || 0) + qty, total_transacciones: (previous?.total_transacciones || 0) + 1, actualizado: now };
-      }
       const restored = { ...target, estado: "activo" as const, en_papelera: false };
       delete restored.anulado_at; delete restored.anulado_por; delete restored.motivo_anulacion; delete restored.desactivado_at; delete restored.estado_antes_papelera; delete restored.periodo_descontado_papelera;
       movimientos[index] = restored;
     });
-    setLocalStorageItem("stock", stockMap); setLocalStorageItem("resumen_ventas", summaryMap); setLocalStorageItem("movimientos", movimientos);
+    setLocalStorageItem("movimientos", movimientos);
     if (selected.venta_id) {
       const masterSales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
       const masterIndex = masterSales.findIndex(item => item.id === selected.venta_id);
@@ -3904,7 +2936,7 @@ export const firestoreService = {
         setLocalStorageItem("ventas_maestras", masterSales);
       }
     }
-    notifyListeners("stock", stockMap); notifyListeners("movimientos", movimientos);
+    notifyListeners("movimientos", movimientos);
     clearFinanzasCache(); clearPeriodosFinancierosCache();
   },
 
@@ -3913,7 +2945,6 @@ export const firestoreService = {
     pageSize?: number;
     lastDoc?: any;
     skuFilter?: string;
-    warehouseFilter?: string;
     tipoFilter?: string;
     estadoFilter?: string;
   } = {}): Promise<{
@@ -3930,9 +2961,6 @@ export const firestoreService = {
 
         if (options.skuFilter) {
           qConstraints.unshift(where("sku", "==", options.skuFilter.trim().toUpperCase()));
-        }
-        if (options.warehouseFilter && options.warehouseFilter !== "all") {
-          qConstraints.unshift(where("almacen_id", "==", options.warehouseFilter));
         }
         if (options.tipoFilter && options.tipoFilter !== "all") {
           qConstraints.unshift(where("tipo", "==", options.tipoFilter));
@@ -3953,7 +2981,7 @@ export const firestoreService = {
         const itemsToProcess = hasMore ? docs.slice(0, pageSize) : docs;
         const nextLastDoc = itemsToProcess.length > 0 ? itemsToProcess[itemsToProcess.length - 1] : null;
 
-        const list: Movimiento[] = itemsToProcess.filter(d => d.data().en_papelera !== true).map(d => {
+        const list: Movimiento[] = itemsToProcess.filter(d => d.data().en_papelera !== true && d.data().tipo !== "transferencia").map(d => {
           const data = d.data();
           return {
             id: d.id,
@@ -3977,13 +3005,13 @@ export const firestoreService = {
             unidades_devueltas: typeof data.unidades_devueltas === "number" ? data.unidades_devueltas : undefined,
             estado_pago: data.estado_pago || undefined,
             sku: data.sku,
-            almacen_id: data.almacen_id,
+            drop_id: data.drop_id,
+            drop_nombre: data.drop_nombre,
             tipo: data.tipo,
             cantidad: data.cantidad,
             referencia: data.referencia,
             usuario: data.usuario,
             fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
-            almacen_destino_id: data.almacen_destino_id,
             compra_id: data.compra_id,
             lote_id: data.lote_id,
             costo_unitario: typeof data.costo_unitario === "number" ? data.costo_unitario : undefined,
@@ -4028,7 +3056,7 @@ export const firestoreService = {
     }
 
     // Modo local
-    let movs = getLocalStorageItem<Movimiento[]>("movimientos", []).filter(movimiento => movimiento.en_papelera !== true);
+    let movs = getLocalStorageItem<Movimiento[]>("movimientos", []).filter(movimiento => movimiento.en_papelera !== true && movimiento.tipo !== "transferencia");
     movs = movs.map(m => ({
       ...m,
       fecha: typeof m.fecha === "string" ? new Date(m.fecha) : m.fecha,
@@ -4053,9 +3081,6 @@ export const firestoreService = {
         (m.ubicacion_entrega_nombre && m.ubicacion_entrega_nombre.toLowerCase().includes(s)) ||
         (m.repartidor_nombre && m.repartidor_nombre.toLowerCase().includes(s))
       );
-    }
-    if (options.warehouseFilter && options.warehouseFilter !== "all") {
-      movs = movs.filter(m => m.almacen_id === options.warehouseFilter || m.almacen_destino_id === options.warehouseFilter);
     }
     if (options.tipoFilter && options.tipoFilter !== "all") {
       movs = movs.filter(m => m.tipo === options.tipoFilter);
@@ -4082,49 +3107,7 @@ export const firestoreService = {
     return res.items;
   },
 
-
   // --- CONSULTA OPTIMIZADA DE RESÚMENES INCREMENTALES DE VENTAS ---
-  getResumenVentasByDateRange: async (startDate: Date, endDate: Date): Promise<ResumenVentaDiaria[]> => {
-    const startStr = getLocalDateString(startDate);
-    const endStr = getLocalDateString(endDate);
-
-    if (isConfigured && realDb) {
-      const q = query(
-        collection(realDb, "resumen_ventas"),
-        where("fecha_str", ">=", startStr),
-        where("fecha_str", "<=", endStr)
-      );
-
-      const snap = await getDocs(q);
-      const list: ResumenVentaDiaria[] = [];
-
-      snap.forEach(d => {
-        const data = d.data();
-        if (Number(data.cantidad) > 0) {
-          list.push({
-            id: d.id,
-            fecha_str: data.fecha_str,
-            fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
-            sku: data.sku,
-            almacen_id: data.almacen_id,
-            cantidad: Number(data.cantidad) || 0,
-            total_transacciones: Number(data.total_transacciones) || 1,
-            actualizado: data.actualizado ? (data.actualizado as Timestamp).toDate() : undefined
-          });
-        }
-      });
-
-      return list;
-    }
-
-    // Modo emulador local
-    const summaryMap = getLocalStorageItem<Record<string, ResumenVentaDiaria>>("resumen_ventas", {});
-    return Object.values(summaryMap).filter(item => {
-      const f = item.fecha_str;
-      return f >= startStr && f <= endStr && item.cantidad > 0;
-    });
-  },
-
   getVentasMaestrasByDateRange: async (startDate: Date, endDate: Date): Promise<Venta[]> => {
     const startMs = startDate.getTime();
     const endMs = endDate.getTime();
@@ -4276,7 +3259,6 @@ export const firestoreService = {
   registerCompraTransaction: async (compraData: {
     proveedor: string;
     fecha?: Date;
-    almacen_id: string;
     items: CompraItem[];
     costo_envio?: number;
     comisiones?: number;
@@ -4292,11 +3274,6 @@ export const firestoreService = {
     const proveedorClean = (compraData.proveedor || "").trim();
     if (!proveedorClean) {
       throw new Error("El nombre o razón social del proveedor es obligatorio.");
-    }
-
-    const almacenId = (compraData.almacen_id || "").trim();
-    if (!almacenId) {
-      throw new Error("El almacén de recepción es obligatorio.");
     }
 
     if (!compraData.items || compraData.items.length === 0) {
@@ -4349,6 +3326,7 @@ export const firestoreService = {
     const purchaseDate = compraData.fecha instanceof Date ? compraData.fecha : new Date();
     const fechaStr = getLocalDateString(purchaseDate);
     const dropId = (compraData.drop_id || "").trim();
+    if (!dropId) throw new Error("Selecciona el drop que recibirá la mercancía.");
 
     if (isConfigured && realDb) {
       const compraCounterRef = doc(realDb, "contadores", "compra");
@@ -4385,16 +3363,7 @@ export const firestoreService = {
           }
         }
 
-        // 2.5 Lectura de stock de todas las partidas y del índice de periodos financieros
-        const stockSnaps: any[] = [];
-        for (let i = 0; i < validItems.length; i++) {
-          const item = validItems[i];
-          const stockKey = `${item.sku}_${almacenId}`;
-          const stockRef = doc(realDb, "stock", stockKey);
-          const snap = await transaction.get(stockRef);
-          stockSnaps.push({ stockKey, stockRef, snap, item });
-        }
-
+        await validateSaleProducts(validItems.map(item => item.sku), transaction);
         const periodSnap = periodRef ? await transaction.get(periodRef) : null;
         const dropSnap = dropRef ? await transaction.get(dropRef) : null;
         if (dropRef) {
@@ -4407,21 +3376,9 @@ export const firestoreService = {
           dropNombre = String(dropSnap.data()?.nombre || "").trim();
         }
 
-        // 3. Procesar stock y movimientos de cada partida
-        for (let i = 0; i < stockSnaps.length; i++) {
-          const { stockKey, stockRef, snap, item } = stockSnaps[i];
-          const currentQty = snap.exists() ? (Number(snap.data()?.cantidad) || 0) : 0;
-          const newQty = currentQty + item.cantidad;
-
-          // Actualizar stock
-          transaction.set(stockRef, {
-            id: stockKey,
-            sku: item.sku,
-            almacen_id: almacenId,
-            cantidad: newQty,
-            actualizado: Timestamp.now()
-          }, { merge: true });
-
+        // Las existencias se derivan de la compra, sin saldos por ubicación.
+        for (let i = 0; i < validItems.length; i++) {
+          const item = validItems[i];
           transaction.set(doc(realDb, "productos", item.sku), {
             precio_costo: item.costo_unitario,
             actualizado_at: Timestamp.now()
@@ -4437,7 +3394,7 @@ export const firestoreService = {
           transaction.set(movRef, {
             folio: movFolio,
             sku: item.sku,
-            almacen_id: almacenId,
+
             tipo: "entrada",
             cantidad: item.cantidad,
             referencia: refText,
@@ -4470,7 +3427,7 @@ export const firestoreService = {
           proveedor: proveedorClean,
           fecha: Timestamp.fromDate(purchaseDate),
           fecha_str: fechaStr,
-          almacen_id: almacenId,
+
           ...(dropId ? { drop_id: dropId, drop_nombre: dropNombre } : {}),
           items: validItems,
           total_unidades: totalUnidades,
@@ -4518,14 +3475,14 @@ export const firestoreService = {
       localDropNombre = localDrop.nombre;
     }
 
-    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
+    await validateSaleProducts(validItems.map(item => item.sku));
     const comprasList = getLocalStorageItem<Compra[]>("compras", []);
     const productosList = getLocalStorageItem<Producto[]>("productos", []);
     const movimientosList = getLocalStorageItem<Movimiento[]>("movimientos", []);
     const counters = getLocalStorageItem<Record<string, number>>("contadores_movimientos", {
       entrada: 0,
       salida: 0,
-      transferencia: 0,
+
       ajuste: 0,
       compra: 0
     });
@@ -4536,16 +3493,6 @@ export const firestoreService = {
     const compraDocId = "comp_" + Math.random().toString(36).substr(2, 9);
 
     for (const item of validItems) {
-      const stockKey = `${item.sku}_${almacenId}`;
-      const currentQty = stockMap[stockKey]?.cantidad || 0;
-      stockMap[stockKey] = {
-        id: stockKey,
-        sku: item.sku,
-        almacen_id: almacenId,
-        cantidad: currentQty + item.cantidad,
-        actualizado: new Date()
-      };
-
       const nextEntradaNum = (counters.entrada || 0) + 1;
       counters.entrada = nextEntradaNum;
       const movFolio = `Entrada-${nextEntradaNum}`;
@@ -4557,7 +3504,7 @@ export const firestoreService = {
         id: "mov_" + Math.random().toString(36).substr(2, 9),
         folio: movFolio,
         sku: item.sku,
-        almacen_id: almacenId,
+
         tipo: "entrada",
         cantidad: item.cantidad,
         referencia: refText,
@@ -4574,8 +3521,6 @@ export const firestoreService = {
     }
 
     setLocalStorageItem("contadores_movimientos", counters);
-    setLocalStorageItem("stock", stockMap);
-    notifyListeners("stock", stockMap);
     setLocalStorageItem("movimientos", movimientosList);
     setLocalStorageItem("productos", productosList);
     notifyListeners("productos", productosList);
@@ -4587,7 +3532,7 @@ export const firestoreService = {
       proveedor: proveedorClean,
       fecha: purchaseDate,
       fecha_str: fechaStr,
-      almacen_id: almacenId,
+
       drop_id: dropId || undefined,
       drop_nombre: dropId ? localDropNombre : undefined,
       items: validItems,
@@ -4636,53 +3581,12 @@ export const firestoreService = {
         const movementSnaps: any[] = [];
         for (const movementRef of movementRefs) movementSnaps.push(await transaction.get(movementRef));
 
-        const quantitiesByStock = new Map<string, { sku: string; almacenId: string; cantidad: number; ref: any }>();
-        movementSnaps.forEach(snapshot => {
-          if (!snapshot.exists() || snapshot.data().estado === "anulado") return;
-          const data = snapshot.data();
-          const sku = String(data.sku || "").trim().toUpperCase();
-          const almacenId = String(data.almacen_id || "");
-          const key = `${sku}_${almacenId}`;
-          const current = quantitiesByStock.get(key);
-          quantitiesByStock.set(key, {
-            sku,
-            almacenId,
-            cantidad: (current?.cantidad || 0) + (Number(data.cantidad) || 0),
-            ref: doc(realDb!, "stock", key)
-          });
-        });
-
-        const stockEntries = [...quantitiesByStock.values()];
-        const stockSnaps: any[] = [];
-        for (const entry of stockEntries) stockSnaps.push(await transaction.get(entry.ref));
-
         const periodoKey = getPeriodoKey(compraSnap.data().fecha);
         const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
         const periodSnap = periodRef ? await transaction.get(periodRef) : null;
 
-        stockEntries.forEach((entry, index) => {
-          const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
-          if (currentQty < entry.cantidad) {
-            throw new Error(
-              `No se puede enviar esta compra a la Papelera porque parte de ${entry.sku} ya fue vendida, transferida o ajustada. ` +
-              `Hay ${currentQty} unidades disponibles y se necesitan ${entry.cantidad} para revertir la compra. ` +
-              `Primero cancela o revierte los movimientos posteriores relacionados.`
-            );
-          }
-        });
-
         await validatePurchaseRemoval({ ...compraSnap.data(), id: compraId } as Compra);
         const now = Timestamp.now();
-        stockEntries.forEach((entry, index) => {
-          const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
-          transaction.set(entry.ref, {
-            id: `${entry.sku}_${entry.almacenId}`,
-            sku: entry.sku,
-            almacen_id: entry.almacenId,
-            cantidad: currentQty - entry.cantidad,
-            actualizado: now
-          }, { merge: true });
-        });
         movementSnaps.forEach(snapshot => {
           if (!snapshot.exists()) return;
           const wasCancelled = snapshot.data().estado === "anulado";
@@ -4728,32 +3632,17 @@ export const firestoreService = {
 
     const compras = getLocalStorageItem<Compra[]>("compras", []);
     const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
-    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
     const compraIndex = compras.findIndex(compra => compra.id === compraId);
     if (compraIndex === -1) throw new Error("La compra no existe.");
     if (compras[compraIndex].estado === "anulada") throw new Error("La compra ya está anulada.");
     await validatePurchaseRemoval(compras[compraIndex]);
-    const linked = movimientos.filter(movimiento => movimiento.compra_id === compraId && movimiento.estado !== "anulado");
-    const totals = new Map<string, number>();
-    linked.forEach(movimiento => {
-      const key = `${movimiento.sku.trim().toUpperCase()}_${movimiento.almacen_id}`;
-      totals.set(key, (totals.get(key) || 0) + (Number(movimiento.cantidad) || 0));
-    });
-    totals.forEach((cantidad, key) => {
-      if ((stockMap[key]?.cantidad || 0) < cantidad) throw new Error(`No hay stock suficiente para revertir ${key}.`);
-    });
     const now = new Date();
-    totals.forEach((cantidad, key) => {
-      stockMap[key] = { ...stockMap[key], cantidad: (stockMap[key]?.cantidad || 0) - cantidad, actualizado: now };
-    });
     movimientos.forEach((movimiento, index) => {
       if (movimiento.compra_id === compraId) movimientos[index] = { ...movimiento, estado_antes_papelera: movimiento.estado === "anulado" ? "anulado" : "activo", estado: "anulado", anulado_at: now, anulado_por: usuarioEmail, motivo_anulacion: "Compra enviada a Papelera", en_papelera: true, desactivado_at: now };
     });
     compras[compraIndex] = { ...compras[compraIndex], estado: "anulada", en_papelera: true, desactivado_at: now };
-    setLocalStorageItem("stock", stockMap);
     setLocalStorageItem("movimientos", movimientos);
     setLocalStorageItem("compras", compras);
-    notifyListeners("stock", stockMap);
     notifyListeners("movimientos", movimientos);
     notifyListeners("compras", compras);
     clearFinanzasCache();
@@ -4772,28 +3661,10 @@ export const firestoreService = {
         if (compraSnap.data().en_papelera !== true) throw new Error("La compra ya está activa.");
         const movementSnaps: any[] = [];
         for (const movementRef of movementRefs) movementSnaps.push(await transaction.get(movementRef));
-        const quantitiesByStock = new Map<string, { sku: string; almacenId: string; cantidad: number; ref: any }>();
-        movementSnaps.forEach(snapshot => {
-          if (!snapshot.exists()) return;
-          const data = snapshot.data();
-          if (data.estado_antes_papelera === "anulado") return;
-          const sku = String(data.sku || "").trim().toUpperCase();
-          const almacenId = String(data.almacen_id || "");
-          const key = `${sku}_${almacenId}`;
-          const current = quantitiesByStock.get(key);
-          quantitiesByStock.set(key, { sku, almacenId, cantidad: (current?.cantidad || 0) + (Number(data.cantidad) || 0), ref: doc(realDb!, "stock", key) });
-        });
-        const stockEntries = [...quantitiesByStock.values()];
-        const stockSnaps: any[] = [];
-        for (const entry of stockEntries) stockSnaps.push(await transaction.get(entry.ref));
         const periodoKey = getPeriodoKey(compraSnap.data().fecha);
         const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
         const periodSnap = periodRef ? await transaction.get(periodRef) : null;
         const now = Timestamp.now();
-        stockEntries.forEach((entry, index) => {
-          const currentQty = stockSnaps[index].exists() ? Number(stockSnaps[index].data()?.cantidad) || 0 : 0;
-          transaction.set(entry.ref, { id: `${entry.sku}_${entry.almacenId}`, sku: entry.sku, almacen_id: entry.almacenId, cantidad: currentQty + entry.cantidad, actualizado: now }, { merge: true });
-        });
         movementSnaps.forEach(snapshot => {
           if (!snapshot.exists()) return;
           const wasCancelled = snapshot.data().estado_antes_papelera === "anulado";
@@ -4810,17 +3681,13 @@ export const firestoreService = {
     }
     const compras = getLocalStorageItem<Compra[]>("compras", []);
     const movimientos = getLocalStorageItem<Movimiento[]>("movimientos", []);
-    const stockMap = getLocalStorageItem<Record<string, StockItem>>("stock", {});
     const compraIndex = compras.findIndex(compra => compra.id === compraId);
     if (compraIndex === -1) throw new Error("La compra no existe.");
+    if (!compras[compraIndex].en_papelera) throw new Error("La compra ya está activa.");
     const now = new Date();
     movimientos.forEach((movimiento, index) => {
       if (movimiento.compra_id !== compraId) return;
       const wasCancelled = movimiento.estado_antes_papelera === "anulado";
-      if (!wasCancelled) {
-        const key = `${movimiento.sku.trim().toUpperCase()}_${movimiento.almacen_id}`;
-        stockMap[key] = { ...(stockMap[key] || { id: key, sku: movimiento.sku, almacen_id: movimiento.almacen_id }), cantidad: (stockMap[key]?.cantidad || 0) + (Number(movimiento.cantidad) || 0), actualizado: now } as StockItem;
-      }
       const restored = { ...movimiento, estado: wasCancelled ? "anulado" as const : "activo" as const, en_papelera: false };
       if (!wasCancelled) { delete restored.anulado_at; delete restored.anulado_por; delete restored.motivo_anulacion; }
       delete restored.desactivado_at; delete restored.estado_antes_papelera;
@@ -4829,8 +3696,8 @@ export const firestoreService = {
     const restoredCompra = { ...compras[compraIndex], estado: "completada" as const, en_papelera: false };
     delete restoredCompra.desactivado_at;
     compras[compraIndex] = restoredCompra;
-    setLocalStorageItem("stock", stockMap); setLocalStorageItem("movimientos", movimientos); setLocalStorageItem("compras", compras);
-    notifyListeners("stock", stockMap); notifyListeners("movimientos", movimientos); notifyListeners("compras", compras);
+    setLocalStorageItem("movimientos", movimientos); setLocalStorageItem("compras", compras);
+    notifyListeners("movimientos", movimientos); notifyListeners("compras", compras);
     clearFinanzasCache(); clearPeriodosFinancierosCache();
   },
 
@@ -4938,7 +3805,6 @@ export const firestoreService = {
   getComprasPaginated: async (options: {
     pageSize?: number;
     lastDoc?: any;
-    warehouseFilter?: string;
     searchTerm?: string;
   } = {}): Promise<{
     items: Compra[];
@@ -4951,10 +3817,6 @@ export const firestoreService = {
     if (isConfigured && realDb) {
       try {
         let qConstraints: any[] = [orderBy("fecha", "desc"), limit(pageSize + 1)];
-
-        if (options.warehouseFilter && options.warehouseFilter !== "all") {
-          qConstraints.unshift(where("almacen_id", "==", options.warehouseFilter));
-        }
 
         if (options.lastDoc) {
           qConstraints.push(startAfter(options.lastDoc));
@@ -5017,9 +3879,6 @@ export const firestoreService = {
     }));
     parsed.sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
 
-    if (options.warehouseFilter && options.warehouseFilter !== "all") {
-      parsed = parsed.filter(c => c.almacen_id === options.warehouseFilter);
-    }
     if (options.searchTerm) {
       const term = options.searchTerm.toLowerCase().trim();
       parsed = parsed.filter(c => 
@@ -6072,7 +4931,6 @@ export const firestoreService = {
     pageSize?: number;
     lastDoc?: any;
     categoriaFilter?: string;
-    warehouseFilter?: string;
     metodoPagoFilter?: string;
     startDate?: string;
     endDate?: string;
@@ -6215,8 +5073,6 @@ export const firestoreService = {
     fecha: Date;
     fecha_str?: string;
     metodo_pago?: MetodoPagoGasto | string;
-    almacen_id?: string;
-    almacen_nombre?: string;
     proveedor?: string;
     referencia?: string;
     notas?: string;
@@ -6267,12 +5123,6 @@ export const firestoreService = {
       }
       payload.metodo_pago = cleanMetodo;
     }
-    if (gastoData.almacen_id && gastoData.almacen_id.trim()) {
-      payload.almacen_id = gastoData.almacen_id.trim();
-    }
-    if (gastoData.almacen_nombre && gastoData.almacen_nombre.trim()) {
-      payload.almacen_nombre = gastoData.almacen_nombre.trim();
-    }
     if (gastoData.proveedor && gastoData.proveedor.trim()) {
       payload.proveedor = gastoData.proveedor.trim();
     }
@@ -6320,8 +5170,6 @@ export const firestoreService = {
           actualizado_at: new Date()
         };
         if (payload.metodo_pago) createdGasto.metodo_pago = payload.metodo_pago;
-        if (payload.almacen_id) createdGasto.almacen_id = payload.almacen_id;
-        if (payload.almacen_nombre) createdGasto.almacen_nombre = payload.almacen_nombre;
         if (payload.proveedor) createdGasto.proveedor = payload.proveedor;
         if (payload.referencia) createdGasto.referencia = payload.referencia;
         if (payload.notas) createdGasto.notas = payload.notas;
@@ -6347,8 +5195,6 @@ export const firestoreService = {
       actualizado_at: new Date()
     };
     if (payload.metodo_pago) createdLocal.metodo_pago = payload.metodo_pago;
-    if (payload.almacen_id) createdLocal.almacen_id = payload.almacen_id;
-    if (payload.almacen_nombre) createdLocal.almacen_nombre = payload.almacen_nombre;
     if (payload.proveedor) createdLocal.proveedor = payload.proveedor;
     if (payload.referencia) createdLocal.referencia = payload.referencia;
     if (payload.notas) createdLocal.notas = payload.notas;
@@ -6370,8 +5216,6 @@ export const firestoreService = {
     fecha?: Date;
     fecha_str?: string;
     metodo_pago?: MetodoPagoGasto | string | null;
-    almacen_id?: string | null;
-    almacen_nombre?: string | null;
     proveedor?: string | null;
     referencia?: string | null;
     notas?: string | null;
@@ -6422,29 +5266,6 @@ export const firestoreService = {
           updatePayload.metodo_pago = deleteField();
         }
         fieldsToDeleteInLocal.push("metodo_pago");
-      }
-    }
-
-    // Almacén y nombre de almacén
-    if (gastoData.almacen_id !== undefined) {
-      const cleanAlmId = typeof gastoData.almacen_id === "string" ? gastoData.almacen_id.trim() : "";
-      if (cleanAlmId) {
-        updatePayload.almacen_id = cleanAlmId;
-        const cleanNombre = typeof gastoData.almacen_nombre === "string" ? gastoData.almacen_nombre.trim() : "";
-        if (cleanNombre) {
-          updatePayload.almacen_nombre = cleanNombre;
-        } else {
-          if (isConfigured && realDb) {
-            updatePayload.almacen_nombre = deleteField();
-          }
-          fieldsToDeleteInLocal.push("almacen_nombre");
-        }
-      } else {
-        if (isConfigured && realDb) {
-          updatePayload.almacen_id = deleteField();
-          updatePayload.almacen_nombre = deleteField();
-        }
-        fieldsToDeleteInLocal.push("almacen_id", "almacen_nombre");
       }
     }
 
@@ -6682,7 +5503,7 @@ export const firestoreService = {
 
     if (isConfigured && realDb) {
       const collectionNames = [
-        "clientes", "drops", "movimientos", "compras", "gastos", "productos", "almacenes",
+        "clientes", "drops", "movimientos", "compras", "gastos", "productos",
         "catalogo_categorias", "catalogo_marcas", "catalogo_colores", "catalogo_tallas_ropa",
         "catalogo_tallas_calzado", "catalogo_unidades", "catalogo_ubicaciones_entrega", "catalogo_repartidores"
       ] as const;
@@ -6698,6 +5519,7 @@ export const firestoreService = {
       const trashedMovements = [...(byName.get("movimientos")?.docs || [])].sort((a, b) => Number(Boolean(b.data().venta_id)) - Number(Boolean(a.data().venta_id)));
       trashedMovements.forEach(item => {
         const data = item.data();
+        if (data.tipo === "transferencia") return;
         if (data.compra_id && purchaseIds.has(data.compra_id)) return;
         const groupedSaleId = data.venta_id || data.venta_relacionada_id;
         if (groupedSaleId) {
@@ -6710,7 +5532,6 @@ export const firestoreService = {
       });
       byName.get("gastos")?.docs.forEach(item => { const data = item.data(); items.push(makeItem("gasto", item.id, data.concepto || "Gasto", `${data.categoria || "Otros"} · $${Number(data.monto || 0).toFixed(2)}`, data)); });
       byName.get("productos")?.docs.forEach(item => { const data = item.data(); items.push(makeItem("producto", item.id, data.nombre || item.id, `SKU ${item.id}`, data)); });
-      byName.get("almacenes")?.docs.forEach(item => { const data = item.data(); items.push(makeItem("almacen", item.id, data.nombre || "Almacén", data.ubicacion || "Sin ubicación", data)); });
       const catalogMap: Array<[typeof collectionNames[number], PapeleraTipo]> = [
         ["catalogo_categorias", "categoria"], ["catalogo_marcas", "marca"], ["catalogo_colores", "color"],
         ["catalogo_tallas_ropa", "talla_ropa"], ["catalogo_tallas_calzado", "talla_calzado"], ["catalogo_unidades", "unidad"],
@@ -6727,7 +5548,7 @@ export const firestoreService = {
     const purchaseIds = new Set(compras.map(item => item.id));
     compras.forEach(item => items.push(makeItem("compra", item.id || "", item.folio, `${item.proveedor} · $${Number(item.total || 0).toFixed(2)}`, item)));
     const groupedSales = new Set<string>();
-    getLocalStorageItem<Movimiento[]>("movimientos", []).filter(item => item.en_papelera).sort((a, b) => Number(Boolean(b.venta_id)) - Number(Boolean(a.venta_id))).forEach(item => {
+    getLocalStorageItem<Movimiento[]>("movimientos", []).filter(item => item.en_papelera && item.tipo !== "transferencia").sort((a, b) => Number(Boolean(b.venta_id)) - Number(Boolean(a.venta_id))).forEach(item => {
       if (item.compra_id && purchaseIds.has(item.compra_id)) return;
       const groupedSaleId = item.venta_id || item.venta_relacionada_id;
       if (groupedSaleId) {
@@ -6738,7 +5559,6 @@ export const firestoreService = {
     });
     getLocalStorageItem<Gasto[]>("gastos", []).filter(item => item.en_papelera).forEach(item => items.push(makeItem("gasto", item.id || "", item.concepto, `${item.categoria} · $${Number(item.monto || 0).toFixed(2)}`, item)));
     getLocalStorageItem<Producto[]>("productos", []).filter(item => item.en_papelera).forEach(item => items.push(makeItem("producto", item.sku, item.nombre, `SKU ${item.sku}`, item)));
-    getLocalStorageItem<Almacen[]>("almacenes", []).filter(item => item.en_papelera).forEach(item => items.push(makeItem("almacen", item.id, item.nombre, item.ubicacion, item)));
     const localCatalogs: Array<[string, PapeleraTipo]> = [["categorias", "categoria"], ["marcas", "marca"], ["colores", "color"], ["tallas_ropa", "talla_ropa"], ["tallas_calzado", "talla_calzado"], ["unidades", "unidad"], ["ubicaciones_entrega", "ubicacion_entrega"], ["repartidores", "repartidor"]];
     localCatalogs.forEach(([key, tipo]) => getLocalStorageItem<any[]>(key, []).filter(item => item.en_papelera).forEach(item => items.push(makeItem(tipo, item.id, item.nombre || item.abreviatura || item.id, "Elemento de catálogo", item))));
     return items.sort((a, b) => (b.fecha?.getTime() || 0) - (a.fecha?.getTime() || 0));
@@ -6746,7 +5566,7 @@ export const firestoreService = {
 
   vaciarPapelera: async (): Promise<number> => {
     const collectionNames = [
-      "clientes", "drops", "ventas", "movimientos", "compras", "gastos", "productos", "almacenes",
+      "clientes", "drops", "ventas", "movimientos", "compras", "gastos", "productos",
       "catalogo_categorias", "catalogo_marcas", "catalogo_colores", "catalogo_tallas_ropa",
       "catalogo_tallas_calzado", "catalogo_unidades", "catalogo_ubicaciones_entrega", "catalogo_repartidores"
     ] as const;
@@ -6757,7 +5577,7 @@ export const firestoreService = {
           getDocs(query(collection(realDb!, collectionName), where("en_papelera", "==", true)))
         )
       );
-      const documentRefs = snapshots.flatMap(snapshot => snapshot.docs.map(document => document.ref));
+      const documentRefs = snapshots.flatMap(snapshot => snapshot.docs.filter(document => document.data().tipo !== "transferencia").map(document => document.ref));
 
       // Firestore limita cada lote a 500 operaciones. Dejamos margen para mantener
       // este proceso seguro si la Papelera acumula muchos registros de prueba.
@@ -6780,7 +5600,6 @@ export const firestoreService = {
       { storageKey: "compras", listenerKey: "compras" },
       { storageKey: "gastos", listenerKey: "gastos" },
       { storageKey: "productos", listenerKey: "productos" },
-      { storageKey: "almacenes", listenerKey: "almacenes" },
       { storageKey: "categorias", listenerKey: "categorias" },
       { storageKey: "marcas", listenerKey: "marcas" },
       { storageKey: "colores", listenerKey: "colores" },
@@ -6793,7 +5612,7 @@ export const firestoreService = {
     let deletedCount = 0;
     localCollections.forEach(({ storageKey, listenerKey }) => {
       const current = getLocalStorageItem<any[]>(storageKey, []);
-      const remaining = current.filter(item => item.en_papelera !== true);
+      const remaining = current.filter(item => item.en_papelera !== true || item.tipo === "transferencia");
       deletedCount += current.length - remaining.length;
       setLocalStorageItem(storageKey, remaining);
       if (listenerKey) notifyListeners(listenerKey, remaining);
@@ -6812,7 +5631,6 @@ export const firestoreService = {
 
     const config: Record<string, { collection: string; localKey: string; activeField: "activo" | "activa" }> = {
       producto: { collection: "productos", localKey: "productos", activeField: "activo" },
-      almacen: { collection: "almacenes", localKey: "almacenes", activeField: "activo" },
       categoria: { collection: "catalogo_categorias", localKey: "categorias", activeField: "activa" },
       marca: { collection: "catalogo_marcas", localKey: "marcas", activeField: "activa" },
       color: { collection: "catalogo_colores", localKey: "colores", activeField: "activa" },
@@ -7567,9 +6385,10 @@ export const firestoreService = {
 // Las llamadas anidadas usan las operaciones internas para no adquirir dos veces
 // el mismo bloqueo. En Firebase cada operación conserva su transacción remota.
 const inventoryOperations = {
+  deleteProducts: firestoreService.deleteProducts,
+  enviarDropPapelera: firestoreService.enviarDropPapelera,
   registerVentaTransaction: firestoreService.registerVentaTransaction,
   registerCompraTransaction: firestoreService.registerCompraTransaction,
-  registerMovimientoTransaction: firestoreService.registerMovimientoTransaction,
   devolverVentaCompleta: firestoreService.devolverVentaCompleta,
   anularVentaAgrupada: firestoreService.anularVentaAgrupada,
   anularMovimiento: firestoreService.anularMovimiento,

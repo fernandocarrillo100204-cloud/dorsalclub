@@ -24,14 +24,14 @@ service cloud.firestore {
       return id is string && id.size() > 0 && id.size() <= 128;
     }
 
-    // Almacenes Collection
-    match /almacenes/{almacenId} {
+    // Colecciones retiradas: se conserva únicamente lectura histórica.
+    match /almacenes/{id} {
       allow read: if isSignedIn();
-      allow create, update: if isSignedIn() 
-        && isValidId(almacenId)
-        && incoming().nombre is string && incoming().nombre.size() > 0 && incoming().nombre.size() <= 100
-        && incoming().ubicacion is string && incoming().ubicacion.size() > 0 && incoming().ubicacion.size() <= 500;
-      allow delete: if isSignedIn() && existing().en_papelera == true;
+      allow write: if false;
+    }
+    match /stock/{id} {
+      allow read: if isSignedIn();
+      allow write: if false;
     }
 
     // Productos Collection
@@ -44,26 +44,15 @@ service cloud.firestore {
       allow delete: if isSignedIn() && existing().en_papelera == true;
     }
 
-    // Stock Collection
-    match /stock/{stockId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn()
-        && isValidId(stockId)
-        && incoming().sku is string && incoming().sku.size() > 0
-        && incoming().almacen_id is string && incoming().almacen_id.size() > 0
-        && incoming().cantidad is number && incoming().cantidad >= 0;
-      allow delete: if false;
-    }
-
     // Movimientos Collection
     match /movimientos/{movimientoId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn()
         && isValidId(movimientoId)
         && incoming().sku is string
-        && incoming().tipo in ['entrada', 'salida', 'transferencia', 'ajuste']
+        && incoming().tipo in ['entrada', 'salida', 'ajuste']
         && incoming().cantidad is number && incoming().cantidad > 0;
-      allow update: if isSignedIn() && (
+      allow update: if isSignedIn() && existing().tipo != 'transferencia' && incoming().tipo == existing().tipo && (
         (
           (!('estado' in existing()) || existing().estado != 'anulado')
           && incoming().estado == 'anulado'
@@ -104,7 +93,7 @@ service cloud.firestore {
           && (!('drop_nombre' in incoming()) || (incoming().drop_nombre is string && incoming().drop_nombre.size() <= 100))
         )
       );
-      allow delete: if isSignedIn() && existing().en_papelera == true;
+      allow delete: if isSignedIn() && existing().tipo != 'transferencia' && existing().en_papelera == true;
     }
 
     // Documento maestro de cada venta. Las partidas de inventario siguen en movimientos.
@@ -207,16 +196,10 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Resumen de Ventas Collection (incremental daily sales aggregations)
-    match /resumen_ventas/{resumenId} {
+    // Resúmenes anteriores al inventario por drops: sin nuevas escrituras.
+    match /resumen_ventas/{id} {
       allow read: if isSignedIn();
-      allow create, update: if isSignedIn()
-        && isValidId(resumenId)
-        && incoming().sku is string
-        && incoming().almacen_id is string
-        && incoming().fecha_str is string
-        && incoming().cantidad is number;
-      allow delete: if false;
+      allow write: if false;
     }
 
     // Catalogs & System Configuration

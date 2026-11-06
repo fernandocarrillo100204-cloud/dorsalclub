@@ -19,7 +19,6 @@ import {
   Loader2
 } from "lucide-react";
 import { 
-  Almacen, 
   Gasto, 
   CategoriaGasto, 
   MetodoPagoGasto, 
@@ -31,7 +30,7 @@ import { useUnsavedChanges, useWorkspace } from "../../context/WorkspaceContext"
 interface GastoFormProps {
   mode: "create" | "edit";
   gastoId?: string;
-  almacenes: Almacen[];
+
   onSuccess: () => void;
   onCancel: () => void;
   configVersion?: number;
@@ -40,7 +39,7 @@ interface GastoFormProps {
 export default function GastoForm({
   mode,
   gastoId,
-  almacenes,
+
   onSuccess,
   onCancel,
   configVersion = 0
@@ -52,7 +51,6 @@ export default function GastoForm({
   const [monto, setMonto] = useState<string>("");
   const [fecha, setFecha] = useState<string>("");
   const [metodoPago, setMetodoPago] = useState<string>("");
-  const [almacenId, setAlmacenId] = useState<string>("");
   const [proveedor, setProveedor] = useState("");
   const [notas, setNotas] = useState("");
   const [clasificacionFinanciera, setClasificacionFinanciera] = useState<"operacion" | "inversion_inicial">("operacion");
@@ -63,8 +61,8 @@ export default function GastoForm({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [categorias, setCategorias] = useState<OpcionListaConfigurable[]>([]);
   const [metodosPago, setMetodosPago] = useState<OpcionListaConfigurable[]>([]);
-  const initialValues = useRef(JSON.stringify(["", "", "", "", "", "", "", "", "operacion"]));
-  const currentValues = JSON.stringify([concepto, categoria, monto, fecha, metodoPago, almacenId, proveedor, notas, clasificacionFinanciera]);
+  const initialValues = useRef(JSON.stringify(["", "", "", "", "", "", "", "operacion"]));
+  const currentValues = JSON.stringify([concepto, categoria, monto, fecha, metodoPago, proveedor, notas, clasificacionFinanciera]);
   const markSaved = useUnsavedChanges(!loadingInitial && !initialLoadError && currentValues !== initialValues.current, saving);
 
   useEffect(() => {
@@ -90,11 +88,10 @@ export default function GastoForm({
           setMonto(g.monto !== undefined && g.monto !== null ? String(g.monto) : "");
           setFecha(g.fecha_str || "");
           setMetodoPago(g.metodo_pago || "");
-          setAlmacenId(g.almacen_id || "");
           setProveedor(g.proveedor || "");
           setNotas(g.notas || "");
           setClasificacionFinanciera(g.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion");
-          initialValues.current = JSON.stringify([g.concepto || "", g.categoria || "", g.monto != null ? String(g.monto) : "", g.fecha_str || "", g.metodo_pago || "", g.almacen_id || "", g.proveedor || "", g.notas || "", g.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion"]);
+          initialValues.current = JSON.stringify([g.concepto || "", g.categoria || "", g.monto != null ? String(g.monto) : "", g.fecha_str || "", g.metodo_pago || "", g.proveedor || "", g.notas || "", g.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion"]);
         })
         .catch((err) => {
           console.error("Error al cargar gasto:", err);
@@ -156,9 +153,6 @@ export default function GastoForm({
       return;
     }
 
-    const selectedAlm = almacenes.find(a => a.id === almacenId);
-    const almacenNombre = selectedAlm ? selectedAlm.nombre : undefined;
-
     setSaving(true);
     try {
       if (mode === "create") {
@@ -169,8 +163,6 @@ export default function GastoForm({
           fecha: parsedFecha,
           fecha_str: fecha,
           metodo_pago: metodoPago.trim() ? (metodoPago.trim() as MetodoPagoGasto) : undefined,
-          almacen_id: almacenId ? almacenId : undefined,
-          almacen_nombre: almacenNombre,
           proveedor: proveedor.trim() ? proveedor.trim() : undefined,
           notas: notas.trim() ? notas.trim() : undefined,
           clasificacion_financiera: clasificacionFinanciera
@@ -183,8 +175,6 @@ export default function GastoForm({
           fecha: parsedFecha,
           fecha_str: fecha,
           metodo_pago: metodoPago.trim() ? (metodoPago.trim() as MetodoPagoGasto) : "",
-          almacen_id: almacenId ? almacenId : "",
-          almacen_nombre: almacenNombre ? almacenNombre : "",
           proveedor: proveedor.trim(),
           notas: notas.trim(),
           clasificacion_financiera: clasificacionFinanciera
@@ -430,33 +420,8 @@ export default function GastoForm({
             </div>
           </div>
 
-          {/* Almacén y Proveedor */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
-            {/* Almacén / Sucursal */}
-            <div>
-              <label 
-                htmlFor="gasto-almacen"
-                className="block text-xs font-semibold uppercase tracking-wider text-[#475569] dark:text-[#94A3B8] mb-1.5"
-              >
-                Almacén / Sucursal <span className="text-[#94A3B8] font-normal lowercase">(opcional)</span>
-              </label>
-              <div className="relative">
-                <select
-                  id="gasto-almacen"
-                  value={almacenId}
-                  onChange={(e) => setAlmacenId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] text-[#172033] dark:text-[#F8FAFC] text-sm focus:outline-none focus:ring-2 focus:ring-[#059669] focus:border-transparent transition-all cursor-pointer"
-                >
-                  <option value="">-- Seleccionar almacén (opcional) --</option>
-                  {almacenes.map((alm) => (
-                    <option key={alm.id} value={alm.id}>
-                      {alm.nombre}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
+          {/* Proveedor */}
+          <div>
             {/* Proveedor o Beneficiario */}
             <div>
               <label 

@@ -18,7 +18,6 @@ export const navigationGroups = [
   { id: "inventario", label: "Inventario", icon: Boxes, items: [
     { id: "drops" as NavigationTab, label: "Inventario por drops", icon: Layers, keywords: "stock disponibilidad existencias colecciones lotes pedidos" },
     { id: "catalogo" as NavigationTab, label: "Catálogo de productos", icon: Package, keywords: "variantes marcas catálogo SKU" },
-    { id: "transferencias_nueva" as NavigationTab, label: "Transferencias", icon: ArrowLeftRight, keywords: "almacenes mover" },
     { id: "historial" as NavigationTab, label: "Movimientos de inventario", icon: History, keywords: "entradas salidas ajustes historial" }
   ] },
   { id: "finanzas", label: "Finanzas", icon: Wallet, items: [
@@ -28,13 +27,12 @@ export const navigationGroups = [
   ] }
 ];
 export const utilityNavigation = [
-  { id: "configuracion" as NavigationTab, label: "Configuración", icon: Settings2, keywords: "listas porcentajes almacenes catálogos" },
+  { id: "configuracion" as NavigationTab, label: "Configuración", icon: Settings2, keywords: "listas porcentajes catálogos" },
   { id: "papelera" as NavigationTab, label: "Papelera", icon: Trash2, keywords: "eliminados restaurar borrar" }
 ];
 export function navigationParent(tab: NavigationTab): NavigationTab {
   if (["ventas_nueva", "ventas_bajo_pedido", "ventas_mayoreo", "ventas_emprendedor"].includes(tab)) return "ventas_stock";
   if (["finanzas_gastos_nuevo", "finanzas_gastos_editar"].includes(tab)) return "finanzas_gastos";
-  if (tab === "almacenes") return "configuracion";
   if (tab === "movimientos") return "compras_nueva";
   return tab;
 }
@@ -42,5 +40,5 @@ export function navigationInfo(tab: NavigationTab) {
   const parent = navigationParent(tab);
   const group = navigationGroups.find(group => group.items.some(item => item.id === parent));
   const item = group?.items.find(item => item.id === parent) || utilityNavigation.find(item => item.id === parent);
-  return { section: group?.label || "Administración", title: tab === "almacenes" ? "Almacenes" : tab === "finanzas_gastos_nuevo" ? "Registrar gasto" : tab === "finanzas_gastos_editar" ? "Editar gasto" : item?.label || "Antiorder" };
+  return { section: group?.label || "Administración", title: tab === "finanzas_gastos_nuevo" ? "Registrar gasto" : tab === "finanzas_gastos_editar" ? "Editar gasto" : item?.label || "Antiorder" };
 }

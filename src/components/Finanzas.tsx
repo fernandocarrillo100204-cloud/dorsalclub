@@ -4,7 +4,6 @@
  */
 
 import React, { useState } from "react";
-import { Almacen } from "../types";
 import GastoForm from "./finanzas/GastoForm";
 import { ResumenFinanciero } from "./finanzas/ResumenFinanciero";
 import { FinanzasTabs } from "./finanzas/FinanzasTabs";
@@ -14,7 +13,6 @@ import MovimientosFinancieros from "./finanzas/MovimientosFinancieros";
 import CuentasPorCobrar from "./finanzas/CuentasPorCobrar";
 
 interface FinanzasProps {
-  almacenes: Almacen[];
   subView: "resumen" | "movimientos" | "cobrar" | "nuevo" | "editar";
   gastoId?: string;
   onNavigateToResumen: () => void;
@@ -27,7 +25,6 @@ interface FinanzasProps {
 }
 
 export default function Finanzas({
-  almacenes,
   subView,
   gastoId,
   onNavigateToResumen,
@@ -51,7 +48,7 @@ export default function Finanzas({
       {subView === "nuevo" ? (
         <GastoForm
           mode="create"
-          almacenes={almacenes}
+
           onSuccess={onNavigateToGastos}
           onCancel={onNavigateToGastos}
           configVersion={configVersion}
@@ -60,7 +57,7 @@ export default function Finanzas({
         <GastoForm
           mode="edit"
           gastoId={gastoId}
-          almacenes={almacenes}
+
           onSuccess={onNavigateToGastos}
           onCancel={onNavigateToGastos}
           configVersion={configVersion}

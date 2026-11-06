@@ -7,8 +7,6 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { firestoreService } from "../lib/firebase";
 import { 
   Producto, 
-  StockItem, 
-  Almacen, 
   CategoriaCatalogo, 
   MarcaCatalogo,
   ColorCatalogo,
@@ -30,7 +28,6 @@ import {
   AlertTriangle, 
   Upload, 
   FileText,
-  Warehouse,
   ArrowRight,
   Sparkles,
   Info,
@@ -52,9 +49,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 
 interface GestionProductosProps {
-  almacenes?: Almacen[];
   productos?: Producto[];
-  stockList?: StockItem[];
   onNavigateToMovimiento?: (sku: string) => void;
 }
 
@@ -66,7 +61,6 @@ interface VariantFormRow {
   codigo_barras: string;
   precio_costo: number | string;
   precio_venta_sugerido: number | string;
-  stock_minimo_almacenes: Record<string, number | string>;
   stock_minimo: number | string;
   activo: boolean;
 }
@@ -86,15 +80,11 @@ function generateVariantSku(): string {
 }
 
 export default function GestionProductos({ 
-  almacenes: propAlmacenes, 
   productos: propProductos,
-  stockList: propStockList,
   onNavigateToMovimiento 
 }: GestionProductosProps) {
   const { notify } = useWorkspace();
   const [internalProductos, setInternalProductos] = useState<Producto[]>(propProductos || []);
-  const [internalStockList, setInternalStockList] = useState<StockItem[]>(propStockList || []);
-  const [internalAlmacenes, setInternalAlmacenes] = useState<Almacen[]>(propAlmacenes || []);
 
   // Catalogs
   const [catalogMarcas, setCatalogMarcas] = useState<MarcaCatalogo[]>([]);
@@ -105,8 +95,6 @@ export default function GestionProductos({
   const [catalogUnidades, setCatalogUnidades] = useState<UnidadMedidaCatalogo[]>([]);
 
   const productos = propProductos ?? internalProductos;
-  const stockList = propStockList ?? internalStockList;
-  const almacenes = propAlmacenes ?? internalAlmacenes;
 
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState("");
@@ -145,11 +133,10 @@ export default function GestionProductos({
     codigo_barras: "",
     precio_costo: "",
     precio_venta_sugerido: "",
-    stock_minimo_almacenes: {},
     stock_minimo: "",
     activo: false
   });
-  
+
   // Variants rows in form
   const [variantRows, setVariantRows] = useState<VariantFormRow[]>([createEmptyVariantRow()]);
 
@@ -168,19 +155,10 @@ export default function GestionProductos({
   // Realtime subscriptions
   useEffect(() => {
     let unsubProds = () => {};
-    let unsubStock = () => {};
-    let unsubAlm = () => {};
 
     if (!propProductos) {
       unsubProds = firestoreService.getProductosRealtime((data) => setInternalProductos(data));
     }
-    if (!propStockList) {
-      unsubStock = firestoreService.getStockRealtime((data) => setInternalStockList(data));
-    }
-    if (!propAlmacenes) {
-      unsubAlm = firestoreService.getAlmacenesRealtime((data) => setInternalAlmacenes(data));
-    }
-
     const unsubMarcas = firestoreService.getMarcasRealtime((data) => setCatalogMarcas(data));
     const unsubCats = firestoreService.getCategoriasRealtime((data) => setCatalogCategorias(data));
     const unsubColores = firestoreService.getColoresRealtime((data) => setCatalogColores(data));
@@ -190,8 +168,6 @@ export default function GestionProductos({
 
     return () => {
       unsubProds();
-      unsubStock();
-      unsubAlm();
       unsubMarcas();
       unsubCats();
       unsubColores();
@@ -199,7 +175,7 @@ export default function GestionProductos({
       unsubTallasCalz();
       unsubUnits();
     };
-  }, [propProductos, propStockList, propAlmacenes]);
+  }, [propProductos]);
 
   // Group products by base product
   const groupedProducts = useMemo(() => {
@@ -211,15 +187,13 @@ export default function GestionProductos({
       tipo_talla: "ropa" | "calzado" | "unica";
       unidad: string;
       variants: Producto[];
-      totalStock: number;
       minPrice: number;
       maxPrice: number;
-      hasLowStock: boolean;
     }> = {};
 
     productos.forEach(p => {
       const baseKey = p.producto_base_id || `legacy-${p.nombre.toLowerCase().trim()}`;
-      
+
       if (!groups[baseKey]) {
         groups[baseKey] = {
           baseId: baseKey,
@@ -229,22 +203,12 @@ export default function GestionProductos({
           tipo_talla: p.tipo_talla || "ropa",
           unidad: p.unidad || "pieza",
           variants: [],
-          totalStock: 0,
           minPrice: Infinity,
           maxPrice: -Infinity,
-          hasLowStock: false
         };
       }
 
       groups[baseKey].variants.push(p);
-
-      // Calculate total stock for this variant
-      const variantStock = almacenes.reduce((acc, alm) => {
-        const item = stockList.find(s => s.sku?.toUpperCase() === p.sku?.toUpperCase() && s.almacen_id === alm.id);
-        return acc + (item ? item.cantidad : 0);
-      }, 0);
-
-      groups[baseKey].totalStock += variantStock;
 
       const price = Number(p.precio_venta_sugerido) || 0;
       if (price > 0) {
@@ -252,15 +216,10 @@ export default function GestionProductos({
         if (price > groups[baseKey].maxPrice) groups[baseKey].maxPrice = price;
       }
 
-      // Check min stock alert
-      const minStock = Number(p.stock_minimo) || 0;
-      if (minStock > 0 && variantStock <= minStock) {
-        groups[baseKey].hasLowStock = true;
-      }
     });
 
     return Object.values(groups);
-  }, [productos, stockList, almacenes]);
+  }, [productos]);
 
   // Filtered grouped products
   const filteredGroups = useMemo(() => {
@@ -281,33 +240,18 @@ export default function GestionProductos({
       const matchesMarca = filterMarca === "all" || g.marca.toLowerCase() === filterMarca.toLowerCase();
       const matchesCategoria = filterCategoria === "all" || g.categoria.toLowerCase() === filterCategoria.toLowerCase();
       const matchesTipoTalla = filterTipoTalla === "all" || g.tipo_talla === filterTipoTalla;
-      
+
       let matchesEstado = true;
       if (filterEstado === "activos") {
         matchesEstado = g.variants.some(v => v.activo !== false);
       } else if (filterEstado === "inactivos") {
         matchesEstado = g.variants.every(v => v.activo === false);
-      } else if (filterEstado === "stock_bajo") {
-        matchesEstado = g.hasLowStock || g.totalStock === 0;
+
       }
 
       return matchesSearch && matchesMarca && matchesCategoria && matchesTipoTalla && matchesEstado;
     });
   }, [groupedProducts, searchQuery, filterMarca, filterCategoria, filterTipoTalla, filterEstado]);
-
-  // Helper for single variant stock calculation
-  const getVariantStock = (sku: string, almacenId?: string): number => {
-    if (!sku) return 0;
-    const cleanSku = sku.toUpperCase();
-    if (almacenId) {
-      const found = stockList.find(s => s.sku?.toUpperCase() === cleanSku && s.almacen_id === almacenId);
-      return found ? found.cantidad : 0;
-    }
-    return almacenes.reduce((acc, alm) => {
-      const found = stockList.find(s => s.sku?.toUpperCase() === cleanSku && s.almacen_id === alm.id);
-      return acc + (found ? found.cantidad : 0);
-    }, 0);
-  };
 
   // Helper to completely reset form to empty state
   const resetFormToEmpty = () => {
@@ -359,11 +303,6 @@ export default function GestionProductos({
     setMatrixMinStock("");
 
     const rows: VariantFormRow[] = group.variants.map(v => {
-      const minMap: Record<string, number | string> = {};
-      almacenes.forEach(alm => {
-        minMap[alm.id] = v.stock_minimo_almacenes?.[alm.id] ?? v.stock_minimo ?? "";
-      });
-
       return {
         id: v.id || v.sku,
         color: v.color || "",
@@ -372,7 +311,6 @@ export default function GestionProductos({
         codigo_barras: v.codigo_barras || "",
         precio_costo: v.precio_costo ?? "",
         precio_venta_sugerido: v.precio_venta_sugerido ?? "",
-        stock_minimo_almacenes: minMap,
         stock_minimo: v.stock_minimo ?? "",
         activo: v.activo !== false
       };
@@ -426,7 +364,6 @@ export default function GestionProductos({
           codigo_barras: "",
           precio_costo: "",
           precio_venta_sugerido: matrixPrice,
-          stock_minimo_almacenes: {},
           stock_minimo: matrixMinStock,
           activo: false
         });
@@ -574,14 +511,6 @@ export default function GestionProductos({
         const priceNum = Number(row.precio_venta_sugerido);
         const costNum = Number(row.precio_costo);
 
-        const minStockMap: Record<string, number> = {};
-        almacenes.forEach(alm => {
-          const customVal = row.stock_minimo_almacenes?.[alm.id];
-          minStockMap[alm.id] = customVal !== undefined && customVal !== "" && !isNaN(Number(customVal))
-            ? Number(customVal)
-            : minStockNum;
-        });
-
         return {
           producto_base_id: baseId,
           nombre: formNombre.trim(),
@@ -596,7 +525,6 @@ export default function GestionProductos({
           precio_costo: costNum >= 0 ? costNum : 0,
           precio_venta_sugerido: priceNum >= 0 ? priceNum : 0,
           stock_minimo: minStockNum >= 0 ? minStockNum : 0,
-          stock_minimo_almacenes: minStockMap,
           activo: Boolean(row.activo)
         };
       });
@@ -618,7 +546,7 @@ export default function GestionProductos({
 
       setIsFormOpen(false);
       resetFormToEmpty();
-      
+
       // Prompt user if they want to register initial stock for the first created variant
       if (!editingBaseId && productsToSave.length > 0) {
         const first = productsToSave[0];
@@ -650,22 +578,6 @@ export default function GestionProductos({
       ? productos.filter(p => p.producto_base_id === productToDelete.id || `legacy-${p.nombre.toLowerCase().trim()}` === productToDelete.id)
       : productos.filter(p => p.sku.trim().toUpperCase() === productToDelete.sku.trim().toUpperCase());
     const targetSkus = targets.map(product => product.sku.trim().toUpperCase());
-    const stockBySku = targetSkus.map(sku => ({
-      sku,
-      units: stockList.reduce(
-        (total, item) => item.sku?.trim().toUpperCase() === sku
-          ? total + Math.max(0, Number(item.cantidad) || 0)
-          : total,
-        0
-      )
-    })).filter(item => item.units > 0);
-
-    if (stockBySku.length > 0) {
-      const detail = stockBySku.map(item => `${item.sku} (${item.units} uds)`).join(", ");
-      notify(`Aún hay existencias: ${detail}. Vende, transfiere o corrige ese stock antes de enviar el producto a la papelera.`, "error");
-      return;
-    }
-
     setSubmitLoading(true);
     try {
       await firestoreService.deleteProducts(targetSkus);
@@ -696,7 +608,7 @@ export default function GestionProductos({
               Productos
             </h1>
             <p className="page-description">
-              Tu catálogo, variantes y existencias por almacén. Abre un producto para consultar sus tallas y colores.
+              Administra productos, tallas y colores. Consulta las existencias y la disponibilidad en Inventario por drops.
             </p>
           </div>
         </div>
@@ -774,7 +686,6 @@ export default function GestionProductos({
             <option value="all">Todos los Estados</option>
             <option value="activos">Solo Activos</option>
             <option value="inactivos">Inactivos</option>
-            <option value="stock_bajo">Stock Crítico / Agotado</option>
           </select>
         </div>
       </div>
@@ -853,20 +764,6 @@ export default function GestionProductos({
                       </span>
                     </div>
 
-                    {/* Stock status pill */}
-                    <div className="text-right">
-                      <span className="text-[11px] text-zinc-400 block font-medium">Stock total</span>
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                        group.totalStock === 0
-                          ? "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 border border-rose-200 dark:border-rose-800"
-                          : group.hasLowStock
-                            ? "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200 dark:border-amber-800"
-                            : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800"
-                      }`}>
-                        {group.totalStock} {group.unidad}s
-                      </span>
-                    </div>
-
                     {/* Actions menu */}
                     <div className="flex items-center gap-1">
                       <button
@@ -906,16 +803,12 @@ export default function GestionProductos({
                           <th className="py-2.5 px-4">SKU</th>
                           <th className="py-2.5 px-4">Código Barras</th>
                           <th className="py-2.5 px-4 text-right">Precio Venta</th>
-                          <th className="py-2.5 px-4 text-center">Stock por Almacén</th>
-                          <th className="py-2.5 px-4 text-center">Total</th>
                           <th className="py-2.5 px-4 text-center">Estado</th>
                           <th className="py-2.5 px-4 text-right">Acciones</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
                         {group.variants.map(variant => {
-                          const varStock = getVariantStock(variant.sku);
-                          const isLow = (Number(variant.stock_minimo) || 0) > 0 && varStock <= (Number(variant.stock_minimo) || 0);
                           const hexColor = colorDotMap[(variant.color || "").toLowerCase()] || "#111827";
 
                           return (
@@ -953,37 +846,6 @@ export default function GestionProductos({
                                 ${Number(variant.precio_venta_sugerido || 0).toLocaleString()} MXN
                               </td>
 
-                              {/* Stock por almacén breakdown */}
-                              <td className="py-3 px-4 text-center">
-                                <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                                  {almacenes.map(alm => {
-                                    const qty = getVariantStock(variant.sku, alm.id);
-                                    return (
-                                      <span
-                                        key={alm.id}
-                                        className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-medium"
-                                        title={`${alm.nombre}: ${qty}`}
-                                      >
-                                        {alm.nombre.slice(0, 3)}: <strong className="text-zinc-900 dark:text-white">{qty}</strong>
-                                      </span>
-                                    );
-                                  })}
-                                </div>
-                              </td>
-
-                              {/* Total Stock */}
-                              <td className="py-3 px-4 text-center">
-                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                                  varStock === 0
-                                    ? "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400"
-                                    : isLow
-                                      ? "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400"
-                                      : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
-                                }`}>
-                                  {varStock}
-                                </span>
-                              </td>
-
                               {/* Status */}
                               <td className="py-3 px-4 text-center">
                                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${
@@ -1002,9 +864,9 @@ export default function GestionProductos({
                                     <button
                                       onClick={() => onNavigateToMovimiento(variant.sku)}
                                       className="p-1.5 text-zinc-600 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors font-medium flex items-center gap-1"
-                                      title="Registrar entrada/salida para este SKU"
+                                      title="Registrar compra de este SKU"
                                     >
-                                      <Warehouse className="w-3.5 h-3.5" />
+                                      <Package className="w-3.5 h-3.5" />
                                     </button>
                                   )}
                                   <button
@@ -1545,8 +1407,8 @@ export default function GestionProductos({
               </h3>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
                 {productToDelete.isBase 
-                  ? "El modelo y todas sus variantes quedarán desactivados. Podrás restaurarlos desde Papelera y el historial previo se conservará. Si alguna variante tiene existencias, primero tendrás que venderlas, transferirlas o corregirlas."
-                  : "La variante quedará desactivada y podrás restaurarla desde Papelera. Si todavía tiene existencias, primero tendrás que venderlas, transferirlas o corregirlas."}
+                  ? "El modelo y todas sus variantes quedarán desactivados. Podrás restaurarlos desde Papelera y el historial previo se conservará. No se permite retirar productos que todavía tengan existencias en un drop."
+                  : "La variante quedará desactivada y podrás restaurarla desde Papelera. No se permite retirarla si todavía tiene existencias en un drop."}
               </p>
             </div>
             <div className="flex gap-2 justify-end pt-2">

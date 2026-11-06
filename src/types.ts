@@ -3,15 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export interface Almacen {
-  id: string;
-  nombre: string;
-  ubicacion: string;
-  activo?: boolean;
-  en_papelera?: boolean;
-  desactivado_at?: { seconds: number; nanoseconds: number } | Date;
-}
-
 export interface Producto {
   id?: string;
   producto_base_id?: string; // Identificador común para agrupar variantes del mismo modelo
@@ -27,7 +18,7 @@ export interface Producto {
   precio_venta?: number; // Precio de venta
   precio_venta_sugerido?: number; // Precio de venta sugerido en MXN
   stock_minimo: number; // Global o fallback legacy
-  stock_minimo_almacenes?: Record<string, number>; // Mínimo individual por almacén (0 = alerta desactivada)
+  stock_minimo_almacenes?: Record<string, number>; // Compatibilidad de lectura; no se usa para disponibilidad.
   unidad: string; // Unidad de medida (normalmente 'pieza' o 'par')
   activo?: boolean; // Estado activo/inactivo (por defecto true)
   en_papelera?: boolean;
@@ -42,22 +33,11 @@ export interface Producto {
   } | Date;
 }
 
-export interface StockItem {
-  id: string; // sku_almacenId
-  sku: string;
-  almacen_id: string;
-  cantidad: number;
-  actualizado: {
-    seconds: number;
-    nanoseconds: number;
-  } | Date;
-}
-
 export interface Movimiento {
   id?: string;
   folio?: string; // Folio consecutivo único: Entrada-1, Salida-1, Transferencia-1
   sku: string;
-  almacen_id: string;
+  almacen_id?: string;
   tipo: "entrada" | "salida" | "ajuste" | "transferencia";
   cantidad: number;
   referencia: string;
@@ -133,7 +113,6 @@ export interface Movimiento {
 
 export interface VentaPartidaInput {
   sku: string;
-  almacen_id?: string; // Compatibilidad; la venta nueva asigna ubicación internamente.
   drop_id?: string;
   cantidad: number;
   precio_unitario_venta: number;
@@ -142,7 +121,7 @@ export interface VentaPartidaInput {
 
 export interface VentaItem {
   sku: string;
-  almacen_id: string;
+  almacen_id?: string;
   drop_id?: string;
   drop_nombre?: string;
   cantidad: number;
@@ -361,7 +340,6 @@ export type NavigationTab =
   | "ventas_pedidos"
   | "ventas_historial"
   | "clientes"
-  | "transferencias_nueva"
   | "historial" 
   | "finanzas_gastos"
   | "finanzas_cobrar"
@@ -369,7 +347,6 @@ export type NavigationTab =
   | "finanzas_gastos_editar"
   | "finanzas"
   | "analisis_clientes"
-  | "almacenes" 
   | "catalogo"
   | "drops"
   | "papelera"
@@ -394,7 +371,7 @@ export interface Compra {
     nanoseconds: number;
   } | Date;
   fecha_str?: string; // YYYY-MM-DD
-  almacen_id: string; // Almacén de recepción
+  almacen_id?: string; // Solo compatibilidad histórica
   drop_id?: string;
   drop_nombre?: string;
   items: CompraItem[];
@@ -528,23 +505,6 @@ export interface ConfiguracionListasDesplegables {
   categorias_gasto: OpcionListaConfigurable[];
   metodos_pago_gasto: OpcionListaConfigurable[];
   metodos_pago_venta: OpcionListaConfigurable[];
-}
-
-export interface ResumenVentaDiaria {
-  id: string; // Formato: YYYY-MM-DD_SKU_almacenId
-  fecha_str: string; // YYYY-MM-DD
-  fecha: {
-    seconds: number;
-    nanoseconds: number;
-  } | Date;
-  sku: string;
-  almacen_id: string;
-  cantidad: number; // Unidades totales vendidas para este SKU, almacén y fecha
-  total_transacciones: number; // Número de movimientos de salida
-  actualizado?: {
-    seconds: number;
-    nanoseconds: number;
-  } | Date;
 }
 
 export type CategoriaGasto = string;
@@ -699,7 +659,6 @@ export type PapeleraTipo =
   | "compra"
   | "gasto"
   | "producto"
-  | "almacen"
   | "categoria"
   | "marca"
   | "color"

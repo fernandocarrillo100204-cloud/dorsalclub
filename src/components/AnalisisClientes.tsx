@@ -47,7 +47,6 @@ import {
 import { 
   Cliente, 
   Movimiento, 
-  Almacen, 
   Producto, 
   TipoCliente,
   getTotalCobradoVenta,
@@ -59,7 +58,6 @@ import { useTheme } from "../context/ThemeContext";
 import ClienteModal from "./ClienteModal";
 
 interface AnalisisClientesProps {
-  almacenes: Almacen[];
   productos: Producto[];
   preselectedClienteId?: string;
   onNavigateToClientes?: (clienteId?: string) => void;
@@ -87,7 +85,6 @@ interface VentaAgrupada {
 const MONTH_NAMES_SHORT = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
 export default function AnalisisClientes({
-  almacenes,
   productos,
   preselectedClienteId,
   onNavigateToClientes,
@@ -128,13 +125,6 @@ export default function AnalisisClientes({
     productos.forEach(p => map.set(p.sku.toUpperCase(), p));
     return map;
   }, [productos]);
-
-  // Lookup map for warehouses
-  const almacenesMap = useMemo(() => {
-    const map = new Map<string, Almacen>();
-    almacenes.forEach(a => map.set(a.id, a));
-    return map;
-  }, [almacenes]);
 
   // Load clients catalogue on mount
   useEffect(() => {

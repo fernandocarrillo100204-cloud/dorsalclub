@@ -29,7 +29,9 @@ for (const channel of ["ventas_nueva", "ventas_bajo_pedido", "ventas_emprendedor
 }
 assert.equal(navigationInfo("finanzas_gastos_nuevo").title, "Registrar gasto");
 assert.equal(navigationInfo("finanzas_gastos_editar").title, "Editar gasto");
-assert.equal(navigationInfo("almacenes").section, "Administración");
+assert.equal(navigationInfo("drops").section, "Inventario");
+assert.equal(JSON.stringify(navigationGroups).includes("transferencias"), false);
+assert.equal(JSON.stringify(navigationGroups).includes("almacenes"), false);
 assert.equal(navigationParent("movimientos"), "compras_nueva");
 
 const render = (component: any, props: any) => renderToStaticMarkup(React.createElement(component, props));

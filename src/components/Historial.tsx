@@ -7,7 +7,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { firestoreService } from "../lib/firebase";
 import { mensajeError } from "../lib/errores";
 import { useWorkspace } from "../context/WorkspaceContext";
-import { Movimiento, Almacen, Producto, Cliente, getTotalCobradoVenta, getSubtotalVenta, getTotalCostosVenta } from "../types";
+import { Movimiento, Producto, Cliente, getTotalCobradoVenta, getSubtotalVenta, getTotalCostosVenta } from "../types";
 import {
   History,
   Search,
@@ -37,7 +37,6 @@ import {
 } from "lucide-react";
 
 interface HistorialProps {
-  almacenes: Almacen[];
   productos: Producto[];
   preselectedSku?: string;
   preselectedClienteId?: string;
@@ -46,7 +45,6 @@ interface HistorialProps {
 }
 
 export default function Historial({
-  almacenes,
   productos,
   preselectedSku = "",
   preselectedClienteId = "",
@@ -56,7 +54,6 @@ export default function Historial({
   const { confirm } = useWorkspace();
   const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
   const [skuFilter, setSkuFilter] = useState(preselectedSku);
-  const [warehouseFilter, setWarehouseFilter] = useState("all");
   const [tipoFilter, setTipoFilter] = useState("all");
   const [estadoFilter, setEstadoFilter] = useState("all"); // "all" | "activo" | "anulado"
   const [clienteFilter, setClienteFilter] = useState(preselectedClienteId || "all");
@@ -126,7 +123,6 @@ export default function Historial({
       const res = await firestoreService.getMovimientosPaginated({
         pageSize: 50,
         skuFilter: skuFilter.trim() || undefined,
-        warehouseFilter,
         tipoFilter,
         estadoFilter
       });
@@ -141,7 +137,7 @@ export default function Historial({
     } finally {
       if (request === requestRef.current) setLoading(false);
     }
-  }, [skuFilter, warehouseFilter, tipoFilter, estadoFilter]);
+  }, [skuFilter, tipoFilter, estadoFilter]);
 
   // Load next page of 50 items
   const loadNextPage = async () => {
@@ -154,7 +150,6 @@ export default function Historial({
         pageSize: 50,
         lastDoc: lastDocCursor,
         skuFilter: skuFilter.trim() || undefined,
-        warehouseFilter,
         tipoFilter,
         estadoFilter
       });
@@ -249,12 +244,6 @@ export default function Historial({
     return prod || null;
   };
 
-  // Helper warehouse name
-  const getWarehouseName = (id: string): string => {
-    const alm = almacenes.find(a => a.id === id);
-    return alm ? alm.nombre : "Desconocido";
-  };
-
   return (
     <div className="page-shell space-y-6" id="historial-container">
       {/* Header */}
@@ -265,7 +254,7 @@ export default function Historial({
             Movimientos de inventario
           </h1>
           <p className="page-description">
-            Entradas, salidas y transferencias. Consulta qué cambió, cuándo y en qué almacén.
+            Entradas y salidas de mercancía. Consulta los movimientos y su drop de origen.
           </p>
         </div>
         <div className="shrink-0 flex items-center space-x-2">
@@ -373,22 +362,6 @@ export default function Historial({
             />
           </div>
 
-          {/* Warehouse Filter */}
-          <div className="relative flex items-center">
-            <select
-              value={warehouseFilter}
-              onChange={(e) => setWarehouseFilter(e.target.value)}
-              className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white rounded-xl py-2 px-3 text-xs focus:outline-none font-medium"
-            >
-              <option value="all">Todos los almacenes</option>
-              {almacenes.map(alm => (
-                <option key={alm.id} value={alm.id}>
-                  {alm.nombre}
-                </option>
-              ))}
-            </select>
-          </div>
-
           {/* Type Filter */}
           <div className="relative flex items-center">
             <select
@@ -399,8 +372,7 @@ export default function Historial({
               <option value="all">Todas las operaciones</option>
               <option value="entrada">Compras y Entradas</option>
               <option value="salida">Ventas (Salidas)</option>
-              <option value="transferencia">Transferencias</option>
-              <option value="ajuste">Ajustes</option>
+              <option value="ajuste">Ajustes históricos</option>
             </select>
           </div>
 
@@ -458,7 +430,7 @@ export default function Historial({
                   <th className="py-3 px-3">Estado</th>
                   <th className="py-3 px-3">Fecha</th>
                   <th className="py-3 px-3">Prenda & SKU</th>
-                  <th className="py-3 px-3">Almacén</th>
+                  <th className="py-3 px-3">Drop</th>
                   <th className="py-3 px-3">Operación</th>
                   <th className="py-3 px-3">Cliente / Destino</th>
                   <th className="py-3 px-3 text-center">Cant.</th>
@@ -507,14 +479,6 @@ export default function Historial({
                       typeLabel = "Venta";
                       qtyPrefix = "-";
                       qtyColorClass = isAnulado ? "text-zinc-400 line-through" : "text-rose-600 dark:text-rose-400 font-semibold";
-                      break;
-                    case "transferencia":
-                      badgeColorClass = isAnulado
-                        ? "bg-zinc-100 text-zinc-400"
-                        : "bg-sky-50 text-sky-700 dark:bg-sky-950/50 dark:text-sky-400 border border-sky-200 dark:border-sky-800";
-                      typeLabel = "Transferencia";
-                      qtyPrefix = "⇆";
-                      qtyColorClass = isAnulado ? "text-zinc-400 line-through" : "text-sky-600 dark:text-sky-400 font-semibold";
                       break;
                     case "ajuste":
                       badgeColorClass = isAnulado
@@ -598,17 +562,7 @@ export default function Historial({
                         </div>
                       </td>
 
-                      {/* Origin warehouse */}
-                      <td className="py-3 px-3">
-                        <div className="font-medium text-zinc-900 dark:text-white text-xs">
-                          {getWarehouseName(mov.almacen_id)}
-                        </div>
-                        {mov.tipo === "transferencia" && mov.almacen_destino_id && (
-                          <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center mt-0.5">
-                            <span>Destino: {getWarehouseName(mov.almacen_destino_id)}</span>
-                          </div>
-                        )}
-                      </td>
+                      <td className="py-3 px-3 text-xs">{mov.drop_nombre || "Sin drop asignado"}</td>
 
                       {/* Movement Type */}
                       <td className="py-3 px-3">
@@ -859,7 +813,7 @@ export default function Historial({
               </p>
             ) : (
               <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                Esta acción revertirá automáticamente el stock de <strong>{movToAnular.sku}</strong> en el almacén de origen y registrará el movimiento como anulado de forma permanente.
+                El movimiento de <strong>{movToAnular.sku}</strong> quedará anulado. Si está asociado a un drop, su disponibilidad se recalculará a partir de las entradas y ventas vigentes.
               </p>
             )}
 

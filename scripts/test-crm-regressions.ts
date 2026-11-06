@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { calcularInventarioDrop } from "../src/lib/inventarioDrops";
 import { construirPedidos, fechaLocal, fechaRegistro, leerMovimiento, leerVenta } from "../src/lib/lecturasVentas";
 import { mensajeError } from "../src/lib/errores";
 import type { Movimiento, VentaRegistroInput } from "../src/types";
@@ -40,18 +41,16 @@ const master = leerVenta("legacy", {
 assert.equal(construirPedidos([master], [legacy, second]).length, 0, "Un maestro anulado no reaparece como pedido legado.");
 assert.equal(construirPedidos([], [legacy, { ...cancelledPayment, estado: "activo", subtipo: "reembolso_venta" }]).length, 0);
 
-put("almacenes", [{ id: "warehouse", nombre: "Prueba", ubicacion: "Prueba" }]);
 put("productos", ["SKU-A", "SKU-B"].map(sku => ({ sku, nombre: sku, categoria: "Prueba", unidad: "pieza", stock_minimo: 0, activo: true })));
-put("stock", {});
 const testDrop = await service.addDrop({ nombre: "Drop de prueba local", estado: "en_venta" });
 const purchase = await service.registerCompraTransaction({
-  proveedor: "Proveedor de prueba", almacen_id: "warehouse", drop_id: testDrop.id,
+  proveedor: "Proveedor de prueba", drop_id: testDrop.id,
   items: [{ sku: "SKU-A", cantidad: 2, costo_unitario: 100, subtotal: 200 }, { sku: "SKU-B", cantidad: 2, costo_unitario: 100, subtotal: 200 }],
   costo_envio: 50, comisiones: 10, descuentos: 20
 });
 const input: VentaRegistroInput = {
   drop_id: testDrop.id,
-  items: ["SKU-A", "SKU-B"].map(sku => ({ sku, almacen_id: "warehouse", cantidad: 1, precio_unitario_venta: 500, costo_unitario_venta: 100 })),
+  items: ["SKU-A", "SKU-B"].map(sku => ({ sku, cantidad: 1, precio_unitario_venta: 500, costo_unitario_venta: 100 })),
   referencia: "Prueba", cliente_id: "client", cliente_nombre: "Cliente de prueba", canal_venta: "stock",
   canal_venta_nombre: "Venta directa", porcentaje_precio: 0, afecta_stock: true,
   anticipo_porcentaje: 100, minimo_piezas: 1, metodo_pago_inicial: "Efectivo"
@@ -72,9 +71,11 @@ await service.devolverVentaCompleta(sale.id, "Prueba de devolución");
 financial = await service.getResumenFinancieroConsolidado({ alcance: "todo" });
 assert.equal(financial.ingresosVentas, 0, "El reembolso debe compensar el cobro.");
 assert.equal(financial.pendientePorCobrar, 0);
-const stock = get<Record<string, any>>("stock", {});
-assert.equal(stock["SKU-A_warehouse"].cantidad, 2);
-assert.equal(stock["SKU-B_warehouse"].cantidad, 2);
+const stock = calcularInventarioDrop(testDrop.id, await service.getDropDetail(testDrop.id));
+assert.equal(stock.find(row => row.sku === "SKU-A")?.saldo, 2);
+assert.equal(stock.find(row => row.sku === "SKU-B")?.saldo, 2);
+assert.equal(memory.has("inventario_mvp_stock"), false);
+assert.equal(memory.has("inventario_mvp_almacenes"), false);
 
 const preorder = await service.registerVentaTransaction({ ...input, afecta_stock: false, canal_venta: "bajo_pedido", anticipo_porcentaje: 50 });
 orders = await service.getPedidosVenta();
@@ -109,5 +110,32 @@ const localCompeting = await Promise.allSettled([
   service.registerVentaTransaction({ ...input, items: [{ ...input.items[0], cantidad: 2 }] })
 ]);
 assert.equal(localCompeting.filter(item => item.status === "fulfilled").length, 1, "Las escrituras locales también deben serializar la validación del drop.");
+// La retirada del módulo no borra los registros históricos, tampoco al vaciar la papelera.
+put("almacenes", [{ id: "anterior", nombre: "Histórico", en_papelera: true }]);
+put("stock", [{ id: "SKU-A_anterior", sku: "SKU-A", almacen_id: "anterior", cantidad: 99 }]);
+const oldTransfer = { id: "traslado-anterior", tipo: "transferencia", sku: "SKU-A", cantidad: 1, en_papelera: true, estado: "anulado" } as Movimiento;
+put("movimientos", [...get<Movimiento[]>("movimientos", []), oldTransfer]);
+await assert.rejects(service.enviarMovimientoPapelera(oldTransfer.id!), /solo lectura/);
+await assert.rejects(service.restaurarMovimientoPapelera(oldTransfer.id!), /solo lectura/);
+assert.equal((await service.getPapeleraItems()).some(item => item.id === oldTransfer.id || item.id === "anterior"), false);
+assert.equal((await service.getMovimientosPaginated()).items.some(item => item.tipo === "transferencia"), false);
+await service.vaciarPapelera();
+assert.deepEqual(get<Movimiento[]>("movimientos", []).find(item => item.id === oldTransfer.id), oldTransfer);
+assert.equal(get<any[]>("almacenes", [])[0].id, "anterior");
+assert.equal(get<any[]>("stock", [])[0].cantidad, 99);
+
+// Renderizado de componentes sin sesión, red ni efectos: controles y etiquetas retirados.
+const { createElement } = await import("react");
+const { renderToStaticMarkup } = await import("react-dom/server");
+const { WorkspaceProvider } = await import("../src/context/WorkspaceContext");
+const { default: Compras } = await import("../src/components/Compras");
+const { default: Ventas } = await import("../src/components/Ventas");
+const { default: Configuracion } = await import("../src/components/Configuracion");
+const render = (component: any, props: any) => renderToStaticMarkup(createElement(WorkspaceProvider, { children: createElement(component, props) }));
+const purchaseForm = render(Compras, { productos: [], isNewView: true });
+assert.match(purchaseForm, /Drop de inventario/);
+assert.doesNotMatch(purchaseForm, /almac[eé]n|transferencias/i);
+assert.doesNotMatch(render(Ventas, { productos: [], canal: "stock" }), /almac[eé]n|transferencias/i);
+assert.doesNotMatch(render(Configuracion, {}), /almac[eé]n|transferencias/i);
 clearFinanzasCache();
 console.log("Regresiones CRM: fechas, clientes, pedidos, compras, cobros, devolución y finanzas aprobadas (solo memoria local).");

@@ -6,13 +6,11 @@ import type { VentaRegistroInput, Venta } from "../src/types";
 let localWrites = 0;
 Object.defineProperty(globalThis, "localStorage", { value: { getItem: () => null, setItem: () => { localWrites++; }, removeItem: () => {} }, configurable: true });
 const { service, data, put, queries, reject, retries } = await firebaseInMemory();
-put("almacenes/a", { nombre: "A", ubicacion: "Local" });
-put("almacenes/b", { nombre: "B", ubicacion: "Local" });
 put("productos/TEST", { nombre: "Producto", sku: "TEST", stock_minimo: 0 });
 const dropA = await service.addDrop({ nombre: "Drop A", estado: "en_venta" });
 const dropB = await service.addDrop({ nombre: "Drop B", estado: "en_venta" });
-const purchase = (dropId: string, quantity: number, warehouse = "a") => service.registerCompraTransaction({
-  proveedor: "Proveedor", almacen_id: warehouse, drop_id: dropId,
+const purchase = (dropId: string, quantity: number) => service.registerCompraTransaction({
+  proveedor: "Proveedor", drop_id: dropId,
   items: [{ sku: "TEST", cantidad: quantity, costo_unitario: 100, subtotal: quantity * 100 }]
 });
 const purchaseA = await purchase(dropA.id, 2);
@@ -23,17 +21,22 @@ const input = (items: { drop_id?: string; cantidad: number; sku?: string }[], de
   afecta_stock: true, anticipo_porcentaje: deposit, minimo_piezas: 1, metodo_pago_inicial: "Efectivo"
 });
 const balance = async (id: string) => calcularInventarioDrop(id, await service.getDropDetail(id)).find(item => item.sku === "TEST")?.saldo || 0;
-const physical = () => [...data].filter(([path]) => path.startsWith("stock/")).reduce((sum, [, value]) => sum + value.cantidad, 0);
+const assertNoLocationWrites = () => {
+  assert.equal([...data.keys()].some(path => /^(stock|almacenes|resumen_ventas)\//.test(path)), false, "No se mantienen existencias por ubicación.");
+  assert.equal(queries.some(query => /^(stock|almacenes|resumen_ventas)$/.test(query.path)), false, "No se consultan colecciones retiradas.");
+};
+await assert.rejects(purchase("", 1), /Selecciona el drop/);
+await assert.rejects(service.deleteProducts(["TEST"]), /existencias en un drop/);
 await assert.rejects(service.registerVentaTransaction(input([{ cantidad: 1 }])), /drop/);
 await assert.rejects(service.registerVentaTransaction(input([{ drop_id: dropA.id, cantidad: 3 }])), /Disponibilidad insuficiente/);
 await assert.rejects(service.registerVentaTransaction(input([{ drop_id: dropA.id, cantidad: 2 }, { drop_id: dropA.id, cantidad: 1 }])), /Disponibilidad insuficiente/);
-assert.equal(physical(), 5);
+assertNoLocationWrites();
 const mixed = await service.registerVentaTransaction(input([{ drop_id: dropA.id, cantidad: 1 }, { drop_id: dropB.id, cantidad: 2 }]));
 let master = data.get("ventas/" + mixed.id) as Venta;
 assert.deepEqual(master.drop_ids, [dropA.id, dropB.id]);
 assert.equal(master.drop_id, undefined, "Una venta mixta no debe atribuirse entera al primer drop.");
 assert.equal(master.total, 750);
-assert.equal(physical(), 2, "Dos partidas con mismo SKU y ubicación se descuentan juntas.");
+assertNoLocationWrites();
 assert.equal(await balance(dropA.id), 1);
 assert.equal(await balance(dropB.id), 1);
 assert.equal(calcularInventarioDrop(dropA.id, await service.getDropDetail(dropA.id))[0].ventaTotal, 250);
@@ -41,36 +44,40 @@ await assert.rejects(service.updateVentaDropAssociation(mixed.id, dropB.id), /or
 await assert.rejects(service.enviarCompraPapelera(purchaseA.id), /drop|vendida/);
 await assert.rejects(service.updateCompraDropAssociation(purchaseA.id, dropB.id), /drop/);
 await service.devolverVentaCompleta(mixed.id, "Devolución de prueba");
-assert.equal(physical(), 5, "La devolución suma todas las partidas aunque compartan ubicación.");
+assertNoLocationWrites();
 assert.equal(await balance(dropA.id), 2);
+assert.equal(await balance(dropB.id), 3);
+await service.enviarVentaPapelera(mixed.id);
+const returnedLine = [...data].find(([path, value]) => path.startsWith("movimientos/") && value.venta_id === mixed.id)!;
+await service.restaurarMovimientoPapelera(returnedLine[0].split("/")[1]);
+assert.equal(await balance(dropA.id), 2, "Restaurar una venta devuelta no debe devolver piezas por segunda vez.");
 assert.equal(await balance(dropB.id), 3);
 await assert.rejects(service.devolverVentaCompleta(mixed.id, "Otra vez"), /devuelta/);
 const unpaid = await service.registerVentaTransaction(input([{ drop_id: dropA.id, cantidad: 1 }, { drop_id: dropB.id, cantidad: 1 }], 0));
 await service.enviarVentaPapelera(unpaid.id);
-assert.equal(physical(), 5);
+assertNoLocationWrites();
 assert.equal(await balance(dropA.id), 2);
 const movement = [...data].find(([path, value]) => path.startsWith("movimientos/") && value.venta_id === unpaid.id)!;
 await service.restaurarMovimientoPapelera(movement[0].split("/")[1]);
-assert.equal(physical(), 3);
+assertNoLocationWrites();
 assert.equal(await balance(dropA.id), 1);
 await service.anularVentaAgrupada(unpaid.id, "Prueba");
-assert.equal(physical(), 5);
+assertNoLocationWrites();
 await service.enviarCompraPapelera(purchaseA.id);
 assert.equal(await balance(dropA.id), 0);
 await service.restaurarCompraPapelera(purchaseA.id);
 assert.equal(await balance(dropA.id), 2);
-// Dos ubicaciones, un único origen comercial, reversión exacta a cada ubicación.
-await purchase(dropA.id, 2, "b");
+// Dos drops con un mismo SKU: no dividir partidas por ubicaciones ocultas.
+await purchase(dropA.id, 2);
 const split = await service.registerVentaTransaction(input([{ drop_id: dropB.id, cantidad: 3 }, { drop_id: dropA.id, cantidad: 4 }]));
 master = data.get("ventas/" + split.id);
-assert.equal(physical(), 0);
-assert.equal(new Set(master.items.map(item => item.almacen_id)).size, 2);
-await service.devolverVentaCompleta(split.id, "Prueba ubicaciones");
-assert.equal(data.get("stock/TEST_a").cantidad, 5);
-assert.equal(data.get("stock/TEST_b").cantidad, 2);
+assertNoLocationWrites();
+assert.equal(master.items.length, 2);
+assert.ok(master.items.every(item => !("almacen_id" in item)));
+await service.devolverVentaCompleta(split.id, "Prueba drops");
 // Bajo pedido no necesita drop y no consume disponibilidad.
 await service.registerVentaTransaction({ ...input([{ cantidad: 30 }]), afecta_stock: false, canal_venta: "bajo_pedido", anticipo_porcentaje: 50 });
-assert.equal(physical(), 7);
+assertNoLocationWrites();
 assert.equal(await balance(dropA.id), 4);
 put("drops/" + dropA.id, { estado: "cerrado" }, true);
 await assert.rejects(service.registerVentaTransaction(input([{ drop_id: dropA.id, cantidad: 1 }])), /En venta/);
@@ -83,7 +90,7 @@ const concurrent = await Promise.allSettled([
 assert.equal(concurrent.filter(item => item.status === "fulfilled").length, 1);
 assert.ok(retries() > 0, "Debe repetirse el callback al cambiar la revisión de inventario.");
 assert.equal(await balance(dropB.id), 0);
-assert.equal(physical(), 4);
+assertNoLocationWrites();
 // Una restauración tampoco puede consumir saldo de otro drop.
 const dropC = await service.addDrop({ nombre: "Drop C", estado: "en_venta" });
 await purchase(dropC.id, 1);
@@ -93,12 +100,12 @@ await service.registerVentaTransaction(input([{ drop_id: dropC.id, cantidad: 1 }
 const pendingLine = [...data].find(([path, value]) => path.startsWith("movimientos/") && value.venta_id === pending.id)!;
 await assert.rejects(service.restaurarMovimientoPapelera(pendingLine[0].split("/")[1]), /Disponibilidad insuficiente/);
 assert.equal(data.get("ventas/" + pending.id).en_papelera, true);
-assert.equal(physical(), 4);
-// Las transferencias mueven ubicación, no alteran el saldo comercial del drop.
-const beforeTransfer = await balance(dropA.id);
-await service.registerMovimientoTransaction({ sku: "TEST", almacen_id: "a", almacen_destino_id: "b", cantidad: 1, tipo: "transferencia", referencia: "Prueba" });
-assert.equal(await balance(dropA.id), beforeTransfer);
-assert.equal(physical(), 4);
+assertNoLocationWrites();
+// No existe ningún servicio activo para registrar traslados ni administrar ubicaciones.
+assert.equal("registerMovimientoTransaction" in service, false);
+assert.equal("addAlmacen" in service, false);
+assert.equal("getStockRealtime" in service, false);
+assertNoLocationWrites();
 // Compatibilidad con ventas antiguas que solo tenían drop_id a nivel maestro.
 const completed = concurrent.find(item => item.status === "fulfilled") as PromiseFulfilledResult<{ id: string }>;
 const legacyPath = "ventas/" + completed.value.id;
@@ -111,12 +118,31 @@ await assert.rejects(service.updateVentaDropAssociation(completed.value.id, drop
 await service.updateVentaDropAssociation(completed.value.id, dropA.id);
 assert.equal(await balance(dropA.id), 1);
 assert.equal(await balance(dropB.id), 3);
-assert.equal(physical(), 4);
+assertNoLocationWrites();
+// La entrada de una compra no se suma otra vez; las entradas históricas independientes sí.
+const dropD = await service.addDrop({ nombre: "Drop histórico", estado: "en_venta" });
+await purchase(dropD.id, 1);
+assert.equal(await balance(dropD.id), 1);
+put("movimientos/entrada-historica", { tipo: "entrada", sku: "TEST", cantidad: 2, drop_id: dropD.id, estado: "activo", fecha: new Date() });
+put("movimientos/transferencia-historica", { tipo: "transferencia", sku: "TEST", cantidad: 90, drop_id: dropD.id, estado: "activo", fecha: new Date() });
+assert.equal(await balance(dropD.id), 3, "Una transferencia no crea ni consume piezas de un drop.");
+const legacySnapshot = JSON.stringify(data.get("movimientos/transferencia-historica"));
+await assert.rejects(service.anularMovimiento("transferencia-historica", "Prueba"), /solo lectura/);
+await assert.rejects(service.enviarMovimientoPapelera("transferencia-historica"), /solo lectura/);
+await assert.rejects(service.restaurarMovimientoPapelera("transferencia-historica"), /solo lectura/);
+assert.equal(JSON.stringify(data.get("movimientos/transferencia-historica")), legacySnapshot);
+await service.updateDrop(dropD.id, { nombre: "Drop histórico actualizado" });
+assert.equal(JSON.stringify(data.get("movimientos/transferencia-historica")), legacySnapshot, "Renombrar un drop no modifica transferencias retiradas.");
+await service.registerVentaTransaction(input([{ drop_id: dropD.id, cantidad: 3 }]));
+await assert.rejects(service.anularMovimiento("entrada-historica", "Prueba"), /existencias/);
+const historicalOnly = await service.addDrop({ nombre: "Solo entrada histórica", estado: "en_venta" });
+put("movimientos/entrada-independiente", { tipo: "entrada", sku: "TEST", cantidad: 1, drop_id: historicalOnly.id, estado: "activo", fecha: new Date() });
+await assert.rejects(service.enviarDropPapelera(historicalOnly.id), /movimientos asociados/);
 const beforeError = JSON.stringify([...data]);
 reject("compras");
 await assert.rejects(service.registerVentaTransaction(input([{ drop_id: dropA.id, cantidad: 1 }])), { code: "permission-denied" });
 assert.equal(JSON.stringify([...data]), beforeError, "Un fallo de lectura no debe escribir ninguna parte de la venta.");
 assert.equal(localWrites, 0, "No se permite fallback local con Firebase configurado.");
 reject("");
-assert.ok(queries.filter(query => ["compras", "ventas", "movimientos", "stock"].includes(query.path)).every(query => query.constraints?.some((clause: any) => clause.kind === "where")), "Las consultas de disponibilidad se limitan por drop o por SKU.");
-console.log("Inventario por drops: origen por partida, cantidades, concurrencia, ubicaciones internas, devoluciones, papelera, pedidos y fallos atómicos aprobados.");
+assert.ok(queries.filter(query => ["compras", "ventas", "movimientos", "stock"].includes(query.path)).every(query => query.constraints?.some((clause: any) => clause.kind === "where")), "Las consultas de disponibilidad se limitan por drop.");
+console.log("Inventario por drops: origen por partida, cantidades, concurrencia, sin almacenes, devoluciones, papelera, pedidos y fallos atómicos aprobados.");

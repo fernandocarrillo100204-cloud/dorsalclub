@@ -1,11 +1,10 @@
 import React, { useState } from "react";
-import { Settings, ShoppingBag, ShoppingCart, Users, Receipt, Package, ChevronRight, Warehouse } from "lucide-react";
+import { Settings, ShoppingBag, ShoppingCart, Users, Receipt, Package, ChevronRight } from "lucide-react";
 import ConfiguracionModuloModal, { ModuloConfigurable } from "./ConfiguracionModuloModal";
 import { PageHeader } from "./ui/Page";
 
 interface ConfiguracionProps {
   onNavigateToProducts?: () => void;
-  onNavigateToWarehouses?: () => void;
 }
 
 const modules: Array<{ id: ModuloConfigurable; title: string; description: string; icon: React.ComponentType<{ className?: string }> }> = [
@@ -15,7 +14,7 @@ const modules: Array<{ id: ModuloConfigurable; title: string; description: strin
   { id: "finanzas", title: "Finanzas", description: "Categorías de gasto y métodos de pago.", icon: Receipt }
 ];
 
-export default function Configuracion({ onNavigateToProducts, onNavigateToWarehouses }: ConfiguracionProps) {
+export default function Configuracion({ onNavigateToProducts }: ConfiguracionProps) {
   const [activeModule, setActiveModule] = useState<ModuloConfigurable | null>(null);
 
   return (
@@ -38,14 +37,6 @@ export default function Configuracion({ onNavigateToProducts, onNavigateToWareho
             </button>
           );
         })}
-
-        <button type="button" onClick={onNavigateToWarehouses} className="group rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 text-left hover:border-emerald-400 dark:hover:border-emerald-700 transition-colors">
-          <div className="flex items-start gap-3">
-            <span className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 flex items-center justify-center shrink-0"><Warehouse className="w-5 h-5" /></span>
-            <span className="min-w-0 flex-1"><strong className="text-sm text-zinc-900 dark:text-white">Almacenes</strong><span className="block text-xs text-zinc-500 mt-1 leading-relaxed">Crea, edita o desactiva ubicaciones utilizadas en compras y transferencias.</span></span>
-            <ChevronRight className="w-4 h-4 text-zinc-400 group-hover:text-emerald-600 mt-1" />
-          </div>
-        </button>
 
         <button type="button" onClick={onNavigateToProducts} className="group rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 text-left hover:border-emerald-400 dark:hover:border-emerald-700 transition-colors">
           <div className="flex items-start gap-3">

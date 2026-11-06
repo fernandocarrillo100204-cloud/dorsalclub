@@ -22,10 +22,10 @@ import {
   X
 } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
-import { Compra, Drop, EstadoDrop, Venta, Movimiento, StockItem } from "../types";
+import { Compra, Drop, EstadoDrop, Venta, Movimiento } from "../types";
 import { useWorkspace } from "../context/WorkspaceContext";
 
-import { calcularInventarioDrop, disponibilidadFisica } from "../lib/inventarioDrops";
+import { calcularInventarioDrop } from "../lib/inventarioDrops";
 import { searchText } from "../lib/presentation";
 
 type DetailTab = "productos" | "ventas";
@@ -37,7 +37,6 @@ interface ProductDropRow {
   vendidas: number;
   restantes: number;
   disponible: number;
-  fisico: number;
   costoTotal: number;
   ventaTotal: number;
   costoPromedio: number;
@@ -74,7 +73,7 @@ const toDate = (value: any): Date => {
   return new Date(value || Date.now());
 };
 
-export default function Drops({ stock, stockReady, stockError, onSell, onPurchases }: { stock: StockItem[]; stockReady: boolean; stockError?: string; onSell: (dropId: string, sku: string) => void; onPurchases: () => void }) {
+export default function Drops({ onSell, onPurchases }: { onSell: (dropId: string, sku: string) => void; onPurchases: () => void }) {
   const { confirm } = useWorkspace();
   const [drops, setDrops] = useState<Drop[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -157,16 +156,15 @@ export default function Drops({ stock, stockReady, stockError, onSell, onPurchas
     return calcularInventarioDrop(selectedId, { compras, ventas, movimientos }).map(item => {
       const costoPromedio = item.compradas > 0 ? item.costoTotal / item.compradas : 0;
       const ventaPromedio = item.vendidas > 0 ? item.ventaTotal / item.vendidas : 0;
-      const fisico = disponibilidadFisica(item.sku, stock);
-      return { ...item, restantes: item.saldo, fisico,
-        disponible: selectedDrop?.estado === "en_venta" ? Math.max(0, Math.min(item.saldo, fisico)) : 0,
+      return { ...item, restantes: item.saldo,
+        disponible: selectedDrop?.estado === "en_venta" ? Math.max(0, item.saldo) : 0,
         costoPromedio, ventaPromedio,
         porcentajeSobreCosto: item.vendidas > 0 && costoPromedio > 0 ? (ventaPromedio - costoPromedio) / costoPromedio * 100 : null
       };
     });
-  }, [selectedId, detailId, compras, ventas, movimientos, stock, selectedDrop?.estado]);
+  }, [selectedId, detailId, compras, ventas, movimientos, selectedDrop?.estado]);
   const visibleProducts = products.filter(item => searchText(item.sku + " " + item.nombre).includes(searchText(search)) &&
-    (availability === "todos" || (availability === "disponibles" && item.disponible > 0) || (availability === "agotados" && item.restantes === 0) || (availability === "revisar" && (item.restantes < 0 || item.fisico < item.restantes))));
+    (availability === "todos" || (availability === "disponibles" && item.disponible > 0) || (availability === "agotados" && item.restantes === 0) || (availability === "revisar" && (item.restantes < 0))));
   const detailReady = !detailLoading && !detailError && detailId === selectedId;
 
   const summary = useMemo(() => {
@@ -309,10 +307,9 @@ export default function Drops({ stock, stockReady, stockError, onSell, onPurchas
       </section>
 
       <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-3 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between text-xs text-zinc-500">
-        <span>La disponibilidad parte de compras reales menos salidas, y se contrasta con las existencias físicas. Los pedidos sin stock no descuentan piezas.</span>
+        <span>La disponibilidad se calcula con las entradas y ventas de cada drop. Las devoluciones recuperan las piezas; los pedidos sin stock no las descuentan.</span>
         <button type="button" onClick={onPurchases} className="btn-secondary shrink-0">Asignar compras a un drop</button>
       </div>
-      {stockError && <p role="alert" className="text-sm text-rose-500">No se pudo comprobar el stock físico. La venta permanecerá deshabilitada hasta recuperar la conexión.</p>}
       {loading ? (
         <div className="min-h-72 flex items-center justify-center text-zinc-400"><Loader2 className="w-6 h-6 animate-spin mr-2" /> Cargando drops…</div>
       ) : error && drops.length === 0 ? null : drops.length === 0 ? (
@@ -365,7 +362,7 @@ export default function Drops({ stock, stockReady, stockError, onSell, onPurchas
                 {[
                   { label: "Compradas", value: `${summary.compradas} uds`, icon: Boxes },
                   { label: "Vendidas", value: `${summary.vendidas} uds`, icon: ShoppingCart },
-                  { label: "Disponibles", value: stockReady && !stockError ? `${summary.disponibles} uds` : "Sin validar", icon: PackageCheck },
+                  { label: "Disponibles", value: `${summary.disponibles} uds`, icon: PackageCheck },
                   { label: "Avance", value: `${summary.avance.toFixed(1)}%`, icon: TrendingUp },
                   { label: "Compra mercancía", value: money(summary.costo), icon: CircleDollarSign },
                   { label: "Venta mercancía", value: money(summary.ventasTotal), icon: CircleDollarSign },
@@ -399,10 +396,10 @@ export default function Drops({ stock, stockReady, stockError, onSell, onPurchas
                       <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
                         {visibleProducts.map(item => <tr key={item.sku} className="hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30">
                           <td className="px-4 py-3"><p className="font-bold text-zinc-900 dark:text-white">{item.nombre}</p><p className="font-mono text-[10px] text-zinc-400 mt-0.5">{item.sku}</p></td>
-                          <td className="px-3 py-3 text-center font-semibold">{item.compradas}</td><td className="px-3 py-3 text-center font-semibold text-emerald-600 dark:text-emerald-400">{item.vendidas}</td><td className="px-3 py-3 text-center font-semibold">{item.restantes}</td><td className="px-3 py-3 text-center"><strong className="text-emerald-600 dark:text-emerald-400">{stockReady && !stockError ? item.disponible : "—"}</strong>{item.restantes < 0 || item.fisico < item.restantes ? <p className="text-[10px] text-amber-600">Revisar existencias</p> : selectedDrop.estado !== "en_venta" ? <p className="text-[10px] text-zinc-500">{STATUS_META[selectedDrop.estado].label}</p> : item.disponible === 0 ? <p className="text-[10px] text-zinc-500">Agotado</p> : null}</td>
+                          <td className="px-3 py-3 text-center font-semibold">{item.compradas}</td><td className="px-3 py-3 text-center font-semibold text-emerald-600 dark:text-emerald-400">{item.vendidas}</td><td className="px-3 py-3 text-center font-semibold">{item.restantes}</td><td className="px-3 py-3 text-center"><strong className="text-emerald-600 dark:text-emerald-400">{item.disponible}</strong>{item.restantes < 0 ? <p className="text-[10px] text-amber-600">Revisar existencias</p> : selectedDrop.estado !== "en_venta" ? <p className="text-[10px] text-zinc-500">{STATUS_META[selectedDrop.estado].label}</p> : item.disponible === 0 ? <p className="text-[10px] text-zinc-500">Agotado</p> : null}</td>
                           <td className="px-3 py-3 text-right font-mono">{item.compradas ? money(item.costoPromedio) : "—"}</td><td className="px-3 py-3 text-right font-mono">{item.vendidas ? money(item.ventaPromedio) : "—"}</td>
                           <td className="px-4 py-3 text-right"><span className={`font-bold ${item.porcentajeSobreCosto === null ? "text-zinc-400" : item.porcentajeSobreCosto >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>{item.porcentajeSobreCosto === null ? "—" : `${item.porcentajeSobreCosto.toFixed(1)}%`}</span></td>
-                          <td className="px-3 py-3"><button type="button" onClick={() => onSell(selectedId, item.sku)} disabled={!stockReady || Boolean(stockError) || item.disponible <= 0} className="btn-secondary text-xs" aria-label={`Vender ${item.nombre} del drop ${selectedDrop.nombre}`}>Vender</button></td>
+                          <td className="px-3 py-3"><button type="button" onClick={() => onSell(selectedId, item.sku)} disabled={item.disponible <= 0} className="btn-secondary text-xs" aria-label={`Vender ${item.nombre} del drop ${selectedDrop.nombre}`}>Vender</button></td>
                         </tr>)}
                       </tbody>
                     </table></div>

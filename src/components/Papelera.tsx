@@ -17,7 +17,6 @@ const TYPE_LABELS: Record<PapeleraTipo, string> = {
   compra: "Compra",
   gasto: "Gasto",
   producto: "Producto",
-  almacen: "Almacén",
   categoria: "Categoría",
   marca: "Marca",
   color: "Color",

@@ -26,21 +26,18 @@ import {
   ChevronDown
 } from "lucide-react";
 import { 
-  Almacen, 
   Gasto, 
   OpcionListaConfigurable
 } from "../../types";
 import { firestoreService, isRealFirebase } from "../../lib/firebase";
 
 interface GastosHistorialProps {
-  almacenes: Almacen[];
   onNuevoGasto: () => void;
   onEditarGasto: (gastoId: string) => void;
   configVersion?: number;
 }
 
 export default function GastosHistorial({
-  almacenes,
   onNuevoGasto,
   onEditarGasto,
   configVersion = 0
@@ -56,7 +53,6 @@ export default function GastosHistorial({
   // Filters state
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategoria, setSelectedCategoria] = useState<string>("all");
-  const [selectedAlmacen, setSelectedAlmacen] = useState<string>("all");
   const [selectedMetodoPago, setSelectedMetodoPago] = useState<string>("all");
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
@@ -129,7 +125,6 @@ export default function GastosHistorial({
   const handleResetFilters = () => {
     setSearchTerm("");
     setSelectedCategoria("all");
-    setSelectedAlmacen("all");
     setSelectedMetodoPago("all");
     setStartDate("");
     setEndDate("");
@@ -140,13 +135,12 @@ export default function GastosHistorial({
     return (
       searchTerm.trim() !== "" ||
       selectedCategoria !== "all" ||
-      selectedAlmacen !== "all" ||
       selectedMetodoPago !== "all" ||
       startDate !== "" ||
       endDate !== "" ||
       proveedorFilter.trim() !== ""
     );
-  }, [searchTerm, selectedCategoria, selectedAlmacen, selectedMetodoPago, startDate, endDate, proveedorFilter]);
+  }, [searchTerm, selectedCategoria, selectedMetodoPago, startDate, endDate, proveedorFilter]);
 
   // Client-side filtering
   const filteredGastos = useMemo(() => {
@@ -154,14 +148,6 @@ export default function GastosHistorial({
       // Category
       if (selectedCategoria !== "all" && g.categoria !== selectedCategoria) {
         return false;
-      }
-      // Warehouse
-      if (selectedAlmacen !== "all") {
-        if (selectedAlmacen === "sin_almacen") {
-          if (g.almacen_id) return false;
-        } else if (g.almacen_id !== selectedAlmacen) {
-          return false;
-        }
       }
       // Payment method
       if (selectedMetodoPago !== "all") {
@@ -198,7 +184,7 @@ export default function GastosHistorial({
       }
       return true;
     });
-  }, [gastos, selectedCategoria, selectedAlmacen, selectedMetodoPago, startDate, endDate, proveedorFilter, searchTerm]);
+  }, [gastos, selectedCategoria, selectedMetodoPago, startDate, endDate, proveedorFilter, searchTerm]);
 
   // Total summary of filtered results
   const totalMontoFiltrado = useMemo(() => {
@@ -336,7 +322,7 @@ export default function GastosHistorial({
       {/* Filters Bar */}
       <div className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-xl p-4 shadow-xs space-y-3">
         {/* Main Search and Quick Filters */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {/* Text Search */}
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#94A3B8]">
@@ -396,23 +382,6 @@ export default function GastosHistorial({
             </select>
           </div>
 
-          {/* Almacén Filter */}
-          <div>
-            <select
-              id="filtro-gasto-almacen"
-              value={selectedAlmacen}
-              onChange={(e) => setSelectedAlmacen(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] text-xs sm:text-sm text-[#172033] dark:text-[#F8FAFC] focus:outline-none focus:ring-2 focus:ring-[#059669] focus:border-transparent transition-all cursor-pointer"
-            >
-              <option value="all">Todos los almacenes / sucursales</option>
-              {almacenes.map((alm) => (
-                <option key={alm.id} value={alm.id}>
-                  {alm.nombre}
-                </option>
-              ))}
-              <option value="sin_almacen">Sin almacén específico (General)</option>
-            </select>
-          </div>
         </div>
 
         {/* Secondary Date Range and Provider Filter */}
@@ -508,7 +477,7 @@ export default function GastosHistorial({
                 <th className="py-3 px-4">Concepto / Descripción</th>
                 <th className="py-3 px-4">Categoría</th>
                 <th className="py-3 px-4">Método</th>
-                <th className="py-3 px-4">Almacén</th>
+
                 <th className="py-3 px-4">Proveedor</th>
                 <th className="py-3 px-4 text-right">Monto (MXN)</th>
                 <th className="py-3 px-4 text-center">Acciones</th>
@@ -531,7 +500,7 @@ export default function GastosHistorial({
                 ))
               ) : filteredGastos.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 px-4 text-center">
+                  <td colSpan={7} className="py-12 px-4 text-center">
                     <div className="max-w-md mx-auto space-y-3">
                       <div className="h-10 w-10 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[#64748B]">
                         <Receipt className="h-5 w-5" />
@@ -616,11 +585,6 @@ export default function GastosHistorial({
                     {/* Método de Pago */}
                     <td className="py-3 px-4 text-xs text-[#64748B] dark:text-[#94A3B8] whitespace-nowrap">
                       {gasto.metodo_pago || <span className="italic text-slate-400 dark:text-slate-500">Sin especificar</span>}
-                    </td>
-
-                    {/* Almacén */}
-                    <td className="py-3 px-4 text-xs text-[#64748B] dark:text-[#94A3B8] whitespace-nowrap">
-                      {gasto.almacen_nombre || (gasto.almacen_id ? "Almacén asignado" : <span className="italic text-slate-400">General</span>)}
                     </td>
 
                     {/* Proveedor */}
@@ -801,13 +765,6 @@ export default function GastosHistorial({
                 </div>
 
                 <div>
-                  <span className="text-[10px] font-medium text-[#64748B] dark:text-[#94A3B8] uppercase">Almacén / Sucursal</span>
-                  <p className="font-medium text-[#172033] dark:text-[#F8FAFC] mt-0.5">
-                    {selectedGastoDetail.almacen_nombre || (selectedGastoDetail.almacen_id ? "Almacén asignado" : "General / Sin almacén")}
-                  </p>
-                </div>
-
-                <div>
                   <span className="text-[10px] font-medium text-[#64748B] dark:text-[#94A3B8] uppercase">Proveedor o Beneficiario</span>
                   <p className="font-medium text-[#172033] dark:text-[#F8FAFC] mt-0.5">
                     {selectedGastoDetail.proveedor || "No especificado"}
@@ -888,7 +845,7 @@ export default function GastosHistorial({
               <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8]">
                 El gasto dejará de aparecer en Finanzas, pero podrás restaurarlo posteriormente desde Papelera:
               </p>
-              
+
               <div className="p-3 bg-slate-50 dark:bg-[#0F172A] rounded-lg border border-slate-200 dark:border-slate-800 text-xs space-y-1">
                 <p className="font-semibold text-[#172033] dark:text-[#F8FAFC]">
                   {gastoToDelete.concepto}
