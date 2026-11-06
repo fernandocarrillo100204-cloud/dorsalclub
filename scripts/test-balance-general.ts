@@ -45,6 +45,30 @@ assert.equal(value.ingresosAnteriores, 500);
 assert.equal(value.salidasAnteriores, 50);
 assert.equal(value.balance, 450);
 
+const mixed = calcularBalanceGeneral([
+  { ...first, sku: "SKU-A", comentarios_venta: "Entrega personal" },
+  { ...second, sku: "SKU-B" }, payment, refund,
+  { ...sale, id: "cancelled", estado: "anulado" }
+], [{ ...purchase, folio: "COMP-1", notas: "Primer pedido" }], [expense], [{ id: "capital", tipo: "aportacion_capital", monto: 500, concepto: "Capital", notas: "Anterior" }] as any);
+assert.equal(mixed.movimientos.length, 7, "Un cobro por venta, abono, devolución, costo, compra, gasto y capital.");
+assert.equal(mixed.movimientos.reduce((sum, row) => sum + Math.round(row.ingreso * 100), 0), Math.round(mixed.ingresos * 100));
+assert.equal(mixed.movimientos.reduce((sum, row) => sum + Math.round(row.egreso * 100), 0), Math.round(mixed.egresos * 100));
+assert.ok(mixed.movimientos.find(row => row.id === "venta-sale")?.descripcion.includes("SKU-A, 1 × SKU-B"));
+assert.equal(mixed.movimientos.find(row => row.id === "venta-sale")?.comentario, "Entrega personal");
+assert.equal(mixed.movimientos.find(row => row.tipo === "Compra")?.egreso, 440);
+assert.equal(mixed.movimientos.find(row => row.tipo === "Compra")?.comentario, "Primer pedido");
+assert.equal(mixed.movimientos.find(row => row.tipo === "Reembolso")?.ingreso, -1100);
+assert.equal(mixed.movimientos.find(row => row.tipo === "Gasto extra")?.gasto?.id, expense.id);
+const { default: MovimientosBalance } = await import("../src/components/finanzas/MovimientosBalance");
+const table = renderToStaticMarkup(React.createElement(MovimientosBalance, { data: mixed, loading: false, busy: false, onEdit: () => {}, onArchive: () => {} }));
+for (const text of ["Detalle de ingresos y egresos", "Descripción", "Comentario", "Primer pedido", "Reembolso", "Entrega personal", "Total de todo el historial"]) assert.ok(table.includes(text));
+const many = calcularBalanceGeneral([], [], Array.from({ length: 25 }, (_, i) => ({ ...expense, id: `expense-${i}`, concepto: `Gasto ${i}`, fecha: new Date(2026, 0, i + 1) })), []);
+const paged = renderToStaticMarkup(React.createElement(MovimientosBalance, { data: many, loading: false, busy: false, onEdit: () => {}, onArchive: () => {} }));
+assert.ok(paged.includes("Cargar más"));
+assert.ok(paged.includes("Gasto 24"));
+assert.ok(!paged.includes('>Gasto 0<'));
+assert.equal(many.egresos, 2500);
+
 const memory = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
   getItem: (key: string) => memory.get(key) ?? null,

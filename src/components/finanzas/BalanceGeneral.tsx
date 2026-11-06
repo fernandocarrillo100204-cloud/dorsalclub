@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from "react";
-import { Plus, RefreshCw, Pencil, Trash2 } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { firestoreService, getLocalDateString } from "../../lib/firebase";
 import type { Gasto } from "../../types";
 import { useConsulta } from "../../hooks/useConsulta";
@@ -8,6 +8,7 @@ import { mensajeError } from "../../lib/errores";
 import { fechaRegistro } from "../../lib/lecturasVentas";
 import { PageHeader } from "../ui/Page";
 import Dialog from "../ui/Dialog";
+import MovimientosBalance from "./MovimientosBalance";
 
 const money = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
 const inputClass = "mt-1 w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none";
@@ -60,7 +61,6 @@ export default function BalanceGeneral() {
   const [editing, setEditing] = useState<Gasto | null | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const mutationLock = useRef(false);
-  const [visible, setVisible] = useState(20);
   const { confirm, notify } = useWorkspace();
   const archive = async (gasto: Gasto) => {
     if (!gasto.id || mutationLock.current) return;
@@ -92,9 +92,7 @@ export default function BalanceGeneral() {
       </div></section>
       <section className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-6 sm:flex sm:items-center sm:justify-between gap-4"><div><h2 className="text-lg font-bold">Balance general</h2><p className="mt-1 text-sm text-zinc-500">Ingresos totales − egresos totales</p></div><strong className={`block mt-3 sm:mt-0 text-3xl font-bold tabular-nums ${(data?.balance || 0) > 0 ? "text-emerald-600 dark:text-emerald-400" : (data?.balance || 0) < 0 ? "text-rose-600 dark:text-rose-400" : "text-zinc-500"}`}>{loading ? "—" : money.format(data!.balance)}</strong></section>
       <p className="text-xs text-zinc-500">Es flujo de dinero registrado, no utilidad ni saldo bancario. Las compras se descuentan completas. Los cobros parciales se reparten proporcionalmente entre mercancía y cargos adicionales.</p>
-      <section className="rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden"><div className="p-5"><h2 className="text-lg font-bold">Gastos extra registrados</h2><p className="text-sm text-zinc-500 mt-1">Solo gastos capturados aparte. No vuelvas a agregar envíos o costos que ya registraste en compras o ventas.</p></div>
-        {loading ? <p role="status" className="p-5 text-zinc-500">Cargando gastos…</p> : !data?.gastos.length ? <p className="px-5 pb-5 text-sm text-zinc-500">No hay gastos extra registrados.</p> : <><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-zinc-50 dark:bg-zinc-800 text-zinc-500"><tr><th className="p-4">Fecha</th><th className="p-4">Concepto</th><th className="p-4 text-right">Monto</th><th className="p-4 text-right">Acciones</th></tr></thead><tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">{data.gastos.slice(0, visible).map(gasto => <tr key={gasto.id}><td className="p-4 whitespace-nowrap">{gasto.fecha.toLocaleDateString("es-MX")}</td><td className="p-4 min-w-48"><p className="font-medium">{gasto.concepto}</p>{gasto.notas && <p className="mt-1 text-xs text-zinc-500 whitespace-pre-wrap break-words">{gasto.notas}</p>}</td><td className="p-4 text-right whitespace-nowrap tabular-nums">{money.format(gasto.monto)}</td><td className="p-4"><div className="flex justify-end gap-1"><button type="button" className="btn-icon" aria-label={`Editar ${gasto.concepto}`} disabled={busy || refreshing} onClick={() => setEditing(gasto)}><Pencil className="h-4 w-4" /></button><button type="button" className="btn-icon text-rose-600" aria-label={`Enviar ${gasto.concepto} a papelera`} disabled={busy || refreshing} onClick={() => archive(gasto)}><Trash2 className="h-4 w-4" /></button></div></td></tr>)}</tbody></table></div>{visible < data.gastos.length && <div className="p-4 text-center"><button type="button" className="btn-secondary" onClick={() => setVisible(value => value + 20)}>Mostrar más gastos</button><p className="mt-2 text-xs text-zinc-500">El balance ya incluye los {data.gastos.length} gastos.</p></div>}</>}
-      </section>
+      <MovimientosBalance data={data} loading={loading} busy={busy || refreshing} onEdit={setEditing} onArchive={archive} />
     </>}
     {editing !== undefined && <GastoExtraForm gasto={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); cargar(); }} />}
   </div>;
