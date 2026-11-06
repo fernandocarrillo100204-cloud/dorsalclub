@@ -4,7 +4,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { buildCsv, csvCell, searchText } from "../src/lib/presentation";
 import { navigationGroups, navigationInfo, navigationParent, utilityNavigation } from "../src/lib/navigation";
 import { ErrorState, FilterSummary, LoadingState, PageHeader, StatCard } from "../src/components/ui/Page";
-import { FinanzasTabs } from "../src/components/finanzas/FinanzasTabs";
 
 // Pure presentation tests: no credentials, browser storage or Firebase connection.
 assert.equal(searchText("  STÜSSY / José  "), "stussy / jose");
@@ -43,8 +42,7 @@ assert.match(render(StatCard, { label: "Total", value: "—" }), /—/);
 assert.match(render(FilterSummary, { count: 20, partial: true, active: true, onClear: () => {} }), /Sobre registros cargados/);
 assert.match(render(FilterSummary, { count: 20, partial: true, active: true, onClear: () => {} }), /Limpiar filtros/);
 assert.doesNotMatch(render(FilterSummary, { count: 0, active: false, onClear: () => {} }), /Limpiar filtros/);
-const tabs = render(FinanzasTabs, { activeTab: "resumen", onNavigateToResumen: () => {}, onNavigateToMovimientos: () => {}, onNavigateToCobrar: () => {} });
-assert.match(tabs, /aria-current="page"/);
-assert.doesNotMatch(tabs, /Resumen mensual/, "All-history mode must not be mislabeled as a monthly summary.");
-assert.equal((tabs.match(/<button/g) || []).length, 3);
+assert.equal(navigationGroups.find(group => group.id === "finanzas")?.items.length, 1);
+assert.equal(navigationParent("finanzas_cobrar"), "finanzas");
+assert.equal(navigationParent("finanzas_gastos"), "finanzas");
 console.log("Workspace: navegación, búsqueda, CSV seguro y semántica de estados aprobados (sin acceso a Firebase).");

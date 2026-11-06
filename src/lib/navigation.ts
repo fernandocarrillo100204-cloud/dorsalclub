@@ -21,9 +21,7 @@ export const navigationGroups = [
     { id: "historial" as NavigationTab, label: "Movimientos de inventario", icon: History, keywords: "entradas salidas ajustes historial" }
   ] },
   { id: "finanzas", label: "Finanzas", icon: Wallet, items: [
-    { id: "finanzas" as NavigationTab, label: "Resumen financiero", icon: Wallet, keywords: "balance ingresos egresos flujo" },
-    { id: "finanzas_gastos" as NavigationTab, label: "Movimientos de dinero", icon: ArrowLeftRight, keywords: "gastos capital inversión ingresos" },
-    { id: "finanzas_cobrar" as NavigationTab, label: "Cuentas por cobrar", icon: CircleDollarSign, keywords: "saldo pendiente pagos" }
+    { id: "finanzas" as NavigationTab, label: "Balance general", icon: Wallet, keywords: "balance ingresos egresos flujo gastos extra" }
   ] }
 ];
 export const utilityNavigation = [
@@ -32,7 +30,7 @@ export const utilityNavigation = [
 ];
 export function navigationParent(tab: NavigationTab): NavigationTab {
   if (["ventas_nueva", "ventas_bajo_pedido", "ventas_mayoreo", "ventas_emprendedor"].includes(tab)) return "ventas_stock";
-  if (["finanzas_gastos_nuevo", "finanzas_gastos_editar"].includes(tab)) return "finanzas_gastos";
+  if (["finanzas_gastos", "finanzas_cobrar", "finanzas_gastos_nuevo", "finanzas_gastos_editar"].includes(tab)) return "finanzas";
   if (tab === "movimientos") return "compras_nueva";
   return tab;
 }

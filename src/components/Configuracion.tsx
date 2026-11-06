@@ -10,8 +10,7 @@ interface ConfiguracionProps {
 const modules: Array<{ id: ModuloConfigurable; title: string; description: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: "ventas", title: "Ventas", description: "Canales, porcentajes, mínimos, anticipos, ubicaciones y repartidores.", icon: ShoppingCart },
   { id: "compras", title: "Compras", description: "Proveedores disponibles para registrar mercancía.", icon: ShoppingBag },
-  { id: "clientes", title: "Clientes", description: "Tipos de cliente, canales de contacto y orígenes.", icon: Users },
-  { id: "finanzas", title: "Finanzas", description: "Categorías de gasto y métodos de pago.", icon: Receipt }
+  { id: "clientes", title: "Clientes", description: "Tipos de cliente, canales de contacto y orígenes.", icon: Users }
 ];
 
 export default function Configuracion({ onNavigateToProducts }: ConfiguracionProps) {

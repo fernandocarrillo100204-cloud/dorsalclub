@@ -74,16 +74,7 @@ const getGastoIdFromPath = (path: string): string => {
 
 const getTabFromPath = (path: string): NavigationTab => {
   const normalized = path.toLowerCase().replace(/\/$/, "");
-  if (normalized === "/finanzas/gastos/nuevo") {
-    return "finanzas_gastos_nuevo";
-  }
-  if (/^\/finanzas\/gastos\/[^/]+\/editar$/.test(normalized)) {
-    return "finanzas_gastos_editar";
-  }
-  if (normalized === "/finanzas/gastos" || normalized === "/finanzas/movimientos") {
-    return "finanzas_gastos";
-  }
-  if (normalized === "/finanzas/por-cobrar") return "finanzas_cobrar";
+  if (normalized.startsWith("/finanzas/")) return "finanzas";
   if (normalized === "/finanzas") {
     return "finanzas";
   }
@@ -578,27 +569,7 @@ export default function App() {
                     exit={{ opacity: 0, y: -15 }}
                     transition={{ duration: 0.25, ease: "easeInOut" }}
                   >
-                    <Finanzas
-                      subView={
-                        activeTab === "finanzas_gastos_nuevo"
-                          ? "nuevo"
-                          : activeTab === "finanzas_gastos_editar"
-                          ? "editar"
-                          : activeTab === "finanzas_gastos"
-                          ? "movimientos"
-                          : activeTab === "finanzas_cobrar"
-                          ? "cobrar"
-                          : "resumen"
-                      }
-                      gastoId={preselectedGastoId}
-                      onNavigateToResumen={() => navigateTo("finanzas")}
-                      onNavigateToGastos={() => navigateTo("finanzas_gastos")}
-                      onNavigateToCobrar={() => navigateTo("finanzas_cobrar")}
-                      onNavigateToNuevoGasto={() => navigateTo("finanzas_gastos_nuevo")}
-                      onNavigateToEditarGasto={(id) => navigateTo("finanzas_gastos_editar", { gastoId: id })}
-                      onNavigateToVentas={() => navigateTo("ventas_historial")}
-                      onNavigateToCompras={() => navigateTo("compras")}
-                    />
+                    <Finanzas />
                   </motion.div>
                 )}
 

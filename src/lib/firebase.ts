@@ -91,6 +91,7 @@ import {
 import { allocateRecognizedSaleIncome, calculateSaleTotals, requiresSaleRefund } from "./ventasCore";
 import { construirPedidos, fechaRegistro, leerMovimiento, leerVenta } from "./lecturasVentas";
 import { calcularInventarioDrop, dropsDeVenta, validarDemandaDrops } from "./inventarioDrops";
+import { calcularBalanceGeneral, type BalanceGeneral } from "./balanceGeneral";
 import type { DetalleInventarioDrop, InventarioDropFila } from "./inventarioDrops";
 
 // Detect if Firebase config is present in environment variables
@@ -5779,7 +5780,9 @@ export const firestoreService = {
       .sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
   },
 
-  getResumenFinancieroConsolidado: async (scope: { alcance: "todo" } | { alcance: "mes"; year: number; month: number }): Promise<ResumenFinancieroConsolidado> => {
+  getBalanceGeneral: async (): Promise<BalanceGeneral> => (await firestoreService.getResumenFinancieroConsolidado({ alcance: "todo" }, false)).balanceGeneral,
+
+  getResumenFinancieroConsolidado: async (scope: { alcance: "todo" } | { alcance: "mes"; year: number; month: number }, includeReceivables = true): Promise<ResumenFinancieroConsolidado & { balanceGeneral: BalanceGeneral }> => {
     const toSafeDate = (value: any): Date => value instanceof Date ? value : value?.toDate ? value.toDate() : value?.seconds ? new Date(value.seconds * 1000) : new Date(value || Date.now());
     const isMonth = scope.alcance === "mes";
     const start = isMonth ? new Date(scope.year, scope.month - 1, 1, 0, 0, 0, 0) : null;
@@ -5880,7 +5883,7 @@ export const firestoreService = {
       movements.push({ id: `manual-${item.id}`, fecha: toSafeDate(item.fecha), tipo: type, origen: "Movimiento manual", concepto: item.concepto, entrada, salida, estado: "Activo", referencia: item.id, editable: true });
     });
 
-    const receivables = await firestoreService.getCuentasPorCobrar();
+    const receivables = includeReceivables ? await firestoreService.getCuentasPorCobrar() : [];
     const pendientePorCobrar = receivables.reduce((sum, item) => sum + item.pendiente, 0);
     const entradasOperativas = ingresosVentas + otrosIngresos;
     const egresosOperativos = comprasOperativas + gastosOperativos + costosAsociadosVentas;
@@ -5900,6 +5903,7 @@ export const firestoreService = {
     const graph = Array.from(graphMap.values()).sort((a, b) => a.clave.localeCompare(b.clave));
     movements.sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
     return {
+      balanceGeneral: calcularBalanceGeneral(rawSales, rawPurchases, rawExpenses, rawManual),
       alcance: scope.alcance,
       ...(isMonth ? { year: scope.year, month: scope.month } : {}),
       ingresosVentas, otrosIngresos, entradasOperativas, comprasOperativas, gastosOperativos, costosAsociadosVentas,
