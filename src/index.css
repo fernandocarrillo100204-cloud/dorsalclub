@@ -149,7 +149,7 @@ table { font-variant-numeric: tabular-nums; }
 .sidebar-account strong, .sidebar-account small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-account strong { font-size: 12px; font-weight: 600; }
 .sidebar-account small { font-size: 10px; color: var(--text-secondary); margin-top: 3px; }
-.workspace-header { position: sticky; top: 0; z-index: 30; min-height: 68px; padding: 12px 32px; display: flex; justify-content: space-between; align-items: center; gap: 14px; background: var(--bg-surface); border-bottom: 1px solid var(--border-color); }
+.workspace-header { position: relative; min-height: 68px; padding: 12px 32px; display: flex; justify-content: space-between; align-items: center; gap: 14px; background: var(--bg-surface); border-bottom: 1px solid var(--border-color); }
 .workspace-breadcrumb { display: flex; align-items: center; min-width: 0; gap: 10px; font-size: 12px; color: var(--text-secondary); }
 .workspace-breadcrumb strong { color: var(--text-primary); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-breadcrumb span { white-space: nowrap; }
