@@ -83,12 +83,15 @@ export default function Ventas({
   const preselectionRef = useRef("");
   const [items, setItems] = useState<VentaItemDraft[]>(() => {
     const initialProduct = productos.find((product) => product.sku === preselectedSku);
-    return [createVentaItem(
-      preselectedSku,
-      preselectedDropId,
-      initialProduct?.precio_venta ?? "",
-      initialProduct?.precio_costo ?? ""
-    )];
+    return [{
+      ...createVentaItem(
+        preselectedSku,
+        preselectedDropId,
+        initialProduct?.precio_venta ?? "",
+        initialProduct?.precio_costo ?? ""
+      ),
+      talla: initialProduct?.tipo_talla === "unica" ? "ÚNICA" : ""
+    }];
   });
   // Opciones y ajustes de venta (envío y costos adicionales)
   const [isAjustesOpen, setIsAjustesOpen] = useState(false);
@@ -142,6 +145,7 @@ export default function Ventas({
         return {
           ...item,
           sku: nextSku,
+          talla: preselectedSku ? (selectedProduct?.tipo_talla === "unica" ? "ÚNICA" : "") : item.talla,
           dropId: preselectedDropId || item.dropId,
           precioUnitario: preselectedSku ? calculateChannelPrice(selectedProduct) : item.precioUnitario,
           costoUnitario: preselectedSku ? (selectedProduct?.precio_costo ?? "") : item.costoUnitario
@@ -279,7 +283,7 @@ export default function Ventas({
     const selectedProduct = productos.find((product) => product.sku === nextSku);
     updateItem(id, {
       sku: nextSku,
-      talla: "",
+      talla: selectedProduct?.tipo_talla === "unica" ? "ÚNICA" : "",
       precioUnitario: calculateChannelPrice(selectedProduct),
       costoUnitario: selectedProduct?.precio_costo ?? ""
     });
@@ -300,8 +304,10 @@ export default function Ventas({
     const inventory = dropInventories[item.dropId];
     if (!item.sku || !item.dropId || !drops.some(drop => drop.id === item.dropId) || !inventory?.data) return null;
     const row = inventory.data.find(row => row.sku === item.sku);
-    const size = item.talla.trim().toUpperCase();
-    const balance = size ? (row?.tallas[size] || 0) : (row?.saldo || 0);
+    const product = productos.find(product => product.sku === item.sku);
+    const hasSizes = Object.keys(row?.tallas || {}).length > 0;
+    const size = product?.tipo_talla === "unica" && hasSizes ? "ÚNICA" : item.talla.trim().toUpperCase();
+    const balance = size && hasSizes ? (row?.tallas[size] || 0) : (row?.saldo || 0);
     return Math.max(0, balance);
   };
 
@@ -399,13 +405,17 @@ export default function Ventas({
       }
 
       const stockedSizes = dropInventories[item.dropId]?.data?.find(row => row.sku === cleanSku)?.tallas || {};
-      if (affectsStock && Object.keys(stockedSizes).length && !item.talla.trim()) {
+      const product = productos.find(product => product.sku === cleanSku);
+      const talla = product?.tipo_talla === "unica"
+        ? (!affectsStock || Object.keys(stockedSizes).length ? "ÚNICA" : "")
+        : item.talla.trim().toUpperCase();
+      if (affectsStock && Object.keys(stockedSizes).length && !talla) {
         setFormError(`Selecciona la talla de la partida ${index + 1}.`);
         return;
       }
       normalizedItems.push({
         sku: cleanSku,
-        ...(item.talla.trim() ? { talla: item.talla.trim().toUpperCase() } : {}),
+        ...(talla ? { talla } : {}),
         ...(affectsStock ? { drop_id: item.dropId } : {}),
         cantidad: quantity,
         precio_unitario_venta: unitPrice,
@@ -703,7 +713,7 @@ export default function Ventas({
                       </select>
                     </div>
 
-                    {affectsStock && item.sku && Object.keys(dropInventories[item.dropId]?.data?.find(row => row.sku === item.sku)?.tallas || {}).length > 0 && (
+                    {affectsStock && item.sku && selectedProduct?.tipo_talla !== "unica" && Object.keys(dropInventories[item.dropId]?.data?.find(row => row.sku === item.sku)?.tallas || {}).length > 0 && (
                       <div>
                         <label htmlFor={"talla-" + item.id} className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">Talla *</label>
                         <select id={"talla-" + item.id} required value={item.talla} onChange={event => updateItem(item.id, { talla: event.target.value })} className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white">
