@@ -617,7 +617,7 @@ export default function Compras({
                       <th className="py-2.5 px-3 w-12 text-center">#</th>
                       <th className="py-2.5 px-3 min-w-[280px]">Producto & SKU</th>
                       <th className="py-2.5 px-3 w-32">Talla</th>
-                       <th className="py-2.5 px-3 w-28 text-center">Cantidad</th>
+                      <th className="py-2.5 px-3 w-28 text-center">Cantidad</th>
                       <th className="py-2.5 px-3 w-36 text-right">Costo Unit. ($)</th>
                       <th className="py-2.5 px-3 w-36 text-right">Subtotal ($)</th>
                       <th className="py-2.5 px-3 w-12 text-center"></th>
@@ -643,6 +643,7 @@ export default function Compras({
                               onChange={(e) => handleProductSelect(idx, e.target.value)}
                               className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-900 dark:text-white font-medium focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-white"
                             >
+                              <option value="">Seleccionar producto</option>
                               {productos.map((prod) => (
                                 <option key={prod.id || prod.sku} value={prod.sku}>
                                   {prod.sku} — {prod.nombre}
