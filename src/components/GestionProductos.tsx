@@ -119,6 +119,7 @@ export default function GestionProductos({
   const [editingBaseId, setEditingBaseId] = useState<string | null>(null);
   const [editingSingleProductId, setEditingSingleProductId] = useState<string | null>(null);
   const [formNombre, setFormNombre] = useState("");
+  const [formSkuManual, setFormSkuManual] = useState("");
   const [formMarca, setFormMarca] = useState("");
   const [formCategoria, setFormCategoria] = useState("");
   const [formTipoTalla, setFormTipoTalla] = useState<"" | "ropa" | "calzado" | "unica">("");
@@ -258,6 +259,7 @@ export default function GestionProductos({
     setEditingBaseId(null);
     setEditingSingleProductId(null);
     setFormNombre("");
+    setFormSkuManual("");
     setFormMarca("");
     setFormCategoria("");
     setFormTipoTalla("");
@@ -557,6 +559,38 @@ export default function GestionProductos({
       }
     } catch (err: any) {
       setGeneralError(err.message || "Error al guardar el producto.");
+    } finally {
+      setSubmitLoading(false);
+    }
+  };
+
+  // Un SKU manual por producto nuevo; las tallas se especifican al comprar.
+  const handleCreateSimpleProduct = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setGeneralError(null);
+    const nombre = formNombre.trim();
+    const marca = formMarca.trim();
+    const sku = formSkuManual.trim().toUpperCase();
+    if (!nombre || nombre.length > 120 || !marca || !sku || sku.length > 128 || sku.includes("/")) {
+      setGeneralError("Completa nombre, marca y un SKU válido (máximo 128 caracteres, sin /).");
+      return;
+    }
+    if (productos.some(p => p.sku.toUpperCase() === sku)) {
+      setGeneralError(`El SKU "${sku}" ya existe en el catálogo.`);
+      return;
+    }
+    setSubmitLoading(true);
+    try {
+      const producto: Producto = {
+        producto_base_id: generateBaseId(marca, nombre), sku, nombre, marca,
+        categoria: "General", tipo_talla: "unica", unidad: "pieza",
+        stock_minimo: 0, activo: true, precio_costo: 0
+      };
+      await firestoreService.addProductsBatch([producto]);
+      handleCloseModal();
+      setCreatedProductPrompt({ ...producto, id: sku });
+    } catch (err: any) {
+      setGeneralError(err.message || "No se pudo crear el producto.");
     } finally {
       setSubmitLoading(false);
     }
@@ -910,8 +944,46 @@ export default function GestionProductos({
         )}
       </div>
 
+      {/* Alta simplificada de nuevos productos; edición histórica permanece disponible. */}
+      {isFormOpen && !editingBaseId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-2xl shadow-2xl">
+            <div className="px-6 py-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-zinc-900 dark:text-white">Crear Nuevo Producto</h2>
+                <p className="text-xs text-zinc-500 mt-1">La talla y el costo se capturan al registrar la compra.</p>
+              </div>
+              <button type="button" onClick={handleCloseModal} aria-label="Cerrar" className="text-zinc-400 hover:text-zinc-900 dark:hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleCreateSimpleProduct} className="p-6 space-y-5">
+              {generalError && <p role="alert" className="text-xs text-rose-600">{generalError}</p>}
+              <div>
+                <label htmlFor="new-model-name" className="block text-xs font-semibold mb-1.5 text-zinc-700 dark:text-zinc-300">Nombre comercial *</label>
+                <input id="new-model-name" required maxLength={120} value={formNombre} onChange={e => setFormNombre(e.target.value)} placeholder="Ej. Heavyweight Boxy Tee" className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white" />
+              </div>
+              <div>
+                <label htmlFor="new-model-brand" className="block text-xs font-semibold mb-1.5 text-zinc-700 dark:text-zinc-300">Marca *</label>
+                <select id="new-model-brand" required value={formMarca} onChange={e => setFormMarca(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white">
+                  <option value="">Seleccionar marca</option>
+                  {catalogMarcas.map(m => <option key={m.id} value={m.nombre}>{m.nombre}</option>)}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="new-model-sku" className="block text-xs font-semibold mb-1.5 text-zinc-700 dark:text-zinc-300">SKU manual *</label>
+                <input id="new-model-sku" required maxLength={128} value={formSkuManual} onChange={e => setFormSkuManual(e.target.value.toUpperCase())} placeholder="Ej. STUSSY-001" className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white font-mono uppercase" />
+                <p className="text-[11px] text-zinc-500 mt-1">Un SKU por modelo. No se genera automáticamente.</p>
+              </div>
+              <div className="flex justify-between pt-4 border-t border-zinc-200 dark:border-zinc-800">
+                <button type="button" onClick={handleCloseModal} className="btn-secondary">Cancelar</button>
+                <button type="submit" disabled={submitLoading || !formNombre.trim() || !formMarca.trim() || !formSkuManual.trim()} className="btn-primary disabled:opacity-40">{submitLoading ? "Guardando…" : "Crear producto"}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* CREATE / EDIT PRODUCT MODAL */}
-      {isFormOpen && (
+      {isFormOpen && editingBaseId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
           <motion.div
             initial={{ opacity: 0, scale: 0.98 }}
