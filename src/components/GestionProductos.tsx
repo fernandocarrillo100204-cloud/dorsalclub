@@ -579,6 +579,10 @@ export default function GestionProductos({
       setGeneralError("Completa nombre, marca y un SKU válido (máximo 128 caracteres, sin /).");
       return;
     }
+    if (!formTipoTalla) {
+      setGeneralError("Selecciona el tipo de talla del producto.");
+      return;
+    }
     if (productos.some(p => p.sku.toUpperCase() === sku && (!editingBaseId || p.producto_base_id !== editingBaseId))) {
       setGeneralError(`El SKU "${sku}" ya existe en el catálogo.`);
       return;
@@ -587,11 +591,11 @@ export default function GestionProductos({
     try {
       const producto: Producto = {
         producto_base_id: generateBaseId(marca, nombre), sku, nombre, marca,
-        categoria: "General", tipo_talla: "ropa", unidad: "pieza",
+        categoria: "General", tipo_talla: formTipoTalla, unidad: "pieza",
         stock_minimo: 0, activo: true, precio_costo: 0
       };
       if (editingBaseId) {
-        await firestoreService.updateProducto(sku, { nombre, marca });
+        await firestoreService.updateProducto(sku, { nombre, marca, tipo_talla: formTipoTalla });
       } else {
         await firestoreService.addProductsBatch([producto]);
       }
@@ -942,7 +946,7 @@ export default function GestionProductos({
             <div className="px-6 py-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-bold text-zinc-900 dark:text-white">{editingBaseId ? "Editar producto" : "Crear Nuevo Producto"}</h2>
-                <p className="text-xs text-zinc-500 mt-1">La talla y el costo se capturan al registrar la compra.</p>
+                <p className="text-xs text-zinc-500 mt-1">Selecciona el tipo de talla; la talla específica y el costo se registran en compras.</p>
               </div>
               <button type="button" onClick={handleCloseModal} aria-label="Cerrar" className="text-zinc-400 hover:text-zinc-900 dark:hover:text-white"><X className="w-5 h-5" /></button>
             </div>
@@ -960,13 +964,22 @@ export default function GestionProductos({
                 </select>
               </div>
               <div>
+                <label htmlFor="new-model-size-type" className="block text-xs font-semibold mb-1.5 text-zinc-700 dark:text-zinc-300">Tipo de talla *</label>
+                <select id="new-model-size-type" required value={formTipoTalla} onChange={e => setFormTipoTalla(e.target.value as "ropa" | "calzado" | "unica" | "")} className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white">
+                  <option value="">Seleccionar tipo de talla</option>
+                  <option value="ropa">Ropa (XS, S, M, L, XL...)</option>
+                  <option value="calzado">Calzado (25, 26, 27, 28...)</option>
+                  <option value="unica">Talla única (accesorios, gorras...)</option>
+                </select>
+              </div>
+              <div>
                 <label htmlFor="new-model-sku" className="block text-xs font-semibold mb-1.5 text-zinc-700 dark:text-zinc-300">SKU manual *</label>
                 <input id="new-model-sku" required readOnly={Boolean(editingBaseId)} maxLength={128} value={formSkuManual} onChange={e => setFormSkuManual(e.target.value.toUpperCase())} placeholder="Ej. STUSSY-001" className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white font-mono uppercase" />
                 <p className="text-[11px] text-zinc-500 mt-1">Un SKU por modelo. No se genera automáticamente.</p>
               </div>
               <div className="flex justify-between pt-4 border-t border-zinc-200 dark:border-zinc-800">
                 <button type="button" onClick={handleCloseModal} className="btn-secondary">Cancelar</button>
-                <button type="submit" disabled={submitLoading || !formNombre.trim() || !formMarca.trim() || !formSkuManual.trim()} className="btn-primary disabled:opacity-40">{submitLoading ? "Guardando…" : editingBaseId ? "Guardar cambios" : "Crear producto"}</button>
+                <button type="submit" disabled={submitLoading || !formNombre.trim() || !formMarca.trim() || !formTipoTalla || !formSkuManual.trim()} className="btn-primary disabled:opacity-40">{submitLoading ? "Guardando…" : editingBaseId ? "Guardar cambios" : "Crear producto"}</button>
               </div>
             </form>
           </div>
