@@ -123,7 +123,7 @@ export default function GestionProductos({
   const [formSkuManual, setFormSkuManual] = useState("");
   const [formMarca, setFormMarca] = useState("");
   const [formCategoria, setFormCategoria] = useState("");
-  const [formTipoTalla, setFormTipoTalla] = useState<"" | "ropa" | "calzado" | "unica">("");
+  const [formTipoTalla, setFormTipoTalla] = useState<"" | "ropa" | "calzado" | "unica" | "personalizada">("");
   const [formUnidad, setFormUnidad] = useState("pieza");
   const [formSubmitted, setFormSubmitted] = useState(false);
 
@@ -186,7 +186,7 @@ export default function GestionProductos({
       nombre: string;
       marca: string;
       categoria: string;
-      tipo_talla: "ropa" | "calzado" | "unica";
+      tipo_talla: "ropa" | "calzado" | "unica" | "personalizada";
       unidad: string;
       variants: Producto[];
       minPrice: number;
@@ -522,7 +522,7 @@ export default function GestionProductos({
           nombre: formNombre.trim(),
           marca: formMarca.trim(),
           categoria: formCategoria.trim(),
-          tipo_talla: (formTipoTalla as "ropa" | "calzado" | "unica") || "ropa",
+          tipo_talla: (formTipoTalla as "ropa" | "calzado" | "unica" | "personalizada") || "ropa",
           unidad: formUnidad.trim() || "pieza",
           color: row.color.trim(),
           talla: formTipoTalla === "unica" ? "Única" : row.talla.trim(),
@@ -965,11 +965,12 @@ export default function GestionProductos({
               </div>
               <div>
                 <label htmlFor="new-model-size-type" className="block text-xs font-semibold mb-1.5 text-zinc-700 dark:text-zinc-300">Tipo de talla *</label>
-                <select id="new-model-size-type" required value={formTipoTalla} onChange={e => setFormTipoTalla(e.target.value as "ropa" | "calzado" | "unica" | "")} className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white">
+                <select id="new-model-size-type" required value={formTipoTalla} onChange={e => setFormTipoTalla(e.target.value as "ropa" | "calzado" | "unica" | "personalizada" | "")} className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white">
                   <option value="">Seleccionar tipo de talla</option>
                   <option value="ropa">Ropa (XS, S, M, L, XL...)</option>
                   <option value="calzado">Calzado (25, 26, 27, 28...)</option>
-                  <option value="unica">Talla única (accesorios, gorras...)</option>
+                  <option value="unica">Talla única / Sin talla (gorras, accesorios...)</option>
+                  <option value="personalizada">Personalizada (anillos, cinturones, medidas...)</option>
                 </select>
               </div>
               <div>
@@ -1134,6 +1135,7 @@ export default function GestionProductos({
                       <option value="ropa">Ropa (XS, S, M, L, XL...)</option>
                       <option value="calzado">Calzado (25, 26, 27, 28...)</option>
                       <option value="unica">Talla Única (Accesorios/Gorras)</option>
+                      <option value="personalizada">Personalizada (medidas especiales)</option>
                     </select>
                     {(formErrors.tipo_talla || (formSubmitted && !formTipoTalla.trim())) && (
                       <p className="text-[11px] text-rose-600 mt-1">{formErrors.tipo_talla || "Debes seleccionar el tipo de talla"}</p>
