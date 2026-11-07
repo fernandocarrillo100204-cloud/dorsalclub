@@ -114,6 +114,7 @@ export interface Movimiento {
 
 export interface VentaPartidaInput {
   sku: string;
+  talla?: string;
   drop_id?: string;
   cantidad: number;
   precio_unitario_venta: number;
@@ -122,6 +123,7 @@ export interface VentaPartidaInput {
 
 export interface VentaItem {
   sku: string;
+  talla?: string;
   almacen_id?: string;
   drop_id?: string;
   drop_nombre?: string;
