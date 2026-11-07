@@ -164,6 +164,28 @@ const batched = await service.getDropsDetail([dropA.id, ...Array.from({ length: 
 assert.equal(queries.length - batchStart, 8);
 assert.equal(batched.ventas.filter(sale => sale.id === "multi-batch").length, 1);
 assert.ok(queries.slice(batchStart).every(q => q.constraints[0].value.length <= 30));
+// Un SKU manual puede comprarse en varias tallas; las ventas descuentan la talla exacta.
+const sizedDrop = await service.addDrop({ nombre: "Drop tallas", estado: "en_venta" });
+await service.registerCompraTransaction({
+  proveedor: "Proveedor tallas", drop_id: sizedDrop.id,
+  items: [
+    { sku: "TEST", talla: "M", cantidad: 2, costo_unitario: 100, subtotal: 200 },
+    { sku: "TEST", talla: "L", cantidad: 3, costo_unitario: 100, subtotal: 300 }
+  ]
+});
+let sizedInventory = calcularInventarioDrop(sizedDrop.id, await service.getDropDetail(sizedDrop.id))[0];
+assert.equal(sizedInventory.saldo, 5);
+assert.deepEqual(sizedInventory.tallas, { M: 2, L: 3 });
+await assert.rejects(service.registerVentaTransaction(input([{ drop_id: sizedDrop.id, talla: "M", cantidad: 3 }]) as VentaRegistroInput), /Disponibilidad insuficiente/);
+await assert.rejects(service.registerVentaTransaction(input([{ drop_id: sizedDrop.id, cantidad: 1 }])), /Selecciona la talla/);
+const sizedSale = await service.registerVentaTransaction({
+  ...input([{ drop_id: sizedDrop.id, cantidad: 2 }]),
+  items: [{ sku: "TEST", talla: "M", drop_id: sizedDrop.id, cantidad: 2, precio_unitario_venta: 250, costo_unitario_venta: 100 }]
+});
+assert.equal((data.get("ventas/" + sizedSale.id) as Venta).items[0].talla, "M");
+sizedInventory = calcularInventarioDrop(sizedDrop.id, await service.getDropDetail(sizedDrop.id))[0];
+assert.deepEqual(sizedInventory.tallas, { M: 0, L: 3 });
+assert.equal(sizedInventory.saldo, 3);
 const beforeError = JSON.stringify([...data]);
 reject("compras");
 await assert.rejects(service.getDropsDetail(catalog.map(drop => drop.id)), { code: "permission-denied" });
