@@ -180,7 +180,7 @@ async function readDropInventoryData(dropId: string): Promise<DetalleInventarioD
   };
 }
 
-async function validateDropDemand(items: { sku: string; cantidad: number; drop_id?: string }[], transaction?: Transaction, requireOpen = true): Promise<Map<string, string>> {
+async function validateDropDemand(items: { sku: string; talla?: string; cantidad: number; drop_id?: string }[], transaction?: Transaction, requireOpen = true): Promise<Map<string, string>> {
   const ids = [...new Set(items.map(item => item.drop_id).filter((id): id is string => Boolean(id)))];
   const inventories = new Map<string, InventarioDropFila[]>();
   const names = new Map<string, string>();
@@ -1642,6 +1642,7 @@ export const firestoreService = {
     const afectaStock = venta.afecta_stock !== false;
     let normalizedItems = venta.items.map((item, index) => {
       const sku = (item.sku || "").trim().toUpperCase();
+      const talla = (item.talla || "").trim().toUpperCase();
       const dropId = afectaStock ? (item.drop_id || venta.drop_id || "").trim() : "";
       const cantidad = Number(item.cantidad);
       const precioUnitario = Number(item.precio_unitario_venta);
@@ -1661,6 +1662,7 @@ export const firestoreService = {
 
       return {
         sku,
+        ...(talla ? { talla } : {}),
         drop_id: dropId,
         drop_nombre: "",
         cantidad,
@@ -1766,6 +1768,7 @@ export const firestoreService = {
             ...(!afectaStock ? { pedido_estado: estadoPago === "pagado" ? "pagado" : "pedido" } : {}),
             ...(isPrimaryItem ? { ingreso_reconocido: ventaTotalRecibido } : {}),
             sku: item.sku,
+            ...(item.talla ? { talla: item.talla } : {}),
 
             tipo: "salida",
             cantidad: item.cantidad,
@@ -1809,6 +1812,7 @@ export const firestoreService = {
           fecha_str: todayStr,
           items: normalizedItems.map(item => ({
             sku: item.sku,
+            ...(item.talla ? { talla: item.talla } : {}),
 
             ...(item.drop_id ? { drop_id: item.drop_id, drop_nombre: item.drop_nombre } : {}),
             cantidad: item.cantidad,
@@ -1910,6 +1914,7 @@ export const firestoreService = {
         ...(!afectaStock ? { pedido_estado: estadoPago === "pagado" ? "pagado" : "pedido" } : {}),
         ...(isPrimaryItem ? { ingreso_reconocido: ventaTotalRecibido } : {}),
         sku: item.sku,
+        ...(item.talla ? { talla: item.talla } : {}),
 
         tipo: "salida",
         cantidad: item.cantidad,
@@ -1945,7 +1950,7 @@ export const firestoreService = {
       folio: generatedFolio,
       fecha: now,
       fecha_str: todayStr,
-      items: normalizedItems.map(item => ({ sku: item.sku, ...(item.drop_id ? { drop_id: item.drop_id, drop_nombre: item.drop_nombre } : {}), cantidad: item.cantidad, precio_unitario: item.precio_unitario_venta, costo_unitario: item.costo_unitario_venta, total: item.total_venta, costo_total: item.costo_total })),
+      items: normalizedItems.map(item => ({ sku: item.sku, ...(item.talla ? { talla: item.talla } : {}), ...(item.drop_id ? { drop_id: item.drop_id, drop_nombre: item.drop_nombre } : {}), cantidad: item.cantidad, precio_unitario: item.precio_unitario_venta, costo_unitario: item.costo_unitario_venta, total: item.total_venta, costo_total: item.costo_total })),
       total_unidades: totalUnidadesVenta,
       subtotal: ventaSubtotal,
       envio_cobrado_cliente: envioCobrado,
