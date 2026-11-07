@@ -15,7 +15,7 @@ const purchase = (dropId: string, quantity: number) => service.registerCompraTra
 });
 const purchaseA = await purchase(dropA.id, 2);
 await purchase(dropB.id, 3);
-const input = (items: { drop_id?: string; cantidad: number; sku?: string }[], deposit = 100): VentaRegistroInput => ({
+const input = (items: { drop_id?: string; cantidad: number; sku?: string; talla?: string }[], deposit = 100): VentaRegistroInput => ({
   items: items.map(item => ({ sku: "TEST", ...item, precio_unitario_venta: 250, costo_unitario_venta: 100 })),
   referencia: "Prueba", cliente_nombre: "Mostrador", canal_venta: "stock", canal_venta_nombre: "Stock", porcentaje_precio: 150,
   afecta_stock: true, anticipo_porcentaje: deposit, minimo_piezas: 1, metodo_pago_inicial: "Efectivo"
@@ -176,7 +176,7 @@ await service.registerCompraTransaction({
 let sizedInventory = calcularInventarioDrop(sizedDrop.id, await service.getDropDetail(sizedDrop.id))[0];
 assert.equal(sizedInventory.saldo, 5);
 assert.deepEqual(sizedInventory.tallas, { M: 2, L: 3 });
-await assert.rejects(service.registerVentaTransaction(input([{ drop_id: sizedDrop.id, talla: "M", cantidad: 3 }]) as VentaRegistroInput), /Disponibilidad insuficiente/);
+await assert.rejects(service.registerVentaTransaction(input([{ drop_id: sizedDrop.id, talla: "M", cantidad: 3 }])), /Disponibilidad insuficiente/);
 await assert.rejects(service.registerVentaTransaction(input([{ drop_id: sizedDrop.id, cantidad: 1 }])), /Selecciona la talla/);
 const sizedSale = await service.registerVentaTransaction({
   ...input([{ drop_id: sizedDrop.id, cantidad: 2 }]),
