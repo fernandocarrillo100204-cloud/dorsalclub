@@ -51,6 +51,7 @@ interface NewItemRow {
   sku: string;
   nombre_producto: string;
   variante_label: string;
+  talla: string;
   cantidad: number | "";
   costo_unitario: number | "";
 }
@@ -59,6 +60,7 @@ const createEmptyPurchaseItem = (): NewItemRow => ({
   sku: "",
   nombre_producto: "",
   variante_label: "",
+  talla: "",
   cantidad: 1,
   costo_unitario: ""
 });
@@ -127,7 +129,7 @@ export default function Compras({
     const today = getLocalDateString(new Date());
     return Boolean(
       proveedor || dropId || notas.trim() || costoEnvio !== "" || comisiones !== "" || descuentos !== "" || fecha !== today || clasificacionFinanciera !== "operacion" ||
-      items.some(item => item.sku || item.nombre_producto || item.variante_label || item.costo_unitario !== "" || item.cantidad !== 1)
+      items.some(item => item.sku || item.nombre_producto || item.talla || item.variante_label || item.costo_unitario !== "" || item.cantidad !== 1)
     );
   }, [isNewView, proveedor, dropId, notas, costoEnvio, comisiones, descuentos, fecha, clasificacionFinanciera, items]);
 
@@ -309,7 +311,8 @@ export default function Compras({
           ...copy[index],
           sku: prod.sku,
           nombre_producto: prod.nombre,
-          variante_label: `${prod.color || "Estándar"} - Talla ${prod.talla || "U"}`,
+          variante_label: prod.talla ? `Talla ${prod.talla}` : "",
+          talla: prod.talla || "",
           costo_unitario: prod.precio_costo || 0
         };
       } else {
@@ -363,6 +366,10 @@ export default function Compras({
         setFormError(`La partida #${i + 1} no tiene un producto/SKU seleccionado.`);
         return;
       }
+      if (!item.talla.trim()) {
+        setFormError(`Selecciona la talla de la partida #${i + 1}. Usa "Única" cuando no aplique.`);
+        return;
+      }
       const qty = typeof item.cantidad === "number" ? item.cantidad : 0;
       if (qty <= 0) {
         setFormError(`La cantidad para el producto "${item.nombre_producto || item.sku}" debe ser mayor a 0.`);
@@ -378,7 +385,8 @@ export default function Compras({
         return {
           sku: it.sku.trim().toUpperCase(),
           nombre_producto: it.nombre_producto,
-          variante_label: it.variante_label,
+          variante_label: `Talla ${it.talla.trim()}`,
+          talla: it.talla.trim(),
           cantidad: qty,
           costo_unitario: unitCost,
           subtotal: qty * unitCost
@@ -608,7 +616,8 @@ export default function Compras({
                     <tr className="bg-zinc-50 dark:bg-zinc-800/60 text-zinc-500 font-semibold text-[11px] uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-800">
                       <th className="py-2.5 px-3 w-12 text-center">#</th>
                       <th className="py-2.5 px-3 min-w-[280px]">Producto & SKU</th>
-                      <th className="py-2.5 px-3 w-28 text-center">Cantidad</th>
+                      <th className="py-2.5 px-3 w-32">Talla</th>
+                       <th className="py-2.5 px-3 w-28 text-center">Cantidad</th>
                       <th className="py-2.5 px-3 w-36 text-right">Costo Unit. ($)</th>
                       <th className="py-2.5 px-3 w-36 text-right">Subtotal ($)</th>
                       <th className="py-2.5 px-3 w-12 text-center"></th>
@@ -636,7 +645,7 @@ export default function Compras({
                             >
                               {productos.map((prod) => (
                                 <option key={prod.id || prod.sku} value={prod.sku}>
-                                  {prod.sku} — {prod.nombre} ({prod.color || "U"} / {prod.talla || "U"})
+                                  {prod.sku} — {prod.nombre}
                                 </option>
                               ))}
                             </select>
@@ -646,6 +655,10 @@ export default function Compras({
                             </div>
                           </td>
 
+                          {/* Talla capturada al registrar compra */}
+                          <td className="py-2.5 px-3">
+                            <input aria-label={`Talla de la partida ${idx + 1}`} required value={row.talla} onChange={e => setItems(prev => prev.map((it, i) => i === idx ? { ...it, talla: e.target.value, variante_label: e.target.value ? `Talla ${e.target.value}` : "" } : it))} placeholder="M, 27, Única" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-900 dark:text-white" />
+                          </td>
                           {/* Cantidad */}
                           <td className="py-2.5 px-3">
                             <input
