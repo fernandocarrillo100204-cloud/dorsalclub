@@ -12,7 +12,7 @@ export interface Producto {
   categoria: string; // Categoría (ej. Camisetas, Sudaderas, Tenis)
   color?: string; // Color de la prenda/sneaker
   talla?: string; // Talla (ej. M, L, 27.5, Única)
-  tipo_talla?: "ropa" | "calzado" | "unica"; // Tipo de talla
+  tipo_talla?: "ropa" | "calzado" | "unica" | "personalizada"; // Tipo de talla
   codigo_barras?: string; // Código de barras opcional (EAN/UPC)
   precio_costo?: number; // Costo de adquisición unitario
   precio_venta?: number; // Precio de venta
