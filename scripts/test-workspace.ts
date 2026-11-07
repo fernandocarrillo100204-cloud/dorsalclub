@@ -4,6 +4,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { buildCsv, csvCell, searchText } from "../src/lib/presentation";
 import { navigationGroups, navigationInfo, navigationParent, utilityNavigation } from "../src/lib/navigation";
 import { ErrorState, FilterSummary, LoadingState, PageHeader, StatCard } from "../src/components/ui/Page";
+import ConnectionStatus from "../src/components/ConnectionStatus";
+import { readFileSync } from "node:fs";
 
 // Pure presentation tests: no credentials, browser storage or Firebase connection.
 assert.equal(searchText("  STÜSSY / José  "), "stussy / jose");
@@ -34,6 +36,16 @@ assert.equal(JSON.stringify(navigationGroups).includes("almacenes"), false);
 assert.equal(navigationParent("movimientos"), "compras_nueva");
 
 const render = (component: any, props: any) => renderToStaticMarkup(React.createElement(component, props));
+const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+Object.defineProperty(globalThis, "navigator", { configurable: true, value: { onLine: true } });
+assert.equal(render(ConnectionStatus, {}), "", "No barra ni espacio reservado con conexión.");
+Object.defineProperty(globalThis, "navigator", { configurable: true, value: { onLine: false } });
+assert.match(render(ConnectionStatus, {}), /Sin conexión/);
+if (navigatorDescriptor) Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
+else Reflect.deleteProperty(globalThis, "navigator");
+const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+assert.doesNotMatch(appSource, /WorkspaceHeader/);
+assert.match(appSource, /<Sidebar/);
 assert.match(render(PageHeader, { title: "Ventas", eyebrow: "Operación", description: "Historial" }), /<h1>Ventas<\/h1>/);
 assert.match(render(ErrorState, { message: "Error de lectura", onRetry: () => {} }), /role="alert"/);
 assert.match(render(ErrorState, { message: "Error de lectura", onRetry: () => {} }), /Reintentar/);

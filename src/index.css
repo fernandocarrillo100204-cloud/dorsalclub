@@ -149,12 +149,6 @@ table { font-variant-numeric: tabular-nums; }
 .sidebar-account strong, .sidebar-account small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-account strong { font-size: 12px; font-weight: 600; }
 .sidebar-account small { font-size: 10px; color: var(--text-secondary); margin-top: 3px; }
-.workspace-header { position: relative; min-height: 68px; padding: 12px 32px; display: flex; justify-content: space-between; align-items: center; gap: 14px; background: var(--bg-surface); border-bottom: 1px solid var(--border-color); }
-.workspace-breadcrumb { display: flex; align-items: center; min-width: 0; gap: 10px; font-size: 12px; color: var(--text-secondary); }
-.workspace-breadcrumb strong { color: var(--text-primary); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workspace-breadcrumb span { white-space: nowrap; }
-.workspace-search { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--text-secondary); min-height: 40px; padding: 8px 11px; background: var(--bg-surface-secondary); border: 1px solid var(--border-color); border-radius: 9px; }
-.workspace-search kbd { display: inline-flex; align-items: center; gap: 3px; padding: 2px 4px; margin-left: 14px; font-size: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-surface); }
 .connection-banner { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px 16px; background: #FEF3C7; color: #92400E; font-size: 12px; }
 .mobile-brand-bar { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border-color); background: var(--bg-surface); }
 
@@ -173,18 +167,6 @@ table { font-variant-numeric: tabular-nums; }
 .app-toast.success > svg { color: var(--accent); }
 .app-toast.error > svg { color: #E11D48; }
 .app-toast > button { padding: 3px; color: var(--text-secondary); }
-.command-dialog { width: min(600px, calc(100% - 32px)); }
-.command-dialog .dialog-body { padding: 0 12px 12px; }
-.command-search { display: flex; align-items: center; gap: 12px; margin: 0 12px 16px; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 10px; color: var(--text-secondary); }
-.command-search:focus-within { border-color: var(--accent); }
-.command-search input { flex: 1; min-width: 0; background: transparent; outline: none; font-size: 14px; color: var(--text-primary); }
-.command-results { max-height: min(45dvh, 380px); overflow-y: auto; }
-.command-option { display: flex; align-items: center; gap: 14px; padding: 11px 13px; width: 100%; border-radius: 9px; color: var(--text-secondary); text-align: left; }
-.command-option > span { flex: 1; }
-.command-option strong { display: block; font-size: 13px; color: var(--text-primary); font-weight: 500; }
-.command-option small { display: block; font-size: 10px; margin-top: 3px; }
-.command-option.active { background: var(--accent-soft); color: var(--accent); }
-.command-hint { color: var(--text-secondary); font-size: 10px; padding: 14px 12px 0; }
 .mobile-nav-dialog { margin: 0; border-radius: 0 16px 16px 0; max-height: 100dvh; height: 100dvh; width: min(310px, calc(100% - 40px)); }
 .mobile-nav-dialog .dialog-body { padding: 0; }
 .mobile-nav-dialog .dialog-header { padding: 12px 18px; border-bottom: 1px solid var(--border-color); }
@@ -221,13 +203,10 @@ table { font-variant-numeric: tabular-nums; }
 @media (max-width: 1100px) { .order-board { grid-template-columns: 1fr; } .order-column > .space-y-3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; } .order-column > .space-y-3 > * { margin: 0; } }
 
 @media (min-width: 768px) { .desktop-sidebar { display: flex; } .workspace-main { padding-left: 248px; } .mobile-brand-bar { display: none; } }
-@media (max-width: 1100px) { .workspace-search span, .workspace-search kbd { display: none; } }
 @media (max-width: 767px) {
   .page-shell, .form-shell { padding: 24px 16px; }
   .page-header { gap: 16px; }
   .page-header h1 { font-size: 24px; }
-  .workspace-header { padding: 10px 16px; min-height: 60px; }
-  .workspace-breadcrumb > span, .workspace-breadcrumb > svg { display: none; }
   .page-actions { width: 100%; }
   .page-actions > .btn-primary { margin-left: auto; }
   .toast-stack { right: 16px; bottom: 16px; }

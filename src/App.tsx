@@ -9,7 +9,7 @@ import { Usuario, Producto, NavigationTab } from "./types";
 import Sidebar from "./components/Sidebar";
 import Login from "./components/Login";
 import ErrorBoundary from "./components/ErrorBoundary";
-import WorkspaceHeader from "./components/WorkspaceHeader";
+import ConnectionStatus from "./components/ConnectionStatus";
 import { useWorkspace } from "./context/WorkspaceContext";
 import { navigationInfo, navigationParent } from "./lib/navigation";
 import { mensajeError } from "./lib/errores";
@@ -391,7 +391,7 @@ export default function App() {
 
       {/* Main content shares its spacing with the desktop sidebar. */}
       <div className="workspace-main">
-        <WorkspaceHeader activeTab={activeTab} onNavigate={navigateTo} />
+        <ConnectionStatus />
         <main id="workspace-main" tabIndex={-1} className="workspace-content">
           {catalogsFailed && <div className="page-shell pb-0"><ErrorState message={`No se pudo sincronizar ${Object.keys(catalogErrors).join(", ")}. ${Object.values(catalogErrors)[0]}`} onRetry={() => setCatalogVersion(current => current + 1)} /></div>}
           {catalogsLoading ? (!catalogsFailed && <div className="page-shell"><LoadingState label="Cargando catálogos…" /></div>) : <div className="w-full">
