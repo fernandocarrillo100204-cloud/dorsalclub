@@ -38,6 +38,7 @@ import {
 interface VentaItemDraft {
   id: string;
   sku: string;
+  talla: string;
   dropId: string;
   cantidad: number | string;
   precioUnitario: number | string;
@@ -49,6 +50,7 @@ let nextVentaItemId = 0;
 const createVentaItem = (sku = "", dropId = "", precioUnitario: number | string = "", costoUnitario: number | string = ""): VentaItemDraft => ({
   id: `venta-item-${++nextVentaItemId}`,
   sku,
+  talla: "",
   dropId,
   cantidad: 1,
   precioUnitario,
@@ -277,6 +279,7 @@ export default function Ventas({
     const selectedProduct = productos.find((product) => product.sku === nextSku);
     updateItem(id, {
       sku: nextSku,
+      talla: "",
       precioUnitario: calculateChannelPrice(selectedProduct),
       costoUnitario: selectedProduct?.precio_costo ?? ""
     });
@@ -296,7 +299,9 @@ export default function Ventas({
   const getAvailableStock = (item: VentaItemDraft): number | null => {
     const inventory = dropInventories[item.dropId];
     if (!item.sku || !item.dropId || !drops.some(drop => drop.id === item.dropId) || !inventory?.data) return null;
-    const balance = inventory.data.find(row => row.sku === item.sku)?.saldo || 0;
+    const row = inventory.data.find(row => row.sku === item.sku);
+    const size = item.talla.trim().toUpperCase();
+    const balance = size ? (row?.tallas[size] || 0) : (row?.saldo || 0);
     return Math.max(0, balance);
   };
 
@@ -393,8 +398,14 @@ export default function Ventas({
         return;
       }
 
+      const stockedSizes = dropInventories[item.dropId]?.data?.find(row => row.sku === cleanSku)?.tallas || {};
+      if (affectsStock && Object.keys(stockedSizes).length && !item.talla.trim()) {
+        setFormError(`Selecciona la talla de la partida ${index + 1}.`);
+        return;
+      }
       normalizedItems.push({
         sku: cleanSku,
+        ...(item.talla.trim() ? { talla: item.talla.trim().toUpperCase() } : {}),
         ...(affectsStock ? { drop_id: item.dropId } : {}),
         cantidad: quantity,
         precio_unitario_venta: unitPrice,
@@ -657,7 +668,7 @@ export default function Ventas({
                     {affectsStock && <div>
                       <label htmlFor={"drop-" + item.id} className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">Drop de origen *</label>
                       <div className="flex gap-2">
-                        <select id={"drop-" + item.id} value={item.dropId} onChange={event => updateItem(item.id, { dropId: event.target.value, sku: "", precioUnitario: "", costoUnitario: "" })} disabled={dropsLoading || Boolean(dropsError)} className="w-full min-w-0 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white focus:ring-2 focus:ring-emerald-500">
+                        <select id={"drop-" + item.id} value={item.dropId} onChange={event => updateItem(item.id, { dropId: event.target.value, sku: "", talla: "", precioUnitario: "", costoUnitario: "" })} disabled={dropsLoading || Boolean(dropsError)} className="w-full min-w-0 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white focus:ring-2 focus:ring-emerald-500">
                           <option value="">{dropsLoading ? "Cargando drops…" : "Seleccionar drop de origen"}</option>
                           {item.dropId && !drops.some(drop => drop.id === item.dropId) && <option value={item.dropId} disabled>Drop no disponible para venta</option>}
                           {drops.map(drop => <option key={drop.id} value={drop.id}>{drop.nombre}</option>)}
@@ -692,6 +703,15 @@ export default function Ventas({
                       </select>
                     </div>
 
+                    {affectsStock && item.sku && Object.keys(dropInventories[item.dropId]?.data?.find(row => row.sku === item.sku)?.tallas || {}).length > 0 && (
+                      <div>
+                        <label htmlFor={"talla-" + item.id} className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">Talla *</label>
+                        <select id={"talla-" + item.id} required value={item.talla} onChange={event => updateItem(item.id, { talla: event.target.value })} className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white">
+                          <option value="">Seleccionar talla</option>
+                          {Object.entries(dropInventories[item.dropId]?.data?.find(row => row.sku === item.sku)?.tallas || {}).filter(([, qty]) => qty > 0).map(([size, qty]) => <option key={size} value={size}>{size} — {qty} disponibles</option>)}
+                        </select>
+                      </div>
+                    )}
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
 
                       <div>
