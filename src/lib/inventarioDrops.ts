@@ -1,4 +1,4 @@
-import type { Compra, Movimiento, Venta, VentaPartidaInput } from "../types";
+import type { Compra, Drop, Movimiento, Venta, VentaPartidaInput } from "../types";
 
 export interface InventarioDropFila {
   sku: string;
@@ -73,4 +73,12 @@ export function validarDemandaDrops(items: Pick<VentaPartidaInput, "sku" | "drop
     const available = inventarios.get(item.drop)?.find(row => row.sku === item.sku)?.saldo || 0;
     if (available < item.cantidad) throw new Error(`Disponibilidad insuficiente de ${item.sku} en el drop seleccionado. Quedan ${Math.max(0, available)} piezas y solicitas ${item.cantidad}. Actualiza Inventario para revisar.`);
   });
+}
+
+/** Conserva el origen de cada SKU y aplica exactamente la fórmula individual. */
+export function calcularInventarioDrops(drops: Drop[], data: DetalleInventarioDrop) {
+  return drops.filter(drop => !drop.en_papelera).flatMap(drop =>
+    calcularInventarioDrop(drop.id, data).map(row => ({ ...row, drop_id: drop.id, drop_nombre: drop.nombre,
+      estado: drop.estado, disponible: drop.estado === "en_venta" ? Math.max(0, row.saldo) : 0 }))
+  ).sort((a, b) => a.nombre.localeCompare(b.nombre, "es") || a.sku.localeCompare(b.sku) || a.drop_nombre.localeCompare(b.drop_nombre, "es"));
 }

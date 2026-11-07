@@ -27,7 +27,7 @@ export async function firebaseInMemory() {
     for (const clause of request.constraints || []) {
       if (clause.kind === "where") entries = entries.filter(item => {
         const value = item.data()[clause.field];
-        return clause.op === "in" ? clause.value.includes(value) : clause.op === "array-contains" ? Array.isArray(value) && value.includes(clause.value) : value === clause.value;
+        return clause.op === "in" ? clause.value.includes(value) : clause.op === "array-contains-any" ? Array.isArray(value) && value.some(item => clause.value.includes(item)) : clause.op === "array-contains" ? Array.isArray(value) && value.includes(clause.value) : value === clause.value;
       });
       if (clause.kind === "limit") entries = entries.slice(0, clause.value);
     }

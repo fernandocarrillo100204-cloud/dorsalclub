@@ -968,6 +968,40 @@ export const firestoreService = {
     return cleanId ? readDropInventoryData(cleanId) : { compras: [], ventas: [], movimientos: [] };
   },
 
+  // Inventario general: consultas por grupos, nunca una consulta por fila o por drop.
+  getDropsDetail: async (dropIds: string[]): Promise<DetalleInventarioDrop> => {
+    const ids = [...new Set(dropIds.map(id => id.trim()).filter(Boolean))];
+    if (!ids.length) return { compras: [], ventas: [], movimientos: [] };
+    if (isConfigured && !realDb) throw new Error("No fue posible conectar con Firebase para consultar el inventario.");
+    if (isConfigured && realDb) {
+      const groups: string[][] = [];
+      for (let i = 0; i < ids.length; i += 30) groups.push(ids.slice(i, i + 30));
+      const results = await Promise.all(groups.map(async group => {
+        const snapshots = await Promise.all([
+          getDocsFromServer(query(collection(realDb, "compras"), where("drop_id", "in", group))),
+          getDocsFromServer(query(collection(realDb, "ventas"), where("drop_id", "in", group))),
+          getDocsFromServer(query(collection(realDb, "ventas"), where("drop_ids", "array-contains-any", group))),
+          getDocsFromServer(query(collection(realDb, "movimientos"), where("drop_id", "in", group)))
+        ]);
+        if (snapshots.some(snapshot => snapshot.metadata?.hasPendingWrites)) throw new Error("Hay cambios de inventario pendientes de sincronizar. Vuelve a intentarlo.");
+        return snapshots;
+      }));
+      const compras = new Map<string, Compra>(), ventas = new Map<string, Venta>(), movimientos = new Map<string, Movimiento>();
+      results.forEach(([purchases, legacySales, multiSales, movements]) => {
+        purchases.docs.forEach(item => compras.set(item.id, { ...item.data(), id: item.id } as Compra));
+        [...legacySales.docs, ...multiSales.docs].forEach(item => ventas.set(item.id, leerVenta(item.id, item.data())));
+        movements.docs.forEach(item => movimientos.set(item.id, leerMovimiento(item.id, item.data())));
+      });
+      return { compras: [...compras.values()], ventas: [...ventas.values()], movimientos: [...movimientos.values()] };
+    }
+    const selected = new Set(ids);
+    return {
+      compras: getLocalStorageItem<Compra[]>("compras", []).filter(item => selected.has(item.drop_id || "")),
+      ventas: getLocalStorageItem<Venta[]>("ventas_maestras", []).filter(item => dropsDeVenta(item).some(id => selected.has(id))),
+      movimientos: getLocalStorageItem<Movimiento[]>("movimientos", []).filter(item => selected.has(item.drop_id || ""))
+    };
+  },
+
   // --- CLIENTES ---
   getClientes: async (): Promise<Cliente[]> => {
     if (isConfigured && realDb) {

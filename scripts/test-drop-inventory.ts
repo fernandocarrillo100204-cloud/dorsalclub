@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { firebaseInMemory } from "./helpers/firestoreMemory";
-import { calcularInventarioDrop } from "../src/lib/inventarioDrops";
+import { calcularInventarioDrop, calcularInventarioDrops } from "../src/lib/inventarioDrops";
 import type { VentaRegistroInput, Venta } from "../src/types";
 
 let localWrites = 0;
@@ -138,8 +138,35 @@ await assert.rejects(service.anularMovimiento("entrada-historica", "Prueba"), /e
 const historicalOnly = await service.addDrop({ nombre: "Solo entrada histórica", estado: "en_venta" });
 put("movimientos/entrada-independiente", { tipo: "entrada", sku: "TEST", cantidad: 1, drop_id: historicalOnly.id, estado: "activo", fecha: new Date() });
 await assert.rejects(service.enviarDropPapelera(historicalOnly.id), /movimientos asociados/);
+// Vista general: mismos resultados que abrir cada drop; el mismo SKU conserva su origen.
+const catalog = await service.getDrops();
+const snapshotBeforeGeneral = JSON.stringify([...data]);
+const beforeQueries = queries.length;
+const general = await service.getDropsDetail(catalog.map(drop => drop.id));
+assert.equal(queries.length - beforeQueries, 4, "Cuatro consultas para todo el grupo, no por drop.");
+const rows = calcularInventarioDrops(catalog, general);
+for (const drop of catalog) {
+  const individual = calcularInventarioDrop(drop.id, await service.getDropDetail(drop.id));
+  assert.deepEqual(rows.filter(row => row.drop_id === drop.id).map(({ drop_id, drop_nombre, estado, disponible, ...row }) => row), individual);
+}
+assert.equal(new Set(rows.map(row => JSON.stringify([row.drop_id, row.sku]))).size, rows.length);
+assert.ok(rows.filter(row => row.sku === "TEST").length > 1);
+assert.ok(calcularInventarioDrops(catalog.map(drop => ({ ...drop, estado: "cerrado" })), general).every(row => row.disponible === 0));
+assert.equal(calcularInventarioDrops(catalog.map(drop => ({ ...drop, en_papelera: true })), general).length, 0);
+assert.equal(JSON.stringify([...data]), snapshotBeforeGeneral, "Consultar inventario general no escribe datos.");
+const emptyQueries = queries.length;
+assert.deepEqual(await service.getDropsDetail([]), { compras: [], ventas: [], movimientos: [] });
+assert.equal(queries.length, emptyQueries);
+// Más de 30 drops: deduplicar ventas que coinciden con varias consultas y grupos.
+put("ventas/multi-batch", { id: "multi-batch", drop_id: dropA.id, drop_ids: [dropA.id, dropB.id], items: [{ sku: "TEST", drop_id: dropA.id, cantidad: 1, precio_unitario: 100 }, { sku: "TEST", drop_id: dropB.id, cantidad: 1, precio_unitario: 100 }], fecha: new Date(), estado: "anulado" });
+const batchStart = queries.length;
+const batched = await service.getDropsDetail([dropA.id, ...Array.from({ length: 30 }, (_, index) => `missing-${index}`), dropB.id, dropA.id]);
+assert.equal(queries.length - batchStart, 8);
+assert.equal(batched.ventas.filter(sale => sale.id === "multi-batch").length, 1);
+assert.ok(queries.slice(batchStart).every(q => q.constraints[0].value.length <= 30));
 const beforeError = JSON.stringify([...data]);
 reject("compras");
+await assert.rejects(service.getDropsDetail(catalog.map(drop => drop.id)), { code: "permission-denied" });
 await assert.rejects(service.registerVentaTransaction(input([{ drop_id: dropA.id, cantidad: 1 }])), { code: "permission-denied" });
 assert.equal(JSON.stringify([...data]), beforeError, "Un fallo de lectura no debe escribir ninguna parte de la venta.");
 assert.equal(localWrites, 0, "No se permite fallback local con Firebase configurado.");
