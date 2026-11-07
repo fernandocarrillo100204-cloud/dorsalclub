@@ -708,7 +708,7 @@ export default function Ventas({
                         <label htmlFor={"talla-" + item.id} className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">Talla *</label>
                         <select id={"talla-" + item.id} required value={item.talla} onChange={event => updateItem(item.id, { talla: event.target.value })} className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-900 dark:text-white">
                           <option value="">Seleccionar talla</option>
-                          {Object.entries(dropInventories[item.dropId]?.data?.find(row => row.sku === item.sku)?.tallas || {}).filter(([, qty]) => qty > 0).map(([size, qty]) => <option key={size} value={size}>{size} — {qty} disponibles</option>)}
+                          {Object.entries(dropInventories[item.dropId]?.data?.find(row => row.sku === item.sku)?.tallas || {}).filter(([, qty]) => Number(qty) > 0).map(([size, qty]) => <option key={size} value={size}>{size} — {qty} disponibles</option>)}
                         </select>
                       </div>
                     )}
