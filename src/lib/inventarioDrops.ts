@@ -81,6 +81,9 @@ export function validarDemandaDrops(items: Pick<VentaPartidaInput, "sku" | "drop
   }
   demand.forEach(item => {
     const balance = inventarios.get(item.drop)?.find(row => row.sku === item.sku);
+    if (!item.talla && Object.keys(balance?.tallas || {}).length > 0) {
+      throw new Error(`Selecciona la talla del SKU ${item.sku} para descontar las existencias correctas.`);
+    }
     const available = item.talla ? (balance?.tallas[item.talla] || 0) : (balance?.saldo || 0);
     if (available < item.cantidad) throw new Error(`Disponibilidad insuficiente de ${item.sku}${item.talla ? ` talla ${item.talla}` : ""} en el drop seleccionado. Quedan ${Math.max(0, available)} piezas y solicitas ${item.cantidad}. Actualiza Inventario para revisar.`);
   });
