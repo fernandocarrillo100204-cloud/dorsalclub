@@ -37,6 +37,7 @@ interface ProductDropRow {
   estado: EstadoDrop;
   sku: string;
   nombre: string;
+  tallas: Record<string, number>;
   compradas: number;
   vendidas: number;
   restantes: number;
@@ -408,7 +409,7 @@ export default function Drops({ onSell, onPurchases }: { onSell: (dropId: string
                       </thead>
                       <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
                         {visibleProducts.map(item => <tr key={JSON.stringify([item.drop_id, item.sku])} className="hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30">
-                          <td className="px-4 py-3"><p className="font-bold text-zinc-900 dark:text-white">{item.nombre}</p><p className="font-mono text-[10px] text-zinc-400 mt-0.5">{item.sku}</p></td>
+                          <td className="px-4 py-3"><p className="font-bold text-zinc-900 dark:text-white">{item.nombre}</p><p className="font-mono text-[10px] text-zinc-400 mt-0.5">{item.sku}</p>{Object.keys(item.tallas).length > 0 && <p className="text-[10px] mt-1 text-zinc-500">Tallas: {Object.entries(item.tallas).map(([size, quantity]) => `${size}: ${quantity}`).join(" · ")}</p>}</td>
                           {allDrops && <td className="px-3 py-3"><button type="button" className="text-emerald-600 dark:text-emerald-400 font-semibold hover:underline text-left" onClick={() => setSelectedId(item.drop_id)}>{item.drop_nombre}</button></td>}
                           <td className="px-3 py-3 text-center font-semibold">{item.compradas}</td><td className="px-3 py-3 text-center font-semibold text-emerald-600 dark:text-emerald-400">{item.vendidas}</td><td className="px-3 py-3 text-center font-semibold">{item.restantes}</td><td className="px-3 py-3 text-center"><strong className="text-emerald-600 dark:text-emerald-400">{item.disponible}</strong>{item.restantes < 0 ? <p className="text-[10px] text-amber-600">Revisar existencias</p> : item.estado !== "en_venta" ? <p className="text-[10px] text-zinc-500">{STATUS_META[item.estado].label}</p> : item.disponible === 0 ? <p className="text-[10px] text-zinc-500">Agotado</p> : null}</td>
                           <td className="px-3 py-3 text-right font-mono">{item.compradas ? money(item.costoPromedio) : "—"}</td><td className="px-3 py-3 text-right font-mono">{item.vendidas ? money(item.ventaPromedio) : "—"}</td>

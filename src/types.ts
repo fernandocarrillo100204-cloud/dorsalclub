@@ -47,6 +47,7 @@ export interface Movimiento {
     nanoseconds: number;
   } | Date;
   almacen_destino_id?: string; // Para transferencias
+  talla?: string; // Talla registrada en la operación
   compra_id?: string; // Trazabilidad con lote de compra
   drop_id?: string; // Agrupa compras y ventas dentro de un drop comercial
   drop_nombre?: string; // Snapshot legible del drop al registrar la operación
@@ -113,6 +114,7 @@ export interface Movimiento {
 
 export interface VentaPartidaInput {
   sku: string;
+  talla?: string;
   drop_id?: string;
   cantidad: number;
   precio_unitario_venta: number;
@@ -121,6 +123,7 @@ export interface VentaPartidaInput {
 
 export interface VentaItem {
   sku: string;
+  talla?: string;
   almacen_id?: string;
   drop_id?: string;
   drop_nombre?: string;
@@ -355,6 +358,7 @@ export type NavigationTab =
 
 export interface CompraItem {
   sku: string;
+  talla?: string;
   nombre_producto?: string;
   variante_label?: string;
   cantidad: number;
