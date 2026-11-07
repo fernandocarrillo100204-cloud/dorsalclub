@@ -4324,10 +4324,6 @@ export const firestoreService = {
       return list.filter(item => item.en_papelera !== true);
     }
     const local = getLocalStorageItem<MarcaCatalogo[]>("marcas", []);
-    if (local.length === 0) {
-      const res = await firestoreService.seedAndImportCatalogos();
-      return res.marcas;
-    }
     return local.filter(item => item.en_papelera !== true);
   },
 
@@ -4548,10 +4544,6 @@ export const firestoreService = {
       return list.filter(item => item.en_papelera !== true).sort((a, b) => (a.orden || 0) - (b.orden || 0));
     }
     const local = getLocalStorageItem<TallaRopaCatalogo[]>("tallas_ropa", []);
-    if (local.length === 0) {
-      const res = await firestoreService.seedAndImportCatalogos();
-      return res.tallasRopa;
-    }
     return local.filter(item => item.en_papelera !== true).sort((a, b) => (a.orden || 0) - (b.orden || 0));
   },
 
@@ -4662,10 +4654,6 @@ export const firestoreService = {
       return list.filter(item => item.en_papelera !== true).sort((a, b) => (Number(a.nombre) || 0) - (Number(b.nombre) || 0));
     }
     const local = getLocalStorageItem<TallaCalzadoCatalogo[]>("tallas_calzado", []);
-    if (local.length === 0) {
-      const res = await firestoreService.seedAndImportCatalogos();
-      return res.tallasCalzado;
-    }
     return local.filter(item => item.en_papelera !== true).sort((a, b) => (Number(a.nombre) || 0) - (Number(b.nombre) || 0));
   },
 
