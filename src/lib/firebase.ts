@@ -3334,10 +3334,12 @@ export const firestoreService = {
       if (isNaN(unitCost) || unitCost < 0) {
         throw new Error(`El costo unitario para el SKU ${cleanSku} no puede ser negativo.`);
       }
-      if (purchaseSkus.has(cleanSku)) {
-        throw new Error(`El SKU ${cleanSku} está repetido. Unifica su cantidad en una sola partida.`);
+      const talla = (item.talla || "").trim();
+      const purchaseKey = JSON.stringify([cleanSku, talla.toLowerCase()]);
+      if (purchaseSkus.has(purchaseKey)) {
+        throw new Error(`El SKU ${cleanSku} y talla ${talla || "Única"} están repetidos. Unifica su cantidad.`);
       }
-      purchaseSkus.add(cleanSku);
+      purchaseSkus.add(purchaseKey);
 
       const itemSubtotal = qty * unitCost;
       totalUnidades += qty;
@@ -3347,6 +3349,7 @@ export const firestoreService = {
         sku: cleanSku,
         nombre_producto: item.nombre_producto || "",
         variante_label: item.variante_label || "",
+        ...(item.talla ? { talla: item.talla.trim() } : {}),
         cantidad: qty,
         costo_unitario: unitCost,
         subtotal: itemSubtotal
@@ -3429,6 +3432,7 @@ export const firestoreService = {
           transaction.set(movRef, {
             folio: movFolio,
             sku: item.sku,
+            ...(item.talla ? { talla: item.talla } : {}),
 
             tipo: "entrada",
             cantidad: item.cantidad,
@@ -3539,6 +3543,7 @@ export const firestoreService = {
         id: "mov_" + Math.random().toString(36).substr(2, 9),
         folio: movFolio,
         sku: item.sku,
+        ...(item.talla ? { talla: item.talla } : {}),
 
         tipo: "entrada",
         cantidad: item.cantidad,
