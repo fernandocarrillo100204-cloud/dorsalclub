@@ -587,7 +587,7 @@ export default function GestionProductos({
     try {
       const producto: Producto = {
         producto_base_id: generateBaseId(marca, nombre), sku, nombre, marca,
-        categoria: "General", tipo_talla: "unica", unidad: "pieza",
+        categoria: "General", tipo_talla: "ropa", unidad: "pieza",
         stock_minimo: 0, activo: true, precio_costo: 0
       };
       if (editingBaseId) {
@@ -784,9 +784,9 @@ export default function GestionProductos({
                         </span>
                       </div>
                       <div className="flex items-center gap-2 mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                        <span>{group.variants.length} {group.variants.length === 1 ? "variante" : "variantes"}</span>
+                        <span>{group.variants.length} {group.variants.length === 1 ? "SKU" : "variantes"}</span>
                         <span>•</span>
-                        <span>Tipo: {group.tipo_talla === "calzado" ? "Calzado" : group.tipo_talla === "unica" ? "Talla Única" : "Ropa"}</span>
+                        {group.variants.some(v => v.color || v.talla) && <span>Tipo: {group.tipo_talla === "calzado" ? "Calzado" : group.tipo_talla === "unica" ? "Talla Única" : "Ropa"}</span>}
                         <span>•</span>
                         <span>Unidad: {group.unidad}</span>
                       </div>
@@ -794,18 +794,6 @@ export default function GestionProductos({
                   </div>
 
                   <div className="flex items-center gap-4 justify-between md:justify-end" onClick={(e) => e.stopPropagation()}>
-                    {/* Price Range */}
-                    <div className="text-right">
-                      <span className="text-[11px] text-zinc-400 block font-medium">Precio sugerido</span>
-                      <span className="text-xs font-semibold text-zinc-900 dark:text-white">
-                        {group.minPrice === Infinity 
-                          ? "$0.00 MXN" 
-                          : group.minPrice === group.maxPrice
-                            ? `$${group.minPrice.toLocaleString()} MXN`
-                            : `$${group.minPrice.toLocaleString()} - $${group.maxPrice.toLocaleString()} MXN`}
-                      </span>
-                    </div>
-
                     {/* Actions menu */}
                     <div className="flex items-center gap-1">
                       <button
@@ -844,7 +832,7 @@ export default function GestionProductos({
                           <th className="py-2.5 px-4">Talla</th>
                           <th className="py-2.5 px-4">SKU</th>
                           <th className="py-2.5 px-4">Código Barras</th>
-                          <th className="py-2.5 px-4 text-right">Precio Venta</th>
+                          
                           <th className="py-2.5 px-4 text-center">Estado</th>
                           <th className="py-2.5 px-4 text-right">Acciones</th>
                         </tr>
@@ -881,11 +869,6 @@ export default function GestionProductos({
                               {/* Código de barras */}
                               <td className="py-3 px-4 font-mono text-zinc-500 dark:text-zinc-400">
                                 {variant.codigo_barras || "—"}
-                              </td>
-
-                              {/* Precio de venta */}
-                              <td className="py-3 px-4 text-right font-semibold text-zinc-900 dark:text-white">
-                                ${Number(variant.precio_venta_sugerido || 0).toLocaleString()} MXN
                               </td>
 
                               {/* Status */}
