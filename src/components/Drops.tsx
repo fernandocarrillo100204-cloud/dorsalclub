@@ -37,6 +37,7 @@ interface ProductDropRow {
   estado: EstadoDrop;
   sku: string;
   nombre: string;
+  tallas: Record<string, number>;
   compradas: number;
   vendidas: number;
   restantes: number;
