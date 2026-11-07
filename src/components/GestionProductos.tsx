@@ -2,1544 +2,313 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
-
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Edit2, Plus, Search, Settings, Trash2, X } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
-import { 
-  Producto, 
-  CategoriaCatalogo, 
-  MarcaCatalogo,
-  ColorCatalogo,
-  TallaRopaCatalogo,
-  TallaCalzadoCatalogo,
-  UnidadMedidaCatalogo 
-} from "../types";
-import ModalCatalogos from "./ModalCatalogos";
+import { etiquetaTipoTalla, filtrarProductosCatalogo } from "../lib/catalogoProductos";
 import { useWorkspace } from "../context/WorkspaceContext";
-import { 
-  Package, 
-  Plus, 
-  Edit2, 
-  Trash2, 
-  Search, 
-  X, 
-  Check, 
-  AlertCircle, 
-  AlertTriangle, 
-  Upload, 
-  FileText,
-  ArrowRight,
-  Sparkles,
-  Info,
-  Layers,
-  Palette,
-  Shirt,
-  Footprints,
-  Bookmark,
-  Tag,
-  ChevronDown,
-  ChevronUp,
-  SlidersHorizontal,
-  Copy,
-  Barcode,
-  DollarSign,
-  Power,
-  Settings
-} from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
+import type { MarcaCatalogo, Producto } from "../types";
+import ModalCatalogos from "./ModalCatalogos";
 
 interface GestionProductosProps {
   productos?: Producto[];
-  onNavigateToMovimiento?: (sku: string) => void;
+  onNavigateToMovimiento?: (sku: string) => void; // Firma conservada para llamadas existentes.
 }
 
-interface VariantFormRow {
-  id: string;
-  color: string;
-  talla: string;
-  sku: string;
-  codigo_barras: string;
-  precio_costo: number | string;
-  precio_venta_sugerido: number | string;
-  stock_minimo: number | string;
-  activo: boolean;
-}
+type TipoTalla = NonNullable<Producto["tipo_talla"]>;
 
-// Generate base ID helper
-function generateBaseId(brand: string, name: string): string {
-  const cleanBrand = brand.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 4) || "dc";
-  const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8) || "prod";
-  const rand = Math.random().toString(36).substring(2, 7);
-  return `${cleanBrand}-${cleanName}-${rand}`;
-}
+const opcionesTipoTalla: { value: TipoTalla; label: string }[] = [
+  { value: "ropa", label: "Ropa (XS, S, M, L, XL...)" },
+  { value: "calzado", label: "Calzado (25, 26, 27, 28...)" },
+  { value: "unica", label: "Talla única / Sin talla (gorras, accesorios...)" },
+  { value: "personalizada", label: "Personalizada (anillos, cinturones, medidas...)" }
+];
 
-function generateVariantSku(): string {
-  const time = Date.now().toString(36).toUpperCase().slice(-6);
-  const random = Math.random().toString(36).toUpperCase().slice(2, 6);
-  return `AO-${time}-${random}`;
-}
-
-export default function GestionProductos({ 
-  productos: propProductos,
-  onNavigateToMovimiento 
-}: GestionProductosProps) {
+export default function GestionProductos({ productos: propProductos }: GestionProductosProps) {
   const { notify } = useWorkspace();
-  const [internalProductos, setInternalProductos] = useState<Producto[]>(propProductos || []);
-
-  // Catalogs
-  const [catalogMarcas, setCatalogMarcas] = useState<MarcaCatalogo[]>([]);
-  const [catalogCategorias, setCatalogCategorias] = useState<CategoriaCatalogo[]>([]);
-  const [catalogColores, setCatalogColores] = useState<ColorCatalogo[]>([]);
-  const [catalogTallasRopa, setCatalogTallasRopa] = useState<TallaRopaCatalogo[]>([]);
-  const [catalogTallasCalzado, setCatalogTallasCalzado] = useState<TallaCalzadoCatalogo[]>([]);
-  const [catalogUnidades, setCatalogUnidades] = useState<UnidadMedidaCatalogo[]>([]);
-
-  const productos = propProductos ?? internalProductos;
-
-  // Search & Filter
+  const [internalProductos, setInternalProductos] = useState<Producto[]>([]);
+  const [marcas, setMarcas] = useState<MarcaCatalogo[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterMarca, setFilterMarca] = useState("all");
-  const [filterCategoria, setFilterCategoria] = useState("all");
-  const [filterTipoTalla, setFilterTipoTalla] = useState("all");
-  const [filterEstado, setFilterEstado] = useState("all"); // "all" | "activos" | "inactivos" | "stock_bajo"
-
-  // Modals state
-  const [isFormOpen, setIsFormOpen] = useState(false);
   const [isCatalogosOpen, setIsCatalogosOpen] = useState(false);
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [productToDelete, setProductToDelete] = useState<{ id: string; sku: string; nombre: string; isBase?: boolean } | null>(null);
-
-  // Expanded base products in view
-  const [expandedBaseIds, setExpandedBaseIds] = useState<Record<string, boolean>>({});
-
-  // Prompt after creation: "¿Deseas registrar su entrada inicial?"
-  const [createdProductPrompt, setCreatedProductPrompt] = useState<Producto | null>(null);
-
-  // Form State
-  const [editingBaseId, setEditingBaseId] = useState<string | null>(null);
-  const [editingSimpleProduct, setEditingSimpleProduct] = useState(false);
-  const [editingSingleProductId, setEditingSingleProductId] = useState<string | null>(null);
-  const [formNombre, setFormNombre] = useState("");
-  const [formSkuManual, setFormSkuManual] = useState("");
-  const [formMarca, setFormMarca] = useState("");
-  const [formCategoria, setFormCategoria] = useState("");
-  const [formTipoTalla, setFormTipoTalla] = useState<"" | "ropa" | "calzado" | "unica" | "personalizada">("");
-  const [formUnidad, setFormUnidad] = useState("pieza");
-  const [formSubmitted, setFormSubmitted] = useState(false);
-
-  const createEmptyVariantRow = (currentTipoTalla: string = ""): VariantFormRow => ({
-    id: Math.random().toString(36).substring(2, 9),
-    color: "",
-    talla: currentTipoTalla === "unica" ? "Única" : "",
-    sku: generateVariantSku(),
-    codigo_barras: "",
-    precio_costo: "",
-    precio_venta_sugerido: "",
-    stock_minimo: "",
-    activo: false
-  });
-
-  // Variants rows in form
-  const [variantRows, setVariantRows] = useState<VariantFormRow[]>([createEmptyVariantRow()]);
-
-  // Matrix generation drawer inside form
-  const [matrixColors, setMatrixColors] = useState<string[]>([]);
-  const [matrixSizes, setMatrixSizes] = useState<string[]>([]);
-  const [matrixPrice, setMatrixPrice] = useState<number | string>("");
-  const [matrixMinStock, setMatrixMinStock] = useState<number | string>("");
-  const [isMatrixOpen, setIsMatrixOpen] = useState(false);
-
-  // Form submission feedback
-  const [submitLoading, setSubmitLoading] = useState(false);
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Producto | null>(null);
+  const [productToDelete, setProductToDelete] = useState<Producto | null>(null);
+  const [loading, setLoading] = useState(false);
   const [generalError, setGeneralError] = useState<string | null>(null);
 
-  // Realtime subscriptions
+  const [formNombre, setFormNombre] = useState("");
+  const [formMarca, setFormMarca] = useState("");
+  const [formTipoTalla, setFormTipoTalla] = useState<TipoTalla | "">("");
+  const [formSku, setFormSku] = useState("");
+
   useEffect(() => {
-    let unsubProds = () => {};
-
-    if (!propProductos) {
-      unsubProds = firestoreService.getProductosRealtime((data) => setInternalProductos(data));
-    }
-    const unsubMarcas = firestoreService.getMarcasRealtime((data) => setCatalogMarcas(data));
-    const unsubCats = firestoreService.getCategoriasRealtime((data) => setCatalogCategorias(data));
-    const unsubColores = firestoreService.getColoresRealtime((data) => setCatalogColores(data));
-    const unsubTallasRopa = firestoreService.getTallasRopaRealtime((data) => setCatalogTallasRopa(data));
-    const unsubTallasCalz = firestoreService.getTallasCalzadoRealtime((data) => setCatalogTallasCalzado(data));
-    const unsubUnits = firestoreService.getUnidadesRealtime((data) => setCatalogUnidades(data));
-
-    return () => {
-      unsubProds();
-      unsubMarcas();
-      unsubCats();
-      unsubColores();
-      unsubTallasRopa();
-      unsubTallasCalz();
-      unsubUnits();
-    };
+    const unsubMarcas = firestoreService.getMarcasRealtime(setMarcas);
+    const unsubProductos = propProductos === undefined
+      ? firestoreService.getProductosRealtime(setInternalProductos, error => {
+          notify(error?.message || "No se pudo cargar el catálogo.", "error");
+        })
+      : () => {};
+    return () => { unsubMarcas(); unsubProductos(); };
   }, [propProductos]);
 
-  // Group products by base product
-  const groupedProducts = useMemo(() => {
-    const groups: Record<string, {
-      baseId: string;
-      nombre: string;
-      marca: string;
-      categoria: string;
-      tipo_talla: "ropa" | "calzado" | "unica" | "personalizada";
-      unidad: string;
-      variants: Producto[];
-      minPrice: number;
-      maxPrice: number;
-    }> = {};
+  const productos = propProductos ?? internalProductos;
+  const visibles = useMemo(
+    () => filtrarProductosCatalogo(productos, searchQuery, filterMarca),
+    [productos, searchQuery, filterMarca]
+  );
 
-    productos.forEach(p => {
-      const baseKey = p.producto_base_id || `legacy-${p.nombre.toLowerCase().trim()}`;
+  const opcionesMarcaFiltro = useMemo(() =>
+    [...new Set([...marcas.map(m => m.nombre), ...productos.map(p => p.marca || "")].filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, "es-MX", { sensitivity: "base" })),
+    [marcas, productos]);
 
-      if (!groups[baseKey]) {
-        groups[baseKey] = {
-          baseId: baseKey,
-          nombre: p.nombre,
-          marca: p.marca || "antiorder",
-          categoria: p.categoria || "General",
-          tipo_talla: p.tipo_talla || "ropa",
-          unidad: p.unidad || "pieza",
-          variants: [],
-          minPrice: Infinity,
-          maxPrice: -Infinity,
-        };
-      }
+  const marcasActivas = useMemo(
+    () => marcas.filter(m => m.activa !== false && m.en_papelera !== true),
+    [marcas]
+  );
 
-      groups[baseKey].variants.push(p);
-
-      const price = Number(p.precio_venta_sugerido) || 0;
-      if (price > 0) {
-        if (price < groups[baseKey].minPrice) groups[baseKey].minPrice = price;
-        if (price > groups[baseKey].maxPrice) groups[baseKey].maxPrice = price;
-      }
-
-    });
-
-    return Object.values(groups);
-  }, [productos]);
-
-  // Filtered grouped products
-  const filteredGroups = useMemo(() => {
-    return groupedProducts.filter(g => {
-      const term = searchQuery.toLowerCase().trim();
-      const matchesSearch = !term || (
-        g.nombre.toLowerCase().includes(term) ||
-        g.marca.toLowerCase().includes(term) ||
-        g.categoria.toLowerCase().includes(term) ||
-        g.variants.some(v => 
-          v.sku.toLowerCase().includes(term) || 
-          (v.color && v.color.toLowerCase().includes(term)) ||
-          (v.talla && v.talla.toLowerCase().includes(term)) ||
-          (v.codigo_barras && v.codigo_barras.toLowerCase().includes(term))
-        )
-      );
-
-      const matchesMarca = filterMarca === "all" || g.marca.toLowerCase() === filterMarca.toLowerCase();
-      const matchesCategoria = filterCategoria === "all" || g.categoria.toLowerCase() === filterCategoria.toLowerCase();
-      const matchesTipoTalla = filterTipoTalla === "all" || g.tipo_talla === filterTipoTalla;
-
-      let matchesEstado = true;
-      if (filterEstado === "activos") {
-        matchesEstado = g.variants.some(v => v.activo !== false);
-      } else if (filterEstado === "inactivos") {
-        matchesEstado = g.variants.every(v => v.activo === false);
-
-      }
-
-      return matchesSearch && matchesMarca && matchesCategoria && matchesTipoTalla && matchesEstado;
-    });
-  }, [groupedProducts, searchQuery, filterMarca, filterCategoria, filterTipoTalla, filterEstado]);
-
-  // Helper to completely reset form to empty state
-  const resetFormToEmpty = () => {
-    setEditingBaseId(null);
-    setEditingSimpleProduct(false);
-    setEditingSingleProductId(null);
+  const resetForm = () => {
+    setEditingProduct(null);
     setFormNombre("");
-    setFormSkuManual("");
     setFormMarca("");
-    setFormCategoria("");
     setFormTipoTalla("");
-    setFormUnidad("pieza");
-    setFormSubmitted(false);
-    setFormErrors({});
+    setFormSku("");
     setGeneralError(null);
-    setIsMatrixOpen(false);
-    setMatrixColors([]);
-    setMatrixSizes([]);
-    setMatrixPrice("");
-    setMatrixMinStock("");
-    setVariantRows([createEmptyVariantRow()]);
   };
 
-  const handleCloseModal = () => {
+  const handleOpenCreate = () => {
+    resetForm();
+    setIsFormOpen(true);
+  };
+
+  const handleOpenEdit = (producto: Producto) => {
+    setEditingProduct(producto);
+    setFormNombre(producto.nombre);
+    setFormMarca(producto.marca || "");
+    setFormTipoTalla(producto.tipo_talla || "personalizada");
+    setFormSku(producto.sku);
+    setGeneralError(null);
+    setIsFormOpen(true);
+  };
+
+  const handleCloseForm = () => {
+    if (loading) return;
     setIsFormOpen(false);
-    resetFormToEmpty();
+    resetForm();
   };
 
-  // Helper to open creation modal
-  const handleOpenCreateModal = () => {
-    resetFormToEmpty();
-    setIsFormOpen(true);
-  };
-
-  // Helper to open edit for an entire base model or adding variants
-  const handleOpenEditModel = (group: typeof groupedProducts[0]) => {
-    setEditingBaseId(group.baseId);
-    setEditingSimpleProduct(group.variants.length === 1 && !group.variants[0].color && !group.variants[0].talla);
-    setFormSkuManual(group.variants.length === 1 ? group.variants[0].sku : "");
-    setEditingSingleProductId(null);
-    setFormNombre(group.nombre);
-    setFormMarca(group.marca);
-    setFormCategoria(group.categoria);
-    setFormTipoTalla(group.tipo_talla);
-    setFormUnidad(group.unidad);
-    setFormSubmitted(false);
-    setFormErrors({});
-    setGeneralError(null);
-    setIsMatrixOpen(false);
-    setMatrixColors([]);
-    setMatrixSizes([]);
-    setMatrixPrice("");
-    setMatrixMinStock("");
-
-    const rows: VariantFormRow[] = group.variants.map(v => {
-      return {
-        id: v.id || v.sku,
-        color: v.color || "",
-        talla: v.talla || "",
-        sku: v.sku,
-        codigo_barras: v.codigo_barras || "",
-        precio_costo: v.precio_costo ?? "",
-        precio_venta_sugerido: v.precio_venta_sugerido ?? "",
-        stock_minimo: v.stock_minimo ?? "",
-        activo: v.activo !== false
-      };
-    });
-
-    setVariantRows(rows.length > 0 ? rows : [createEmptyVariantRow(group.tipo_talla)]);
-    setIsFormOpen(true);
-  };
-
-  // Add single variant row to form - creates a completely empty row
-  const handleAddVariantRow = () => {
-    setVariantRows(prev => [
-      ...prev,
-      createEmptyVariantRow(formTipoTalla)
-    ]);
-  };
-
-  // Remove variant row
-  const handleRemoveVariantRow = (rowId: string) => {
-    if (variantRows.length <= 1) {
-      setGeneralError("El producto debe tener al menos una variante.");
-      return;
-    }
-    setVariantRows(prev => prev.filter(r => r.id !== rowId));
-  };
-
-  // Update variant row field - no automatic SKU generation
-  const handleUpdateVariantField = (rowId: string, field: keyof VariantFormRow, value: any) => {
-    setVariantRows(prev => prev.map(row => {
-      if (row.id !== rowId) return row;
-      return { ...row, [field]: value };
-    }));
-  };
-
-  // Apply quick matrix generation - leaves SKU empty for manual entry
-  const handleGenerateMatrix = () => {
-    if (matrixColors.length === 0 || matrixSizes.length === 0) {
-      setGeneralError("Selecciona al menos un color y una talla para generar combinaciones.");
-      return;
-    }
-
-    const newRows: VariantFormRow[] = [];
-
-    matrixColors.forEach(col => {
-      matrixSizes.forEach(sz => {
-        newRows.push({
-          id: Math.random().toString(36).substring(2, 9),
-          color: col,
-          talla: sz,
-          sku: generateVariantSku(),
-          codigo_barras: "",
-          precio_costo: "",
-          precio_venta_sugerido: matrixPrice,
-          stock_minimo: matrixMinStock,
-          activo: false
-        });
-      });
-    });
-
-    setVariantRows(newRows);
-    setIsMatrixOpen(false);
-    setGeneralError(null);
-  };
-
-  // Check if all required fields are complete to enable the button
-  const isFormValid = useMemo(() => {
-    if (!formNombre.trim() || formNombre.trim().length > 120) return false;
-    if (!formMarca.trim()) return false;
-    if (!formCategoria.trim()) return false;
-    if (!formTipoTalla.trim()) return false;
-    if (variantRows.length === 0) return false;
-
-    for (const row of variantRows) {
-      if (!row.color || !row.color.trim()) return false;
-      if (formTipoTalla !== "unica" && (!row.talla || !row.talla.trim())) return false;
-      if (!row.sku || !row.sku.trim()) return false;
-      if (row.precio_costo === "" || isNaN(Number(row.precio_costo)) || Number(row.precio_costo) < 0) return false;
-      if (row.precio_venta_sugerido === "" || isNaN(Number(row.precio_venta_sugerido)) || Number(row.precio_venta_sugerido) < 0) return false;
-      if (row.stock_minimo === "" || isNaN(Number(row.stock_minimo)) || Number(row.stock_minimo) < 0) return false;
-    }
-
-    return true;
-  }, [formNombre, formMarca, formCategoria, formTipoTalla, variantRows]);
-
-  // Form submission: Validate and save batch
-  const handleSubmitForm = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormSubmitted(true);
-    setGeneralError(null);
-    setFormErrors({});
-
-    const errors: Record<string, string> = {};
-    if (!formNombre.trim()) {
-      errors.nombre = "El nombre comercial del modelo es obligatorio.";
-    } else if (formNombre.trim().length > 120) {
-      errors.nombre = "El nombre comercial no puede superar 120 caracteres.";
-    }
-    if (!formMarca.trim()) {
-      errors.marca = "Debes seleccionar una marca.";
-    }
-    if (!formCategoria.trim()) {
-      errors.categoria = "Debes seleccionar una categoría.";
-    }
-    if (!formTipoTalla.trim()) {
-      errors.tipo_talla = "Debes seleccionar el tipo de talla.";
-    }
-
-    if (variantRows.length === 0) {
-      setGeneralError("El producto debe tener al menos una variante.");
-      setFormErrors(errors);
-      return;
-    }
-
-    // Validation for variants
-    const skusSet = new Set<string>();
-    const comboSet = new Set<string>();
-
-    for (let i = 0; i < variantRows.length; i++) {
-      const row = variantRows[i];
-      const rowNum = i + 1;
-
-      if (!row.color.trim()) {
-        setGeneralError(`La variante en la fila ${rowNum} no tiene un color seleccionado.`);
-        setFormErrors(errors);
-        return;
-      }
-
-      if (formTipoTalla !== "unica" && !row.talla.trim()) {
-        setGeneralError(`La variante en la fila ${rowNum} no tiene una talla seleccionada.`);
-        setFormErrors(errors);
-        return;
-      }
-
-      const cleanSku = (row.sku || "").trim().toUpperCase();
-      if (!cleanSku) {
-        setGeneralError(`La variante en la fila ${rowNum} no tiene un SKU válido.`);
-        setFormErrors(errors);
-        return;
-      }
-
-      if (skusSet.has(cleanSku)) {
-        setGeneralError(`SKU duplicado "${cleanSku}" detectado en múltiples variantes.`);
-        setFormErrors(errors);
-        return;
-      }
-      skusSet.add(cleanSku);
-
-      // Check if SKU already exists in other products
-      const existingWithSameSku = productos.find(p => p.sku?.toUpperCase() === cleanSku);
-      if (existingWithSameSku) {
-        // If not editing this same product variant, it's a conflict
-        if (!editingBaseId || existingWithSameSku.producto_base_id !== editingBaseId) {
-          setGeneralError(`El SKU "${cleanSku}" ya está registrado en otro producto.`);
-          setFormErrors(errors);
-          return;
-        }
-      }
-
-      const comboTalla = formTipoTalla === "unica" ? "unica" : row.talla.trim().toLowerCase();
-      const combo = `${row.color.trim().toLowerCase()}_${comboTalla}`;
-      if (comboSet.has(combo)) {
-        setGeneralError(`Combinación de color "${row.color}" y talla "${row.talla || 'Única'}" repetida.`);
-        setFormErrors(errors);
-        return;
-      }
-      comboSet.add(combo);
-
-      if (row.precio_venta_sugerido === "" || isNaN(Number(row.precio_venta_sugerido)) || Number(row.precio_venta_sugerido) < 0) {
-        setGeneralError(`La variante en la fila ${rowNum} debe tener un precio válido en MXN.`);
-        setFormErrors(errors);
-        return;
-      }
-      if (row.precio_costo === "" || isNaN(Number(row.precio_costo)) || Number(row.precio_costo) < 0) {
-        setGeneralError(`La variante en la fila ${rowNum} debe tener un costo válido en MXN.`);
-        setFormErrors(errors);
-        return;
-      }
-
-      if (row.stock_minimo === "" || isNaN(Number(row.stock_minimo)) || Number(row.stock_minimo) < 0) {
-        setGeneralError(`La variante en la fila ${rowNum} debe tener un stock mínimo válido.`);
-        setFormErrors(errors);
-        return;
-      }
-    }
-
-    if (Object.keys(errors).length > 0) {
-      setFormErrors(errors);
-      setGeneralError("Por favor completa todos los campos obligatorios del modelo.");
-      return;
-    }
-
-    setSubmitLoading(true);
-    try {
-      const baseId = editingBaseId || generateBaseId(formMarca, formNombre);
-
-      const productsToSave: Omit<Producto, "id">[] = variantRows.map(row => {
-        const minStockNum = Number(row.stock_minimo);
-        const priceNum = Number(row.precio_venta_sugerido);
-        const costNum = Number(row.precio_costo);
-
-        return {
-          producto_base_id: baseId,
-          nombre: formNombre.trim(),
-          marca: formMarca.trim(),
-          categoria: formCategoria.trim(),
-          tipo_talla: (formTipoTalla as "ropa" | "calzado" | "unica" | "personalizada") || "ropa",
-          unidad: formUnidad.trim() || "pieza",
-          color: row.color.trim(),
-          talla: formTipoTalla === "unica" ? "Única" : row.talla.trim(),
-          sku: row.sku.trim().toUpperCase(),
-          codigo_barras: (row.codigo_barras || "").trim(),
-          precio_costo: costNum >= 0 ? costNum : 0,
-          precio_venta_sugerido: priceNum >= 0 ? priceNum : 0,
-          stock_minimo: minStockNum >= 0 ? minStockNum : 0,
-          activo: Boolean(row.activo)
-        };
-      });
-
-      if (editingBaseId) {
-        // For editing, update existing and create new variants
-        for (const item of productsToSave) {
-          const existing = productos.find(p => p.sku === item.sku);
-          if (existing) {
-            await firestoreService.updateProducto(existing.id, item);
-          } else {
-            await firestoreService.addProducto(item);
-          }
-        }
-      } else {
-        // Atomic batch add
-        await firestoreService.addProductsBatch(productsToSave);
-      }
-
-      setIsFormOpen(false);
-      resetFormToEmpty();
-
-      // Prompt user if they want to register initial stock for the first created variant
-      if (!editingBaseId && productsToSave.length > 0) {
-        const first = productsToSave[0];
-        setCreatedProductPrompt({
-          id: first.sku,
-          ...first
-        } as Producto);
-      }
-    } catch (err: any) {
-      setGeneralError(err.message || "Error al guardar el producto.");
-    } finally {
-      setSubmitLoading(false);
-    }
-  };
-
-  // Un SKU manual por producto nuevo; las tallas se especifican al comprar.
-  const handleCreateSimpleProduct = async (event: React.FormEvent) => {
+  const handleSave = async (event: React.FormEvent) => {
     event.preventDefault();
-    setGeneralError(null);
+    if (loading) return;
     const nombre = formNombre.trim();
     const marca = formMarca.trim();
-    const sku = formSkuManual.trim().toUpperCase();
-    if (!nombre || nombre.length > 120 || !marca || !sku || sku.length > 128 || sku.includes("/")) {
-      setGeneralError("Completa nombre, marca y un SKU válido (máximo 128 caracteres, sin /).");
+    const sku = formSku.trim().toUpperCase();
+    if (!nombre || nombre.length > 120 || !marca || !formTipoTalla || !sku || sku.length > 128 || sku.includes("/")) {
+      setGeneralError("Completa nombre, marca, tipo de talla y un SKU válido (máximo 128 caracteres, sin /).");
       return;
     }
-    if (!formTipoTalla) {
-      setGeneralError("Selecciona el tipo de talla del producto.");
+    if (!editingProduct && productos.some(p => p.sku.trim().toUpperCase() === sku)) {
+      setGeneralError(`El SKU "${sku}" ya está registrado.`);
       return;
     }
-    if (productos.some(p => p.sku.toUpperCase() === sku && (!editingBaseId || p.producto_base_id !== editingBaseId))) {
-      setGeneralError(`El SKU "${sku}" ya existe en el catálogo.`);
-      return;
-    }
-    setSubmitLoading(true);
+
+    setGeneralError(null);
+    setLoading(true);
     try {
-      const producto: Producto = {
-        producto_base_id: generateBaseId(marca, nombre), sku, nombre, marca,
-        categoria: "General", tipo_talla: formTipoTalla, unidad: "pieza",
-        stock_minimo: 0, activo: true, precio_costo: 0
-      };
-      if (editingBaseId) {
-        await firestoreService.updateProducto(sku, { nombre, marca, tipo_talla: formTipoTalla });
+      if (editingProduct) {
+        // El SKU es la identidad de Firestore y los movimientos. No se modifica al editar.
+        await firestoreService.updateProducto(editingProduct.sku, { nombre, marca, tipo_talla: formTipoTalla });
+        notify("Producto actualizado.");
       } else {
+        const producto: Producto = {
+          sku,
+          producto_base_id: sku,
+          nombre,
+          marca,
+          tipo_talla: formTipoTalla,
+          categoria: "General", // Dato interno de compatibilidad, no se solicita.
+          unidad: "pieza",
+          stock_minimo: 0,
+          activo: true,
+          precio_costo: 0
+        };
         await firestoreService.addProductsBatch([producto]);
+        notify("Producto registrado correctamente.");
       }
-      handleCloseModal();
-      if (!editingBaseId) setCreatedProductPrompt({ ...producto, id: sku });
-    } catch (err: any) {
-      setGeneralError(err.message || "No se pudo crear el producto.");
+      setIsFormOpen(false);
+      resetForm();
+    } catch (error: any) {
+      setGeneralError(error?.message || "No se pudo guardar el producto.");
     } finally {
-      setSubmitLoading(false);
+      setLoading(false);
     }
   };
 
-  // Toggle single variant active status
-  const handleToggleVariantStatus = async (productoId: string, currentStatus: boolean) => {
+  const handleDelete = async () => {
+    if (!productToDelete || loading) return;
+    setLoading(true);
     try {
-      await firestoreService.toggleProductoStatus(productoId, !currentStatus);
-    } catch (e: any) {
-      notify("No se pudo cambiar el estado: " + e.message, "error");
-    }
-  };
-
-  // Delete product confirmation
-  const handleConfirmDelete = async () => {
-    if (!productToDelete) return;
-    const targets = productToDelete.isBase
-      ? productos.filter(p => p.producto_base_id === productToDelete.id || `legacy-${p.nombre.toLowerCase().trim()}` === productToDelete.id)
-      : productos.filter(p => p.sku.trim().toUpperCase() === productToDelete.sku.trim().toUpperCase());
-    const targetSkus = targets.map(product => product.sku.trim().toUpperCase());
-    setSubmitLoading(true);
-    try {
-      await firestoreService.deleteProducts(targetSkus);
-      setIsDeleteModalOpen(false);
+      await firestoreService.deleteProducts([productToDelete.sku]);
+      notify("Producto enviado a Papelera.");
       setProductToDelete(null);
-    } catch (err: any) {
-      notify(err.message || "No se pudo enviar el producto a la papelera.", "error");
+    } catch (error: any) {
+      notify(error?.message || "No se pudo eliminar el producto.", "error");
     } finally {
-      setSubmitLoading(false);
+      setLoading(false);
     }
-  };
-
-  const toggleExpand = (baseId: string) => {
-    setExpandedBaseIds(prev => ({
-      ...prev,
-      [baseId]: !prev[baseId]
-    }));
   };
 
   return (
     <div id="gestion-productos-root" className="page-shell space-y-6">
-      {/* Top Header Card */}
       <div id="gestion-productos-header" className="page-header">
         <div>
-          <div>
-            <p className="page-eyebrow">Inventario</p>
-            <h1 className="text-xl font-bold text-zinc-900 dark:text-white tracking-tight">
-              Productos
-            </h1>
-            <p className="page-description">
-              Administra productos, tallas y colores. Consulta las existencias y la disponibilidad en Inventario por drops.
-            </p>
-          </div>
+          <p className="page-eyebrow">Inventario</p>
+          <h1 className="text-xl font-bold text-zinc-900 dark:text-white tracking-tight">Productos</h1>
+          <p className="page-description">
+            Administra los modelos de tu catálogo. Consulta las existencias en Inventario por drops.
+          </p>
         </div>
-
         <div className="page-actions">
-          <button
-            id="btn-gestionar-catalogos"
-            onClick={() => setIsCatalogosOpen(true)}
-            className="btn-secondary"
-          >
-            <Settings className="w-4 h-4" />
-            Configurar productos
+          <button id="btn-gestionar-catalogos" type="button" onClick={() => setIsCatalogosOpen(true)} className="btn-secondary">
+            <Settings className="w-4 h-4" /> Configurar productos
           </button>
-
-          <button
-            id="btn-crear-producto"
-            onClick={handleOpenCreateModal}
-            className="btn-primary"
-          >
-            <Plus className="w-4 h-4" />
-            Nuevo producto
+          <button id="btn-crear-producto" type="button" onClick={handleOpenCreate} className="btn-primary">
+            <Plus className="w-4 h-4" /> Nuevo producto
           </button>
         </div>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div id="gestion-productos-filters" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
-        {/* Search */}
-        <div className="relative lg:col-span-2">
+      <div id="gestion-productos-filters" className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+        <div className="relative sm:col-span-2">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
           <input
-            type="text"
-            placeholder="Buscar por modelo, SKU, marca o color..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3.5 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white text-zinc-900 dark:text-white"
+            type="search" aria-label="Buscar productos" placeholder="Buscar por nombre, SKU o marca..."
+            value={searchQuery} onChange={event => setSearchQuery(event.target.value)}
+            className="w-full pl-9 pr-3.5 py-2.5 text-xs bg-zinc-50 dark:bg-zinc-800/70 border border-zinc-200 dark:border-zinc-700 rounded-xl text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
           />
         </div>
-
-        {/* Marca filter */}
-        <div>
-          <select
-            value={filterMarca}
-            onChange={(e) => setFilterMarca(e.target.value)}
-            className="w-full px-3 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:outline-none text-zinc-900 dark:text-white font-medium"
-          >
-            <option value="all">Todas las Marcas</option>
-            {catalogMarcas.map(m => (
-              <option key={m.id} value={m.nombre}>{m.nombre}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Categoria filter */}
-        <div>
-          <select
-            value={filterCategoria}
-            onChange={(e) => setFilterCategoria(e.target.value)}
-            className="w-full px-3 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:outline-none text-zinc-900 dark:text-white font-medium"
-          >
-            <option value="all">Todas las Categorías</option>
-            {catalogCategorias.map(c => (
-              <option key={c.id} value={c.nombre}>{c.nombre}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Tipo / Estado filter */}
-        <div>
-          <select
-            value={filterEstado}
-            onChange={(e) => setFilterEstado(e.target.value)}
-            className="w-full px-3 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border border-zinc-200 dark:border-zinc-700 rounded-xl focus:outline-none text-zinc-900 dark:text-white font-medium"
-          >
-            <option value="all">Todos los Estados</option>
-            <option value="activos">Solo Activos</option>
-            <option value="inactivos">Inactivos</option>
-          </select>
-        </div>
+        <select aria-label="Filtrar por marca" value={filterMarca} onChange={event => setFilterMarca(event.target.value)}
+          className="w-full px-3 py-2.5 text-xs font-medium rounded-xl bg-zinc-50 dark:bg-zinc-800/70 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white">
+          <option value="all">Todas las marcas</option>
+          {opcionesMarcaFiltro.map(marca => <option key={marca} value={marca}>{marca}</option>)}
+        </select>
       </div>
 
-      {/* Main List: Grouped by Model */}
-      <div id="gestion-productos-list" className="space-y-3">
-        {filteredGroups.length === 0 ? (
-          <div className="bg-white dark:bg-zinc-900 p-12 text-center rounded-2xl border border-zinc-200 dark:border-zinc-800 space-y-3">
-            <div className="w-12 h-12 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-400 mx-auto flex items-center justify-center">
-              <Shirt className="w-6 h-6" />
-            </div>
-            <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
-              No se encontraron productos
-            </h3>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto">
-              {searchQuery ? "Intenta con otros términos de búsqueda." : "Comienza agregando tu primer modelo y sus variantes con el botón Crear Producto."}
-            </p>
-          </div>
-        ) : (
-          filteredGroups.map(group => {
-            const isExpanded = expandedBaseIds[group.baseId] !== false; // expanded by default
-            const colorDotMap: Record<string, string> = {};
-            catalogColores.forEach(c => {
-              colorDotMap[c.nombre.toLowerCase()] = c.codigo_hex;
-            });
-
-            return (
-              <div
-                key={group.baseId}
-                className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-xs transition-all"
-              >
-                {/* Group Header Row */}
-                <div 
-                  className="px-5 py-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-zinc-50/50 dark:bg-zinc-800/20 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 cursor-pointer border-b border-zinc-100 dark:border-zinc-800/60"
-                  onClick={() => toggleExpand(group.baseId)}
-                >
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      className="p-1 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400"
-                    >
-                      {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    </button>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-zinc-900 dark:text-white tracking-tight">
-                          {group.nombre}
-                        </span>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-zinc-900 text-white dark:bg-white dark:text-zinc-900">
-                          {group.marca}
-                        </span>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
-                          {group.categoria}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                        <span>{group.variants.length} {group.variants.length === 1 ? "SKU" : "variantes"}</span>
-                        <span>•</span>
-                        {group.variants.some(v => v.color || v.talla) && <span>Tipo: {group.tipo_talla === "calzado" ? "Calzado" : group.tipo_talla === "unica" ? "Talla Única" : "Ropa"}</span>}
-                        <span>•</span>
-                        <span>Unidad: {group.unidad}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-4 justify-between md:justify-end" onClick={(e) => e.stopPropagation()}>
-                    {/* Actions menu */}
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleOpenEditModel(group)}
-                        className="p-1.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
-                        title="Editar modelo y variantes"
-                      >
+      <section id="gestion-productos-list" className="overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-zinc-50 dark:bg-zinc-800/60 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500 uppercase tracking-wide text-[10px]">
+              <tr>
+                <th className="px-4 py-3">Producto</th>
+                <th className="px-4 py-3">Marca</th>
+                <th className="px-4 py-3">Tipo de talla</th>
+                <th className="px-4 py-3">SKU</th>
+                <th className="px-4 py-3 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {visibles.length === 0 ? (
+                <tr><td colSpan={5} className="px-5 py-12 text-center text-zinc-500">
+                  {searchQuery || filterMarca !== "all" ? "No hay productos que coincidan con los filtros." : "Aún no hay productos. Utiliza Nuevo producto para crear el primero."}
+                </td></tr>
+              ) : visibles.map(producto => (
+                <tr key={producto.sku} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
+                  <td className="px-4 py-3 font-semibold text-zinc-900 dark:text-white">{producto.nombre}</td>
+                  <td className="px-4 py-3 text-zinc-700 dark:text-zinc-300">{producto.marca || "—"}</td>
+                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{etiquetaTipoTalla(producto.tipo_talla)}</td>
+                  <td className="px-4 py-3 font-mono font-semibold text-zinc-900 dark:text-white">{producto.sku}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end gap-1">
+                      <button type="button" onClick={() => handleOpenEdit(producto)}
+                        title={`Editar ${producto.nombre}`} aria-label={`Editar producto ${producto.sku}`}
+                        className="p-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button
-                        onClick={() => {
-                          setProductToDelete({
-                            id: group.baseId,
-                            sku: group.variants[0]?.sku || "",
-                            nombre: group.nombre,
-                            isBase: true
-                          });
-                          setIsDeleteModalOpen(true);
-                        }}
-                        className="p-1.5 text-zinc-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-colors"
-                        title="Enviar modelo a Papelera"
-                      >
+                      <button type="button" onClick={() => setProductToDelete(producto)}
+                        title={`Enviar ${producto.nombre} a Papelera`} aria-label={`Eliminar producto ${producto.sku}`}
+                        className="p-2 text-zinc-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
-                  </div>
-                </div>
-
-                {/* Expanded Variants Table */}
-                {isExpanded && (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-zinc-50/70 dark:bg-zinc-800/40 text-zinc-400 font-semibold border-b border-zinc-100 dark:border-zinc-800">
-                        <tr>
-                          <th className="py-2.5 px-4">Color</th>
-                          <th className="py-2.5 px-4">Talla</th>
-                          <th className="py-2.5 px-4">SKU</th>
-                          <th className="py-2.5 px-4">Código Barras</th>
-                          
-                          <th className="py-2.5 px-4 text-center">Estado</th>
-                          <th className="py-2.5 px-4 text-right">Acciones</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
-                        {group.variants.map(variant => {
-                          const hexColor = colorDotMap[(variant.color || "").toLowerCase()] || "#111827";
-
-                          return (
-                            <tr key={variant.sku} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30">
-                              {/* Color */}
-                              <td className="py-3 px-4 font-medium text-zinc-900 dark:text-white">
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className="w-3.5 h-3.5 rounded-full border border-zinc-300 dark:border-zinc-700 shadow-inner shrink-0"
-                                    style={{ backgroundColor: hexColor }}
-                                  />
-                                  <span>{variant.color || "Sin especificar"}</span>
-                                </div>
-                              </td>
-
-                              {/* Talla */}
-                              <td className="py-3 px-4">
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200">
-                                  {variant.talla || "U"}
-                                </span>
-                              </td>
-
-                              {/* SKU */}
-                              <td className="py-3 px-4 font-mono font-bold text-zinc-900 dark:text-zinc-100 tracking-tight">
-                                {variant.sku}
-                              </td>
-
-                              {/* Código de barras */}
-                              <td className="py-3 px-4 font-mono text-zinc-500 dark:text-zinc-400">
-                                {variant.codigo_barras || "—"}
-                              </td>
-
-                              {/* Status */}
-                              <td className="py-3 px-4 text-center">
-                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                                  variant.activo !== false
-                                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
-                                    : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
-                                }`}>
-                                  {variant.activo !== false ? "Activo" : "Inactivo"}
-                                </span>
-                              </td>
-
-                              {/* Actions */}
-                              <td className="py-3 px-4 text-right">
-                                <div className="flex items-center justify-end gap-1">
-                                  {onNavigateToMovimiento && (
-                                    <button
-                                      onClick={() => onNavigateToMovimiento(variant.sku)}
-                                      className="p-1.5 text-zinc-600 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors font-medium flex items-center gap-1"
-                                      title="Registrar compra de este SKU"
-                                    >
-                                      <Package className="w-3.5 h-3.5" />
-                                    </button>
-                                  )}
-                                  <button
-                                    onClick={() => handleToggleVariantStatus(variant.id, variant.activo !== false)}
-                                    className={`p-1.5 rounded-lg transition-colors ${
-                                      variant.activo !== false
-                                        ? "text-zinc-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30"
-                                        : "text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
-                                    }`}
-                                    title={variant.activo !== false ? "Desactivar variante" : "Activar variante"}
-                                  >
-                                    <Power className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      setProductToDelete({
-                                        id: variant.id,
-                                        sku: variant.sku,
-                                        nombre: `${group.nombre} (${variant.color} / ${variant.talla})`,
-                                        isBase: false
-                                      });
-                                      setIsDeleteModalOpen(true);
-                                    }}
-                                    className="p-1.5 text-zinc-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-colors"
-                                    title="Enviar variante a Papelera"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      {/* Alta simplificada de nuevos productos; edición histórica permanece disponible. */}
-      {isFormOpen && (!editingBaseId || editingSimpleProduct) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-2xl shadow-2xl">
-            <div className="px-6 py-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-bold text-zinc-900 dark:text-white">{editingBaseId ? "Editar producto" : "Crear Nuevo Producto"}</h2>
-                <p className="text-xs text-zinc-500 mt-1">Selecciona el tipo de talla; la talla específica y el costo se registran en compras.</p>
-              </div>
-              <button type="button" onClick={handleCloseModal} aria-label="Cerrar" className="text-zinc-400 hover:text-zinc-900 dark:hover:text-white"><X className="w-5 h-5" /></button>
-            </div>
-            <form onSubmit={handleCreateSimpleProduct} className="p-6 space-y-5">
-              {generalError && <p role="alert" className="text-xs text-rose-600">{generalError}</p>}
-              <div>
-                <label htmlFor="new-model-name" className="block text-xs font-semibold mb-1.5 text-zinc-700 dark:text-zinc-300">Nombre comercial *</label>
-                <input id="new-model-name" required maxLength={120} value={formNombre} onChange={e => setFormNombre(e.target.value)} placeholder="Ej. Heavyweight Boxy Tee" className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white" />
-              </div>
-              <div>
-                <label htmlFor="new-model-brand" className="block text-xs font-semibold mb-1.5 text-zinc-700 dark:text-zinc-300">Marca *</label>
-                <select id="new-model-brand" required value={formMarca} onChange={e => setFormMarca(e.target.value)} className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white">
-                  <option value="">Seleccionar marca</option>
-                  {catalogMarcas.map(m => <option key={m.id} value={m.nombre}>{m.nombre}</option>)}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="new-model-size-type" className="block text-xs font-semibold mb-1.5 text-zinc-700 dark:text-zinc-300">Tipo de talla *</label>
-                <select id="new-model-size-type" required value={formTipoTalla} onChange={e => setFormTipoTalla(e.target.value as "ropa" | "calzado" | "unica" | "personalizada" | "")} className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white">
-                  <option value="">Seleccionar tipo de talla</option>
-                  <option value="ropa">Ropa (XS, S, M, L, XL...)</option>
-                  <option value="calzado">Calzado (25, 26, 27, 28...)</option>
-                  <option value="unica">Talla única / Sin talla (gorras, accesorios...)</option>
-                  <option value="personalizada">Personalizada (anillos, cinturones, medidas...)</option>
-                </select>
-              </div>
-              <div>
-                <label htmlFor="new-model-sku" className="block text-xs font-semibold mb-1.5 text-zinc-700 dark:text-zinc-300">SKU manual *</label>
-                <input id="new-model-sku" required readOnly={Boolean(editingBaseId)} maxLength={128} value={formSkuManual} onChange={e => setFormSkuManual(e.target.value.toUpperCase())} placeholder="Ej. STUSSY-001" className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white font-mono uppercase" />
-                <p className="text-[11px] text-zinc-500 mt-1">Un SKU por modelo. No se genera automáticamente.</p>
-              </div>
-              <div className="flex justify-between pt-4 border-t border-zinc-200 dark:border-zinc-800">
-                <button type="button" onClick={handleCloseModal} className="btn-secondary">Cancelar</button>
-                <button type="submit" disabled={submitLoading || !formNombre.trim() || !formMarca.trim() || !formTipoTalla || !formSkuManual.trim()} className="btn-primary disabled:opacity-40">{submitLoading ? "Guardando…" : editingBaseId ? "Guardar cambios" : "Crear producto"}</button>
-              </div>
-            </form>
-          </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      )}
+      </section>
 
-      {/* CREATE / EDIT PRODUCT MODAL */}
-      {isFormOpen && editingBaseId && !editingSimpleProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.98 }}
-            className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-5xl my-8 flex flex-col shadow-2xl overflow-hidden max-h-[90vh]"
-          >
-            {/* Modal Header */}
-            <div className="px-6 py-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 flex items-center justify-center font-bold">
-                  <Shirt className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-zinc-900 dark:text-white">
-                    {editingBaseId ? "Editar Producto y Variantes" : "Crear Nuevo Producto"}
-                  </h2>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Define la información base del modelo y genera sus variantes por color y talla
-                  </p>
-                </div>
+      {isFormOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-2xl">
+            <div className="px-6 py-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-zinc-900 dark:text-white">{editingProduct ? "Editar producto" : "Crear nuevo producto"}</h2>
+                <p className="mt-1 text-xs text-zinc-500">Las tallas específicas y el costo se registran durante la compra.</p>
               </div>
-              <button
-                onClick={handleCloseModal}
-                className="p-2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              >
+              <button type="button" onClick={handleCloseForm} disabled={loading} aria-label="Cerrar" className="p-2 text-zinc-400 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
-
-            {/* Modal Body */}
-            <form onSubmit={handleSubmitForm} className="flex-1 overflow-y-auto p-6 space-y-6">
-              {generalError && (
-                <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2.5">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span className="font-medium">{generalError}</span>
-                </div>
-              )}
-
-              {/* SECTION 1: BASE PRODUCT DETAILS */}
-              <div className="space-y-4">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 flex items-center gap-2">
-                  <Package className="w-3.5 h-3.5" />
-                  1. Información General del Modelo
-                </h3>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-                  {/* Nombre */}
-                  <div className="lg:col-span-2">
-                    <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                      Nombre Comercial del Modelo *
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Ej. Heavyweight Boxy Tee, Cargo Pants..."
-                      value={formNombre}
-                      maxLength={120}
-                      onChange={(e) => {
-                        setFormNombre(e.target.value);
-                        if (formErrors.nombre) setFormErrors(prev => ({ ...prev, nombre: "" }));
-                      }}
-                      className={`w-full px-3.5 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border ${
-                        (formErrors.nombre || (formSubmitted && !formNombre.trim())) ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"
-                      } rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white text-zinc-900 dark:text-white font-medium`}
-                    />
-                    {(formErrors.nombre || (formSubmitted && !formNombre.trim())) && (
-                      <p className="text-[11px] text-rose-600 mt-1">{formErrors.nombre || "El nombre comercial del modelo es obligatorio"}</p>
-                    )}
-                    <p className="text-[10px] text-zinc-400 mt-1 text-right">{formNombre.length}/120</p>
-                  </div>
-
-                  {/* Marca */}
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                      Marca *
-                    </label>
-                    <select
-                      value={formMarca}
-                      onChange={(e) => {
-                        setFormMarca(e.target.value);
-                        if (formErrors.marca) setFormErrors(prev => ({ ...prev, marca: "" }));
-                      }}
-                      className={`w-full px-3.5 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border ${
-                        (formErrors.marca || (formSubmitted && !formMarca.trim())) ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"
-                      } rounded-xl focus:outline-none text-zinc-900 dark:text-white font-medium`}
-                    >
-                      <option value="">-- Seleccionar marca --</option>
-                      {catalogMarcas.map(m => (
-                        <option key={m.id} value={m.nombre}>{m.nombre}</option>
-                      ))}
-                    </select>
-                    {(formErrors.marca || (formSubmitted && !formMarca.trim())) && (
-                      <p className="text-[11px] text-rose-600 mt-1">{formErrors.marca || "Debes seleccionar una marca"}</p>
-                    )}
-                  </div>
-
-                  {/* Categoria */}
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                      Categoría *
-                    </label>
-                    <select
-                      value={formCategoria}
-                      onChange={(e) => {
-                        setFormCategoria(e.target.value);
-                        if (formErrors.categoria) setFormErrors(prev => ({ ...prev, categoria: "" }));
-                      }}
-                      className={`w-full px-3.5 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border ${
-                        (formErrors.categoria || (formSubmitted && !formCategoria.trim())) ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"
-                      } rounded-xl focus:outline-none text-zinc-900 dark:text-white font-medium`}
-                    >
-                      <option value="">-- Seleccionar categoría --</option>
-                      {catalogCategorias.map(c => (
-                        <option key={c.id} value={c.nombre}>{c.nombre}</option>
-                      ))}
-                    </select>
-                    {(formErrors.categoria || (formSubmitted && !formCategoria.trim())) && (
-                      <p className="text-[11px] text-rose-600 mt-1">{formErrors.categoria || "Debes seleccionar una categoría"}</p>
-                    )}
-                  </div>
-
-                  {/* Tipo de Talla */}
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                      Tipo de Talla *
-                    </label>
-                    <select
-                      value={formTipoTalla}
-                      onChange={(e: any) => {
-                        const val = e.target.value;
-                        setFormTipoTalla(val);
-                        if (formErrors.tipo_talla) setFormErrors(prev => ({ ...prev, tipo_talla: "" }));
-                        if (val === "unica") {
-                          setVariantRows(prev => prev.map(r => ({ ...r, talla: "Única" })));
-                        } else if (val === "") {
-                          setVariantRows(prev => prev.map(r => ({ ...r, talla: "" })));
-                        }
-                      }}
-                      className={`w-full px-3.5 py-2 text-xs bg-zinc-50 dark:bg-zinc-800/70 border ${
-                        (formErrors.tipo_talla || (formSubmitted && !formTipoTalla.trim())) ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"
-                      } rounded-xl focus:outline-none text-zinc-900 dark:text-white font-medium`}
-                    >
-                      <option value="">-- Seleccionar tipo de talla --</option>
-                      <option value="ropa">Ropa (XS, S, M, L, XL...)</option>
-                      <option value="calzado">Calzado (25, 26, 27, 28...)</option>
-                      <option value="unica">Talla Única (Accesorios/Gorras)</option>
-                      <option value="personalizada">Personalizada (medidas especiales)</option>
-                    </select>
-                    {(formErrors.tipo_talla || (formSubmitted && !formTipoTalla.trim())) && (
-                      <p className="text-[11px] text-rose-600 mt-1">{formErrors.tipo_talla || "Debes seleccionar el tipo de talla"}</p>
-                    )}
-                  </div>
-                </div>
+            <form onSubmit={handleSave} className="p-6 space-y-5">
+              {generalError && <p role="alert" className="text-xs text-rose-600">{generalError}</p>}
+              <div>
+                <label htmlFor="producto-nombre" className="block mb-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">Nombre comercial *</label>
+                <input id="producto-nombre" required maxLength={120} value={formNombre} onChange={event => setFormNombre(event.target.value)}
+                  placeholder="Ej. Balenciaga Tape"
+                  className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-2.5 text-zinc-900 dark:text-white" />
               </div>
-
-              {/* SECTION 2: VARIANTS MATRIX GENERATOR / BUILDER */}
-              <div className="space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-zinc-100 dark:border-zinc-800 pt-5">
-                  <div>
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 flex items-center gap-2">
-                      <Layers className="w-3.5 h-3.5" />
-                      2. Variantes del Producto ({variantRows.length})
-                    </h3>
-                    <p className="text-[11px] text-zinc-400 mt-0.5">
-                      Cada fila representa una variante vendible con su propio SKU y control de inventario
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setIsMatrixOpen(!isMatrixOpen)}
-                      className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 transition-colors"
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-zinc-900 dark:text-white" />
-                      Generador Rápido de Combinaciones
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleAddVariantRow}
-                      className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 hover:bg-black dark:hover:bg-zinc-100 flex items-center gap-1.5 transition-colors"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Agregar Fila
-                    </button>
-                  </div>
-                </div>
-
-                {/* Quick Matrix Expandable Box */}
-                {isMatrixOpen && (
-                  <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-700/80 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-zinc-900 dark:text-white flex items-center gap-1.5">
-                        <Sparkles className="w-4 h-4" />
-                        Selecciona múltiples colores y tallas para autogenerar todas las filas:
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setIsMatrixOpen(false)}
-                        className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    {/* Colors selection checkboxes */}
-                    <div>
-                      <span className="block text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 mb-1.5">
-                        Colores a incluir:
-                      </span>
-                      <div className="flex flex-wrap gap-2">
-                        {catalogColores.map(c => {
-                          const selected = matrixColors.includes(c.nombre);
-                          return (
-                            <button
-                              key={c.id}
-                              type="button"
-                              onClick={() => {
-                                setMatrixColors(prev => 
-                                  selected ? prev.filter(x => x !== c.nombre) : [...prev, c.nombre]
-                                );
-                              }}
-                              className={`px-2.5 py-1 rounded-lg text-xs font-medium border flex items-center gap-1.5 transition-all ${
-                                selected 
-                                  ? "bg-zinc-900 text-white border-zinc-900 dark:bg-white dark:text-zinc-900 dark:border-white shadow-xs" 
-                                  : "bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700"
-                              }`}
-                            >
-                              <span
-                                className="w-2.5 h-2.5 rounded-full border border-black/20 shrink-0"
-                                style={{ backgroundColor: c.codigo_hex }}
-                              />
-                              {c.nombre}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Sizes selection checkboxes */}
-                    <div>
-                      <span className="block text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 mb-1.5">
-                        Tallas a incluir ({formTipoTalla === "calzado" ? "Calzado" : "Ropa"}):
-                      </span>
-                      <div className="flex flex-wrap gap-2">
-                        {(formTipoTalla === "calzado" ? catalogTallasCalzado : catalogTallasRopa).map(t => {
-                          const selected = matrixSizes.includes(t.nombre);
-                          return (
-                            <button
-                              key={t.id}
-                              type="button"
-                              onClick={() => {
-                                setMatrixSizes(prev => 
-                                  selected ? prev.filter(x => x !== t.nombre) : [...prev, t.nombre]
-                                );
-                              }}
-                              className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all ${
-                                selected 
-                                  ? "bg-zinc-900 text-white border-zinc-900 dark:bg-white dark:text-zinc-900 dark:border-white" 
-                                  : "bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700"
-                              }`}
-                            >
-                              {t.nombre}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-4 pt-2 border-t border-zinc-200/60 dark:border-zinc-700/60">
-                      <div className="flex items-center gap-2">
-                        <label className="text-xs text-zinc-500 font-medium">Precio base:</label>
-                        <input
-                          type="number"
-                          value={matrixPrice}
-                          onChange={(e) => setMatrixPrice(e.target.value)}
-                          className="w-24 px-2 py-1 text-xs bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-white"
-                        />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <label className="text-xs text-zinc-500 font-medium">Stock mínimo:</label>
-                        <input
-                          type="number"
-                          value={matrixMinStock}
-                          onChange={(e) => setMatrixMinStock(e.target.value)}
-                          className="w-20 px-2 py-1 text-xs bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-white"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleGenerateMatrix}
-                        className="ml-auto px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-colors"
-                      >
-                        Generar {matrixColors.length * matrixSizes.length} Variantes
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Variants Table in Form */}
-                <div className="border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden bg-white dark:bg-zinc-900">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-zinc-50 dark:bg-zinc-800/60 text-zinc-500 font-semibold border-b border-zinc-200 dark:border-zinc-800">
-                      <tr>
-                        <th className="py-2.5 px-3">Color</th>
-                        <th className="py-2.5 px-3">Talla</th>
-                        <th className="py-2.5 px-3">SKU automático</th>
-                        <th className="py-2.5 px-3">Costo MXN</th>
-                        <th className="py-2.5 px-3">Precio sugerido</th>
-                        <th className="py-2.5 px-3">Stock Mínimo</th>
-                        <th className="py-2.5 px-3 text-center">Activo</th>
-                        <th className="py-2.5 px-3 text-right">Quitar</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                      {variantRows.map((row, idx) => (
-                        <tr key={row.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/40">
-                          {/* Color select */}
-                          <td className="py-2.5 px-3">
-                            <select
-                              value={row.color}
-                              onChange={(e) => handleUpdateVariantField(row.id, "color", e.target.value)}
-                              className={`w-full px-2.5 py-1 text-xs bg-zinc-50 dark:bg-zinc-800 border ${
-                                formSubmitted && !row.color ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"
-                              } rounded-lg text-zinc-900 dark:text-white font-medium`}
-                            >
-                              <option value="">-- Seleccionar color --</option>
-                              {catalogColores.map(c => (
-                                <option key={c.id} value={c.nombre}>{c.nombre}</option>
-                              ))}
-                            </select>
-                          </td>
-
-                          {/* Talla select */}
-                          <td className="py-2.5 px-3">
-                            {formTipoTalla === "unica" ? (
-                              <span className="text-xs font-semibold px-2 py-1 bg-zinc-100 dark:bg-zinc-800 rounded text-zinc-700 dark:text-zinc-300 block text-center">
-                                Única
-                              </span>
-                            ) : (
-                              <select
-                                value={row.talla}
-                                onChange={(e) => handleUpdateVariantField(row.id, "talla", e.target.value)}
-                                className={`w-full px-2.5 py-1 text-xs bg-zinc-50 dark:bg-zinc-800 border ${
-                                  formSubmitted && !row.talla ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"
-                                } rounded-lg text-zinc-900 dark:text-white font-semibold`}
-                              >
-                                <option value="">-- Seleccionar talla --</option>
-                                {formTipoTalla === "calzado" && catalogTallasCalzado.map(t => (
-                                  <option key={t.id} value={t.nombre}>{t.nombre}</option>
-                                ))}
-                                {formTipoTalla === "ropa" && catalogTallasRopa.map(t => (
-                                  <option key={t.id} value={t.nombre}>{t.nombre}</option>
-                                ))}
-                                {!formTipoTalla && (
-                                  <option value="" disabled>Selecciona tipo de talla arriba</option>
-                                )}
-                              </select>
-                            )}
-                          </td>
-
-                          {/* SKU input */}
-                          <td className="py-2.5 px-3 font-mono">
-                            <input
-                              type="text"
-                              placeholder="Ej. DC-TEE-NEG-M"
-                              value={row.sku}
-                              readOnly
-                              className={`w-full px-2.5 py-1 text-xs uppercase bg-zinc-100 dark:bg-zinc-950 border ${
-                                formSubmitted && !row.sku.trim() ? "border-rose-500" : "border-zinc-300 dark:border-zinc-700"
-                              } rounded-lg text-zinc-900 dark:text-white font-bold tracking-tight focus:outline-none`}
-                            />
-                          </td>
-
-                          {/* Costo actual */}
-                          <td className="py-2.5 px-3">
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              placeholder="0.00"
-                              value={row.precio_costo}
-                              onChange={(e) => handleUpdateVariantField(row.id, "precio_costo", e.target.value)}
-                              className={`w-24 px-2 py-1 text-xs bg-white dark:bg-zinc-900 border ${formSubmitted && (row.precio_costo === "" || isNaN(Number(row.precio_costo))) ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"} rounded-lg text-zinc-900 dark:text-white font-semibold focus:outline-none`}
-                            />
-                          </td>
-
-                          {/* Precio venta */}
-                          <td className="py-2.5 px-3">
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              placeholder="Ej. 799"
-                              value={row.precio_venta_sugerido}
-                              onChange={(e) => handleUpdateVariantField(row.id, "precio_venta_sugerido", e.target.value)}
-                              className={`w-24 px-2 py-1 text-xs bg-white dark:bg-zinc-900 border ${
-                                formSubmitted && (row.precio_venta_sugerido === "" || isNaN(Number(row.precio_venta_sugerido))) ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"
-                              } rounded-lg text-zinc-900 dark:text-white font-semibold focus:outline-none`}
-                            />
-                          </td>
-
-                          {/* Stock mínimo */}
-                          <td className="py-2.5 px-3">
-                            <input
-                              type="number"
-                              min="0"
-                              placeholder="Ej. 3"
-                              value={row.stock_minimo}
-                              onChange={(e) => handleUpdateVariantField(row.id, "stock_minimo", e.target.value)}
-                              className={`w-20 px-2 py-1 text-xs bg-white dark:bg-zinc-900 border ${
-                                formSubmitted && (row.stock_minimo === "" || isNaN(Number(row.stock_minimo))) ? "border-rose-500" : "border-zinc-200 dark:border-zinc-700"
-                              } rounded-lg text-zinc-900 dark:text-white focus:outline-none`}
-                            />
-                          </td>
-
-                          {/* Activo checkbox */}
-                          <td className="py-2.5 px-3 text-center">
-                            <input
-                              type="checkbox"
-                              checked={row.activo}
-                              onChange={(e) => handleUpdateVariantField(row.id, "activo", e.target.checked)}
-                              className="w-4 h-4 rounded text-zinc-900 focus:ring-zinc-900 cursor-pointer"
-                            />
-                          </td>
-
-                          {/* Remove button */}
-                          <td className="py-2.5 px-3 text-right">
-                            <button
-                              type="button"
-                              disabled={variantRows.length <= 1}
-                              onClick={() => handleRemoveVariantRow(row.id)}
-                              className="p-1 text-zinc-400 hover:text-rose-600 disabled:opacity-30 rounded-md"
-                              title="Quitar variante"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+              <div>
+                <label htmlFor="producto-marca" className="block mb-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">Marca *</label>
+                <select id="producto-marca" required value={formMarca} onChange={event => setFormMarca(event.target.value)}
+                  className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-2.5 text-zinc-900 dark:text-white">
+                  <option value="">Seleccionar marca</option>
+                  {formMarca && !marcasActivas.some(item => item.nombre === formMarca) && <option value={formMarca}>{formMarca} (existente)</option>}
+                  {marcasActivas.map(item => <option key={item.id} value={item.nombre}>{item.nombre}</option>)}
+                </select>
               </div>
-
-              {/* Modal Footer */}
-              <div className="border-t border-zinc-200 dark:border-zinc-800 pt-5 flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={handleCloseModal}
-                  className="px-4 py-2 text-xs font-semibold rounded-xl border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                >
-                  Cancelar
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={submitLoading || !isFormValid}
-                  className="px-6 py-2.5 text-xs font-bold rounded-xl bg-zinc-900 dark:bg-white hover:bg-black dark:hover:bg-zinc-100 text-white dark:text-zinc-900 transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  {submitLoading ? (
-                    <span>Guardando...</span>
-                  ) : (
-                    <>
-                      <Check className="w-4 h-4" />
-                      <span>{editingBaseId ? "Guardar Cambios" : `Crear Modelo y ${variantRows.length} ${variantRows.length === 1 ? 'Variante' : 'Variantes'}`}</span>
-                    </>
-                  )}
+              <div>
+                <label htmlFor="producto-tipo-talla" className="block mb-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">Tipo de talla *</label>
+                <select id="producto-tipo-talla" required value={formTipoTalla} onChange={event => setFormTipoTalla(event.target.value as TipoTalla | "")}
+                  className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-2.5 text-zinc-900 dark:text-white">
+                  <option value="">Seleccionar tipo de talla</option>
+                  {opcionesTipoTalla.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="producto-sku" className="block mb-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">SKU manual *</label>
+                <input id="producto-sku" required readOnly={Boolean(editingProduct)} maxLength={128} value={formSku}
+                  onChange={event => setFormSku(event.target.value.toUpperCase())} placeholder="Ej. BA-211"
+                  className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-2.5 font-mono uppercase text-zinc-900 dark:text-white read-only:opacity-60" />
+                <p className="mt-1 text-[11px] text-zinc-500">{editingProduct ? "El SKU no puede cambiarse porque identifica compras, ventas e inventario." : "Identificador único asignado por ti."}</p>
+              </div>
+              <div className="flex justify-between gap-3 border-t border-zinc-200 dark:border-zinc-800 pt-5">
+                <button type="button" onClick={handleCloseForm} disabled={loading} className="btn-secondary">Cancelar</button>
+                <button type="submit" disabled={loading || !formNombre.trim() || !formMarca.trim() || !formTipoTalla || !formSku.trim()} className="btn-primary disabled:opacity-50">
+                  {loading ? "Guardando…" : editingProduct ? "Guardar cambios" : "Crear producto"}
                 </button>
               </div>
             </form>
-          </motion.div>
-        </div>
-      )}
-
-      {/* MODAL CATALOGOS */}
-      <ModalCatalogos
-        isOpen={isCatalogosOpen}
-        onClose={() => setIsCatalogosOpen(false)}
-        productos={productos}
-      />
-
-      {/* MODAL DELETE CONFIRMATION */}
-      {isDeleteModalOpen && productToDelete && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4">
-            <div className="w-10 h-10 rounded-full bg-rose-100 dark:bg-rose-950/50 text-rose-600 flex items-center justify-center">
-              <AlertTriangle className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-zinc-900 dark:text-white">
-                ¿Enviar {productToDelete.nombre} a la Papelera?
-              </h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
-                {productToDelete.isBase 
-                  ? "El modelo y todas sus variantes quedarán desactivados. Podrás restaurarlos desde Papelera y el historial previo se conservará. No se permite retirar productos que todavía tengan existencias en un drop."
-                  : "La variante quedará desactivada y podrás restaurarla desde Papelera. No se permite retirarla si todavía tiene existencias en un drop."}
-              </p>
-            </div>
-            <div className="flex gap-2 justify-end pt-2">
-              <button
-                onClick={() => setIsDeleteModalOpen(false)}
-                className="px-4 py-2 text-xs font-semibold rounded-xl border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleConfirmDelete}
-                disabled={submitLoading}
-                className="px-4 py-2 text-xs font-semibold rounded-xl bg-rose-600 hover:bg-rose-700 text-white transition-colors disabled:opacity-50"
-              >
-                Enviar a Papelera
-              </button>
-            </div>
           </div>
         </div>
       )}
 
-      {/* PROMPT INITIAL STOCK ENTRY MODAL */}
-      {createdProductPrompt && onNavigateToMovimiento && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
-            <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 flex items-center justify-center">
-              <Package className="w-5 h-5" />
-            </div>
+      <ModalCatalogos isOpen={isCatalogosOpen} onClose={() => setIsCatalogosOpen(false)} productos={productos} />
+
+      {productToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 shadow-2xl space-y-4">
             <div>
-              <h3 className="text-base font-bold text-zinc-900 dark:text-white">
-                ¡Producto creado con éxito!
-              </h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
-                Se guardó <strong className="text-zinc-800 dark:text-zinc-200">{createdProductPrompt.nombre}</strong>. ¿Deseas registrar la entrada inicial de inventario ahora?
+              <h3 className="text-base font-bold text-zinc-900 dark:text-white">¿Enviar {productToDelete.nombre} a Papelera?</h3>
+              <p className="mt-2 text-xs text-zinc-500">
+                Solo se enviará el SKU {productToDelete.sku}. Se conserva el historial y no se permite retirar productos con existencias en un drop.
               </p>
             </div>
-            <div className="flex gap-2 justify-end pt-2">
-              <button
-                onClick={() => setCreatedProductPrompt(null)}
-                className="px-4 py-2 text-xs font-semibold rounded-xl border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              >
-                Más tarde
-              </button>
-              <button
-                onClick={() => {
-                  const sku = createdProductPrompt.sku;
-                  setCreatedProductPrompt(null);
-                  onNavigateToMovimiento(sku);
-                }}
-                className="px-4 py-2 text-xs font-bold rounded-xl bg-zinc-900 dark:bg-white hover:bg-black dark:hover:bg-zinc-100 text-white dark:text-zinc-900 transition-colors flex items-center gap-1.5"
-              >
-                <span>Registrar Entrada</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+            <div className="flex justify-end gap-3">
+              <button type="button" disabled={loading} onClick={() => setProductToDelete(null)} className="btn-secondary">Cancelar</button>
+              <button type="button" disabled={loading} onClick={handleDelete} className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">
+                {loading ? "Procesando…" : "Enviar a Papelera"}
               </button>
             </div>
           </div>
