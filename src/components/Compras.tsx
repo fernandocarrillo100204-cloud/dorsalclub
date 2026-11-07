@@ -9,7 +9,8 @@ import { mensajeError } from "../lib/errores";
 import { useUnsavedChanges, useWorkspace } from "../context/WorkspaceContext";
 import { StatCard, FilterSummary, ErrorState } from "./ui/Page";
 import { downloadCsv, searchText } from "../lib/presentation";
-import { Compra, CompraItem, Producto, OpcionListaConfigurable, Drop } from "../types";
+import { Compra, CompraItem, Producto, OpcionListaConfigurable, Drop, TallaRopaCatalogo, TallaCalzadoCatalogo } from "../types";
+import { opcionesTallaCompra, tallaNormalizadaCompra, tipoTallaDeProducto, validarTallaCompra } from "../lib/tallasProducto";
 import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 import {
   ShoppingBag,
@@ -122,6 +123,8 @@ export default function Compras({
   const [descuentos, setDescuentos] = useState<number | "">("");
   const [clasificacionFinanciera, setClasificacionFinanciera] = useState<"operacion" | "inversion_inicial">("operacion");
   const [items, setItems] = useState<NewItemRow[]>([createEmptyPurchaseItem()]);
+  const [tallasRopa, setTallasRopa] = useState<TallaRopaCatalogo[]>([]);
+  const [tallasCalzado, setTallasCalzado] = useState<TallaCalzadoCatalogo[]>([]);
   const [updatingCompraDropId, setUpdatingCompraDropId] = useState<string | null>(null);
 
   const isPurchaseDirty = useMemo(() => {
@@ -145,6 +148,13 @@ export default function Compras({
   };
 
   useEffect(() => { loadPurchaseSettings(); }, []);
+
+  useEffect(() => {
+    if (!isNewView) return;
+    const unsubRopa = firestoreService.getTallasRopaRealtime(setTallasRopa);
+    const unsubCalzado = firestoreService.getTallasCalzadoRealtime(setTallasCalzado);
+    return () => { unsubRopa(); unsubCalzado(); };
+  }, [isNewView]);
 
   const loadDrops = async () => {
     setDropsLoading(true);
@@ -311,18 +321,27 @@ export default function Compras({
           ...copy[index],
           sku: prod.sku,
           nombre_producto: prod.nombre,
-          variante_label: prod.talla ? `Talla ${prod.talla}` : "",
-          talla: prod.talla || "",
+          variante_label: tipoTallaDeProducto(prod) === "unica" ? "Talla única" : prod.talla ? `Talla ${prod.talla}` : "",
+          talla: tipoTallaDeProducto(prod) === "unica" ? "Única" : (prod.talla || ""),
           costo_unitario: prod.precio_costo || 0
         };
       } else {
         copy[index] = {
           ...copy[index],
-          sku
+          sku,
+          nombre_producto: "",
+          variante_label: "",
+          talla: ""
         };
       }
       return copy;
     });
+  };
+
+  const handleTallaChange = (index: number, talla: string) => {
+    setItems(current => current.map((item, i) => i === index
+      ? { ...item, talla, variante_label: talla ? `Talla ${talla}` : "" }
+      : item));
   };
 
   const handleItemChange = (index: number, field: "cantidad" | "costo_unitario", val: string) => {
@@ -366,8 +385,9 @@ export default function Compras({
         setFormError(`La partida #${i + 1} no tiene un producto/SKU seleccionado.`);
         return;
       }
-      if (!item.talla.trim()) {
-        setFormError(`Selecciona la talla de la partida #${i + 1}. Usa "Única" cuando no aplique.`);
+      const tallaError = validarTallaCompra(getProductBySku(item.sku), item.talla, tallasRopa, tallasCalzado);
+      if (tallaError) {
+        setFormError(`Partida #${i + 1}: ${tallaError}`);
         return;
       }
       const qty = typeof item.cantidad === "number" ? item.cantidad : 0;
@@ -382,11 +402,13 @@ export default function Compras({
       const formattedItems: CompraItem[] = items.map((it) => {
         const qty = typeof it.cantidad === "number" ? it.cantidad : 1;
         const unitCost = typeof it.costo_unitario === "number" ? it.costo_unitario : 0;
+        const tipo = tipoTallaDeProducto(getProductBySku(it.sku));
+        const talla = tallaNormalizadaCompra(tipo, it.talla);
         return {
           sku: it.sku.trim().toUpperCase(),
           nombre_producto: it.nombre_producto,
-          variante_label: `Talla ${it.talla.trim()}`,
-          talla: it.talla.trim(),
+          variante_label: tipo === "unica" ? "Talla única" : `Talla ${talla}`,
+          talla,
           cantidad: qty,
           costo_unitario: unitCost,
           subtotal: qty * unitCost
@@ -628,6 +650,9 @@ export default function Compras({
                       const rowQty = typeof row.cantidad === "number" ? row.cantidad : 0;
                       const rowCost = typeof row.costo_unitario === "number" ? row.costo_unitario : 0;
                       const rowSubtotal = rowQty * rowCost;
+                      const currentProduct = getProductBySku(row.sku);
+                      const tipoTalla = tipoTallaDeProducto(currentProduct);
+                      const opcionesTalla = opcionesTallaCompra(currentProduct, tallasRopa, tallasCalzado);
 
                       return (
                         <tr key={idx} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30">
@@ -656,9 +681,34 @@ export default function Compras({
                             </div>
                           </td>
 
-                          {/* Talla capturada al registrar compra */}
+                          {/* La talla se captura según el tipo establecido en el producto. */}
                           <td className="py-2.5 px-3">
-                            <input aria-label={`Talla de la partida ${idx + 1}`} required value={row.talla} onChange={e => setItems(prev => prev.map((it, i) => i === idx ? { ...it, talla: e.target.value, variante_label: e.target.value ? `Talla ${e.target.value}` : "" } : it))} placeholder="M, 27, Única" className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-900 dark:text-white" />
+                            {!currentProduct ? (
+                              <span className="text-zinc-400 text-[11px]">Selecciona producto</span>
+                            ) : tipoTalla === "unica" ? (
+                              <span className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">No aplica</span>
+                            ) : tipoTalla === "personalizada" ? (
+                              <input
+                                aria-label={`Talla personalizada de la partida ${idx + 1}`}
+                                required maxLength={40} value={row.talla}
+                                onChange={e => handleTallaChange(idx, e.target.value)}
+                                placeholder="Ej. 90 cm, talla 8"
+                                className="w-full min-w-32 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-900 dark:text-white"
+                              />
+                            ) : (
+                              <div>
+                                <select
+                                  aria-label={`Talla de la partida ${idx + 1}`}
+                                  required value={row.talla}
+                                  onChange={e => handleTallaChange(idx, e.target.value)}
+                                  className="w-full min-w-32 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-900 dark:text-white"
+                                >
+                                  <option value="">Seleccionar talla</option>
+                                  {opcionesTalla.map(talla => <option key={talla} value={talla}>{talla}</option>)}
+                                </select>
+                                {opcionesTalla.length === 0 && <p className="mt-1 text-[10px] text-amber-600">Agrega tallas en Administrar Catálogos</p>}
+                              </div>
+                            )}
                           </td>
                           {/* Cantidad */}
                           <td className="py-2.5 px-3">
