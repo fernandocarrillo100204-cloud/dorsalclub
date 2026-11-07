@@ -61,7 +61,15 @@ assert.equal(mixed.movimientos.find(row => row.tipo === "Reembolso")?.ingreso, -
 assert.equal(mixed.movimientos.find(row => row.tipo === "Gasto extra")?.gasto?.id, expense.id);
 const { default: MovimientosBalance } = await import("../src/components/finanzas/MovimientosBalance");
 const table = renderToStaticMarkup(React.createElement(MovimientosBalance, { data: mixed, loading: false, busy: false, onEdit: () => {}, onArchive: () => {} }));
-for (const text of ["Detalle de ingresos y egresos", "Descripción", "Comentario", "Primer pedido", "Reembolso", "Entrega personal", "Total de todo el historial"]) assert.ok(table.includes(text));
+for (const text of ["Movimientos", "Descripción", "Comentario", "Primer pedido", "Reembolso", "Entrega personal", "Total acumulado"]) assert.ok(table.includes(text));
+assert.ok(!table.includes("No necesitas capturarlos otra vez"));
+const emptyTable = renderToStaticMarkup(React.createElement(MovimientosBalance, { data: calcularBalanceGeneral([], [], [], []), loading: false, busy: false, onEdit: () => {}, onArchive: () => {} }));
+assert.ok(emptyTable.includes("<thead"));
+assert.ok(emptyTable.includes("Sin movimientos registrados"));
+const { default: ResumenBalance } = await import("../src/components/finanzas/ResumenBalance");
+const summary = renderToStaticMarkup(React.createElement(ResumenBalance, { data: mixed, loading: false }));
+for (const label of ["Ventas de mercancía cobradas", "Envíos y otros cargos cobrados", "Compras de mercancía", "Envíos y comisiones de compra", "Envíos y otros costos de venta", "Gastos operativos extra", "Otros ingresos anteriores"]) assert.ok(summary.includes(label));
+assert.ok(summary.includes("<dl"));
 const many = calcularBalanceGeneral([], [], Array.from({ length: 25 }, (_, i) => ({ ...expense, id: `expense-${i}`, concepto: `Gasto ${i}`, fecha: new Date(2026, 0, i + 1) })), []);
 const paged = renderToStaticMarkup(React.createElement(MovimientosBalance, { data: many, loading: false, busy: false, onEdit: () => {}, onArchive: () => {} }));
 assert.ok(paged.includes("Cargar más"));
