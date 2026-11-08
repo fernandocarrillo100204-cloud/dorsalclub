@@ -1,3 +1,4 @@
+import { MoneyInput } from "../ui/NumericInputs";
 import React, { useCallback, useRef, useState } from "react";
 import { Plus, RefreshCw } from "lucide-react";
 import { firestoreService, getLocalDateString } from "../../lib/firebase";
@@ -48,7 +49,7 @@ function GastoExtraForm({ gasto, onClose, onSaved }: { gasto: Gasto | null; onCl
   return <Dialog open onClose={close} busy={saving} title={gasto ? "Editar gasto extra" : "Registrar gasto extra"} description="Solo gastos que no hayas registrado en compras o ventas.">
     <form onSubmit={save} className="space-y-4">
       <label className="block text-sm font-semibold">Concepto<input autoFocus required maxLength={200} value={concepto} onChange={event => setConcepto(event.target.value)} className={inputClass} placeholder="Ej. Publicidad" disabled={saving} /></label>
-      <div className="grid gap-4 sm:grid-cols-2"><label className="block text-sm font-semibold">Monto (MXN)<input required type="number" min="0.01" step="0.01" value={monto} onChange={event => setMonto(event.target.value)} className={inputClass} disabled={saving} /></label><label className="block text-sm font-semibold">Fecha<input required type="date" value={fecha} onChange={event => setFecha(event.target.value)} className={inputClass} disabled={saving} /></label></div>
+      <div className="grid gap-4 sm:grid-cols-2"><label className="block text-sm font-semibold">Monto (MXN)<MoneyInput required min="0.01"  value={monto} onChange={event => setMonto(event.target.value)} className={inputClass} disabled={saving} /></label><label className="block text-sm font-semibold">Fecha<input required type="date" value={fecha} onChange={event => setFecha(event.target.value)} className={inputClass} disabled={saving} /></label></div>
       <label className="block text-sm font-semibold">Comentario <span className="font-normal text-zinc-500">(opcional)</span><textarea value={notas} onChange={event => setNotas(event.target.value)} rows={3} className={inputClass} disabled={saving} /></label>
       {error && <p role="alert" className="text-sm text-rose-600">{error}</p>}
       <div className="flex justify-end gap-2"><button type="button" onClick={close} disabled={saving} className="btn-secondary">Cancelar</button><button type="submit" disabled={saving} className="btn-primary">{saving ? "Guardando…" : "Guardar gasto"}</button></div>

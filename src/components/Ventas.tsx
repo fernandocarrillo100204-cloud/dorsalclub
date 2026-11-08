@@ -1,3 +1,4 @@
+import { MoneyInput, IntegerInput } from "./ui/NumericInputs";
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -609,7 +610,7 @@ export default function Ventas({
           <div><span className="block text-[10px] uppercase text-zinc-400">Precio</span><strong className="text-zinc-900 dark:text-white">{canal === "mayoreo" ? "Por definir" : `Costo + ${channelConfig.porcentaje}%`}</strong></div>
           {canal === "mayoreo" && (
             <label className="col-span-2 sm:col-span-4 text-xs font-semibold text-zinc-700 dark:text-zinc-300">Porcentaje especial para esta venta
-              <div className="relative mt-1 max-w-xs"><input type="number" min="0" step="1" disabled={loading} value={customMarkup} onChange={(event) => setCustomMarkup(event.target.value)} placeholder="Ej. 80" className="w-full px-3 py-2 pr-8 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white" /><span className="absolute right-3 top-2 text-zinc-400">%</span></div>
+              <div className="relative mt-1 max-w-xs"><IntegerInput min="0"  disabled={loading} value={customMarkup} onChange={(event) => setCustomMarkup(event.target.value)} placeholder="Ej. 80" className="w-full px-3 py-2 pr-8 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white" /><span className="absolute right-3 top-2 text-zinc-400">%</span></div>
             </label>
           )}
         </div>
@@ -728,10 +729,9 @@ export default function Ventas({
                         <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
                           Cantidad
                         </label>
-                        <input
-                          type="number"
+                        <IntegerInput
                           min="1"
-                          step="1"
+                          
                           value={item.cantidad}
                           onChange={(event) => updateItem(item.id, {
                             cantidad: event.target.value === "" ? "" : Math.max(1, parseInt(event.target.value, 10) || 1)
@@ -746,10 +746,9 @@ export default function Ventas({
                         </label>
                         <div className="relative">
                           <DollarSign className="w-4 h-4 text-zinc-400 absolute left-3 top-2.5" />
-                          <input
-                            type="number"
+                          <MoneyInput
                             min="0"
-                            step="0.01"
+                            
                             value={item.costoUnitario}
                             readOnly={affectsStock}
                             onChange={(event) => updateItem(item.id, { costoUnitario: event.target.value })}
@@ -766,10 +765,9 @@ export default function Ventas({
                         </label>
                         <div className="relative">
                           <DollarSign className="w-4 h-4 text-zinc-400 absolute left-3 top-2.5" />
-                          <input
-                            type="number"
+                          <MoneyInput
                             min="0"
-                            step="0.01"
+                            
                             value={item.precioUnitario}
                             readOnly
                             placeholder="0.00"
@@ -1097,10 +1095,9 @@ export default function Ventas({
                     </label>
                     <div className="relative">
                       <span className="absolute left-3 top-2 text-zinc-400 text-xs">$</span>
-                      <input
-                        type="number"
+                      <MoneyInput
                         min="0"
-                        step="0.01"
+                        
                         placeholder="0.00"
                         value={envioCobradoCliente}
                         onChange={(e) => setEnvioCobradoCliente(e.target.value)}
@@ -1119,10 +1116,9 @@ export default function Ventas({
                     </label>
                     <div className="relative">
                       <span className="absolute left-3 top-2 text-zinc-400 text-xs">$</span>
-                      <input
-                        type="number"
+                      <MoneyInput
                         min="0"
-                        step="0.01"
+                        
                         placeholder="0.00"
                         value={otrosCargosCliente}
                         onChange={(e) => setOtrosCargosCliente(e.target.value)}
@@ -1168,10 +1164,9 @@ export default function Ventas({
                     </label>
                     <div className="relative">
                       <span className="absolute left-3 top-2 text-zinc-400 text-xs">$</span>
-                      <input
-                        type="number"
+                      <MoneyInput
                         min="0"
-                        step="0.01"
+                        
                         placeholder="0.00"
                         value={costoEnvioVenta}
                         onChange={(e) => setCostoEnvioVenta(e.target.value)}
@@ -1190,10 +1185,9 @@ export default function Ventas({
                     </label>
                     <div className="relative">
                       <span className="absolute left-3 top-2 text-zinc-400 text-xs">$</span>
-                      <input
-                        type="number"
+                      <MoneyInput
                         min="0"
-                        step="0.01"
+                        
                         placeholder="0.00"
                         value={otrosCostosVenta}
                         onChange={(e) => setOtrosCostosVenta(e.target.value)}

@@ -1,3 +1,4 @@
+import { MoneyInput } from "../ui/NumericInputs";
 import React, { useEffect, useState } from "react";
 import { AlertCircle } from "lucide-react";
 import { firestoreService } from "../../lib/firebase";
@@ -103,7 +104,7 @@ export default function MovimientoFinancieroForm({ open, onClose, onSaved }: Pro
             <input value={concepto} onChange={event => setConcepto(event.target.value)} maxLength={200} placeholder="Describe claramente el movimiento" className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950" />
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Monto (MXN) *<input type="number" min="0.01" step="0.01" value={monto} onChange={event => setMonto(event.target.value)} className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950" /></label>
+            <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Monto (MXN) *<MoneyInput min="0.01"  value={monto} onChange={event => setMonto(event.target.value)} className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950" /></label>
             <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Fecha *<input type="date" value={fecha} onChange={event => setFecha(event.target.value)} className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950" /></label>
           </div>
           <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Método de pago (opcional)

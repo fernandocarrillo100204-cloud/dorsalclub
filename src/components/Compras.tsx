@@ -1,3 +1,4 @@
+import { MoneyInput, IntegerInput } from "./ui/NumericInputs";
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -712,10 +713,9 @@ export default function Compras({
                           </td>
                           {/* Cantidad */}
                           <td className="py-2.5 px-3">
-                            <input
-                              type="number"
+                            <IntegerInput
                               min="1"
-                              step="1"
+                              
                               required
                               value={row.cantidad}
                               onChange={(e) => handleItemChange(idx, "cantidad", e.target.value)}
@@ -728,10 +728,9 @@ export default function Compras({
                           <td className="py-2.5 px-3">
                             <div className="relative flex items-center">
                               <span className="absolute inset-y-0 left-0 pl-2 flex items-center text-zinc-400 text-xs">$</span>
-                              <input
-                                type="number"
+                              <MoneyInput
                                 min="0"
-                                step="0.01"
+                                
                                 required
                                 value={row.costo_unitario}
                                 onChange={(e) => handleItemChange(idx, "costo_unitario", e.target.value)}
@@ -792,10 +791,9 @@ export default function Compras({
                   </label>
                   <div className="relative flex items-center">
                     <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-zinc-400">$</span>
-                    <input
-                      type="number"
+                    <MoneyInput
                       min="0"
-                      step="0.01"
+                      
                       placeholder="0.00"
                       value={costoEnvio}
                       onChange={(e) => setCostoEnvio(e.target.value === "" ? "" : parseFloat(e.target.value) || 0)}
@@ -810,10 +808,9 @@ export default function Compras({
                   </label>
                   <div className="relative flex items-center">
                     <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-zinc-400">$</span>
-                    <input
-                      type="number"
+                    <MoneyInput
                       min="0"
-                      step="0.01"
+                      
                       placeholder="0.00"
                       value={comisiones}
                       onChange={(e) => setComisiones(e.target.value === "" ? "" : parseFloat(e.target.value) || 0)}
@@ -828,10 +825,9 @@ export default function Compras({
                   </label>
                   <div className="relative flex items-center">
                     <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-zinc-400">-$</span>
-                    <input
-                      type="number"
+                    <MoneyInput
                       min="0"
-                      step="0.01"
+                      
                       placeholder="0.00"
                       value={descuentos}
                       onChange={(e) => setDescuentos(e.target.value === "" ? "" : parseFloat(e.target.value) || 0)}
