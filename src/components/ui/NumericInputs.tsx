@@ -3,7 +3,8 @@ import { limpiarEntero, limpiarImporte, mostrarImporte } from "../../lib/inputsN
 
 type NumericValue = string | number;
 type CommonProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, "type" | "inputMode" | "value" | "defaultValue"> & {
-  value: NumericValue;
+  value?: NumericValue;
+  defaultValue?: NumericValue;
 };
 
 /**
@@ -50,7 +51,7 @@ export function MoneyInput({ value, onChange, onFocus, onBlur, ...props }: Commo
 }
 
 /** Cantidades y porcentajes enteros, sin incremento con scroll. */
-export function IntegerInput({ value, onChange, ...props }: CommonProps) {
+export function IntegerInput({ value, defaultValue, onChange, ...props }: CommonProps) {
   return (
     <input
       {...props}
@@ -59,6 +60,7 @@ export function IntegerInput({ value, onChange, ...props }: CommonProps) {
       autoComplete="off"
       spellCheck={false}
       value={value}
+      defaultValue={defaultValue}
       onChange={event => {
         event.currentTarget.value = limpiarEntero(event.currentTarget.value);
         onChange?.(event);
