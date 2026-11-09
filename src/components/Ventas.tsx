@@ -5,6 +5,7 @@ import { MoneyInput, IntegerInput } from "./ui/NumericInputs";
  */
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { precioPartidaTrasCambioPorcentaje } from "../lib/precioVentaEditable";
 import { firestoreService } from "../lib/firebase";
 import { Producto, Cliente, TipoCliente, VentaPartidaInput, UbicacionEntregaCatalogo, RepartidorCatalogo, CanalVentaId, ConfiguracionVentas, OpcionListaConfigurable, Drop, normalizeOptionalMoney } from "../types";
 import { calcularInventarioDrop, validarDemandaDrops, type InventarioDropFila } from "../lib/inventarioDrops";
@@ -43,6 +44,7 @@ interface VentaItemDraft {
   dropId: string;
   cantidad: number | string;
   precioUnitario: number | string;
+  precioManual: boolean;
   costoUnitario: number | string;
 }
 
@@ -55,6 +57,7 @@ const createVentaItem = (sku = "", dropId = "", precioUnitario: number | string 
   dropId,
   cantidad: 1,
   precioUnitario,
+  precioManual: false,
   costoUnitario
 });
 
@@ -149,6 +152,7 @@ export default function Ventas({
           talla: preselectedSku ? (selectedProduct?.tipo_talla === "unica" ? "ÚNICA" : "") : item.talla,
           dropId: preselectedDropId || item.dropId,
           precioUnitario: preselectedSku ? calculateChannelPrice(selectedProduct) : item.precioUnitario,
+          precioManual: preselectedSku ? false : item.precioManual,
           costoUnitario: preselectedSku ? (selectedProduct?.precio_costo ?? "") : item.costoUnitario
         };
       }));
@@ -232,7 +236,11 @@ export default function Ventas({
     pricingKeyRef.current = pricingKey;
     setItems(current => current.map(item => {
       const product = productos.find(candidate => candidate.sku === item.sku);
-      return item.sku ? { ...item, precioUnitario: calculateChannelPrice(product), costoUnitario: product?.precio_costo ?? item.costoUnitario } : item;
+      return item.sku ? {
+        ...item,
+        precioUnitario: precioPartidaTrasCambioPorcentaje(item, calculateChannelPrice(product)),
+        costoUnitario: product?.precio_costo ?? item.costoUnitario
+      } : item;
     }));
   }, [canal, channelConfig, customMarkup, productos]);
 
@@ -286,8 +294,18 @@ export default function Ventas({
       sku: nextSku,
       talla: selectedProduct?.tipo_talla === "unica" ? "ÚNICA" : "",
       precioUnitario: calculateChannelPrice(selectedProduct),
+      precioManual: false,
       costoUnitario: selectedProduct?.precio_costo ?? ""
     });
+  };
+
+  const handlePrecioUnitarioChange = (id: string, valor: string) => {
+    // El importe digitado es el precio real de esta partida, no una modificación al canal.
+    updateItem(id, { precioUnitario: valor, precioManual: true });
+  };
+
+  const restaurarPrecioSugerido = (id: string, product: Producto) => {
+    updateItem(id, { precioUnitario: calculateChannelPrice(product), precioManual: false });
   };
 
   const addItem = () => {
@@ -556,7 +574,7 @@ export default function Ventas({
       <section aria-labelledby="canal-venta-label" className="space-y-2">
         <div>
           <h2 id="canal-venta-label" className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">01 · Canal de venta</h2>
-          <p className="text-[11px] text-zinc-400 mt-0.5">El canal determina mínimo, precio, anticipo y afectación de inventario.</p>
+          <p className="text-[11px] text-zinc-400 mt-0.5">El canal determina mínimo, precio sugerido, anticipo y afectación de inventario.</p>
         </div>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
           {([
@@ -607,7 +625,7 @@ export default function Ventas({
           <div><span className="block text-[10px] uppercase text-zinc-400">Modalidad</span><strong className="text-zinc-900 dark:text-white">{affectsStock ? "Stock" : "Bajo pedido"}</strong></div>
           <div><span className="block text-[10px] uppercase text-zinc-400">Mínimo</span><strong className="text-zinc-900 dark:text-white">{channelConfig.minimo_piezas} piezas</strong></div>
           <div><span className="block text-[10px] uppercase text-zinc-400">Anticipo</span><strong className="text-zinc-900 dark:text-white">{requiredDepositPercent}%</strong></div>
-          <div><span className="block text-[10px] uppercase text-zinc-400">Precio</span><strong className="text-zinc-900 dark:text-white">{canal === "mayoreo" ? "Por definir" : `Costo + ${channelConfig.porcentaje}%`}</strong></div>
+          <div><span className="block text-[10px] uppercase text-zinc-400">Precio sugerido</span><strong className="text-zinc-900 dark:text-white">{canal === "mayoreo" ? "Según % especial" : `Costo + ${channelConfig.porcentaje}%`}</strong></div>
           {canal === "mayoreo" && (
             <label className="col-span-2 sm:col-span-4 text-xs font-semibold text-zinc-700 dark:text-zinc-300">Porcentaje especial para esta venta
               <div className="relative mt-1 max-w-xs"><IntegerInput min="0"  disabled={loading} value={customMarkup} onChange={(event) => setCustomMarkup(event.target.value)} placeholder="Ej. 80" className="w-full px-3 py-2 pr-8 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white" /><span className="absolute right-3 top-2 text-zinc-400">%</span></div>
@@ -761,19 +779,38 @@ export default function Ventas({
 
                       <div>
                         <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                          Precio unitario
+                          Precio unitario de venta
                         </label>
                         <div className="relative">
                           <DollarSign className="w-4 h-4 text-zinc-400 absolute left-3 top-2.5" />
                           <MoneyInput
                             min="0"
-                            
+                            required
+                            disabled={loading || !item.sku}
                             value={item.precioUnitario}
-                            readOnly
+                            onChange={event => handlePrecioUnitarioChange(item.id, event.target.value)}
                             placeholder="0.00"
-                            className="w-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl pl-9 pr-3 py-2.5 text-xs font-bold text-zinc-900 dark:text-white font-mono"
+                            aria-label={`Precio unitario de venta de partida ${index + 1}`}
+                            className={`w-full border rounded-xl pl-9 pr-3 py-2.5 text-xs font-bold text-zinc-900 dark:text-white font-mono bg-white dark:bg-zinc-800 disabled:opacity-50 ${item.precioManual ? "border-emerald-500" : "border-zinc-200 dark:border-zinc-700"}`}
                           />
                         </div>
+                        {item.sku && (
+                          <div className="mt-1 flex items-center flex-wrap gap-x-2 gap-y-1 text-[10px]">
+                            <span className={item.precioManual ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-zinc-500"}>
+                              {item.precioManual ? "Precio personalizado" : "Precio sugerido por porcentaje"}
+                            </span>
+                            {item.precioManual && selectedProduct && hasValidMarkup && (
+                              <button
+                                type="button"
+                                disabled={loading}
+                                onClick={() => restaurarPrecioSugerido(item.id, selectedProduct)}
+                                className="font-semibold text-zinc-600 dark:text-zinc-300 underline underline-offset-2 hover:text-zinc-900 dark:hover:text-white disabled:opacity-50"
+                              >
+                                Restablecer sugerido (${Number(calculateChannelPrice(selectedProduct)).toFixed(2)})
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -796,7 +833,7 @@ export default function Ventas({
                           </span>
                         )}
                         {selectedProduct && Number.isFinite(Number(selectedProduct.precio_costo)) && (
-                          <span className="text-zinc-400">Costo: ${Number(selectedProduct.precio_costo).toFixed(2)} · +{hasValidMarkup ? appliedMarkup : 0}%</span>
+                          <span className="text-zinc-400">Costo: ${Number(selectedProduct.precio_costo).toFixed(2)} · Porcentaje base: +{hasValidMarkup ? appliedMarkup : 0}%</span>
                         )}
                       </div>
                       <div className="font-mono text-sm font-bold text-zinc-900 dark:text-white">
