@@ -97,14 +97,10 @@ export default function Ventas({
       talla: initialProduct?.tipo_talla === "unica" ? "ÚNICA" : ""
     }];
   });
-  // Opciones y ajustes de venta (envío y costos adicionales)
+  // La entrega tiene dos importes independientes: costo real y parte cubierta por el cliente.
   const [isAjustesOpen, setIsAjustesOpen] = useState(false);
-  const [envioCobradoCliente, setEnvioCobradoCliente] = useState<string>("");
-  const [otrosCargosCliente, setOtrosCargosCliente] = useState<string>("");
-  const [conceptoOtrosCargos, setConceptoOtrosCargos] = useState<string>("");
   const [costoEnvioVenta, setCostoEnvioVenta] = useState<string>("");
-  const [otrosCostosVenta, setOtrosCostosVenta] = useState<string>("");
-  const [conceptoOtrosCostos, setConceptoOtrosCostos] = useState<string>("");
+  const [envioCobradoCliente, setEnvioCobradoCliente] = useState<string>("");
   const [comentariosVenta, setComentariosVenta] = useState<string>("");
   const [ubicacionesEntrega, setUbicacionesEntrega] = useState<UbicacionEntregaCatalogo[]>([]);
   const [repartidores, setRepartidores] = useState<RepartidorCatalogo[]>([]);
@@ -134,7 +130,7 @@ export default function Ventas({
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
-  const markSaved = useUnsavedChanges(!formSuccess && Boolean(items.some(item => item.sku || item.dropId || item.precioUnitario !== "" || item.cantidad !== 1) || selectedClienteId || comentariosVenta || envioCobradoCliente || otrosCargosCliente || costoEnvioVenta || otrosCostosVenta || conceptoOtrosCargos || conceptoOtrosCostos || customMarkup || ubicacionEntregaId || repartidorId || metodoPagoInicial), loading);
+  const markSaved = useUnsavedChanges(!formSuccess && Boolean(items.some(item => item.sku || item.dropId || item.precioUnitario !== "" || item.cantidad !== 1) || selectedClienteId || comentariosVenta || envioCobradoCliente || costoEnvioVenta || customMarkup || ubicacionEntregaId || repartidorId || metodoPagoInicial), loading);
 
   // Sync initial props
   useEffect(() => {
@@ -345,15 +341,12 @@ export default function Ventas({
     }
   };
 
-  const envioCobradoNum = parseNumField(envioCobradoCliente);
-  const otrosCargosNum = parseNumField(otrosCargosCliente);
   const costoEnvioNum = parseNumField(costoEnvioVenta);
-  const otrosCostosNum = parseNumField(otrosCostosVenta);
+  const envioCobradoNum = parseNumField(envioCobradoCliente);
 
-  const totalCobrado = totalMercancia + envioCobradoNum + otrosCargosNum;
+  const totalCobrado = totalMercancia + envioCobradoNum;
   const totalRecibido = Math.round((totalCobrado * requiredDepositPercent / 100 + Number.EPSILON) * 100) / 100;
   const saldoPendiente = Math.max(0, Math.round((totalCobrado - totalRecibido + Number.EPSILON) * 100) / 100);
-  const totalCostosVenta = costoEnvioNum + otrosCostosNum;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -448,37 +441,21 @@ export default function Ventas({
       } catch (error: any) { setFormError(error.message); return; }
     }
 
-    // Validar importes y costos opcionales con normalizeOptionalMoney
-    let envioCobradoValidated = 0;
-    let otrosCargosValidated = 0;
+    // Validar de manera independiente costo real de entrega e importe cubierto por cliente.
     let costoEnvioValidated = 0;
-    let otrosCostosValidated = 0;
+    let envioCobradoValidated = 0;
 
     try {
       envioCobradoValidated = normalizeOptionalMoney(envioCobradoCliente);
     } catch {
-      setFormError("El envío cobrado al cliente debe ser un número válido mayor o igual a cero.");
-      return;
-    }
-
-    try {
-      otrosCargosValidated = normalizeOptionalMoney(otrosCargosCliente);
-    } catch {
-      setFormError("Los otros cargos cobrados al cliente deben ser un número válido mayor o igual a cero.");
+      setFormError("El costo cubierto por el cliente debe ser un importe válido mayor o igual a cero.");
       return;
     }
 
     try {
       costoEnvioValidated = normalizeOptionalMoney(costoEnvioVenta);
     } catch {
-      setFormError("El costo real del envío debe ser un número válido mayor o igual a cero.");
-      return;
-    }
-
-    try {
-      otrosCostosValidated = normalizeOptionalMoney(otrosCostosVenta);
-    } catch {
-      setFormError("Los otros costos asociados deben ser un número válido mayor o igual a cero.");
+      setFormError("El costo de la entrega debe ser un importe válido mayor o igual a cero.");
       return;
     }
 
@@ -492,13 +469,8 @@ export default function Ventas({
 
       const fullReference = `Cliente: ${clienteNombre}`;
 
-      const envioCobradoFinal = envioCobradoValidated > 0 ? envioCobradoValidated : undefined;
-      const otrosCargosFinal = otrosCargosValidated > 0 ? otrosCargosValidated : undefined;
-      const conceptoOtrosCargosFinal = otrosCargosFinal && conceptoOtrosCargos.trim() ? conceptoOtrosCargos.trim() : undefined;
-
       const costoEnvioFinal = costoEnvioValidated > 0 ? costoEnvioValidated : undefined;
-      const otrosCostosFinal = otrosCostosValidated > 0 ? otrosCostosValidated : undefined;
-      const conceptoOtrosCostosFinal = otrosCostosFinal && conceptoOtrosCostos.trim() ? conceptoOtrosCostos.trim() : undefined;
+      const envioCobradoFinal = envioCobradoValidated > 0 ? envioCobradoValidated : undefined;
 
       const cleanComentarios = comentariosVenta.trim();
       const comentariosVentaFinal = cleanComentarios ? cleanComentarios.slice(0, 500) : undefined;
@@ -516,12 +488,8 @@ export default function Ventas({
         cliente_id: clienteId,
         cliente_nombre: clienteNombre,
         cliente_tipo: clienteTipo,
-        envio_cobrado_cliente: envioCobradoFinal,
-        otros_cargos_cliente: otrosCargosFinal,
-        concepto_otros_cargos: conceptoOtrosCargosFinal,
         costo_envio_venta: costoEnvioFinal,
-        otros_costos_venta: otrosCostosFinal,
-        concepto_otros_costos: conceptoOtrosCostosFinal,
+        envio_cobrado_cliente: envioCobradoFinal,
         comentarios_venta: comentariosVentaFinal,
         ubicacion_entrega_id: selectedDeliveryLocation?.id,
         ubicacion_entrega_nombre: selectedDeliveryLocation?.nombre,
@@ -544,12 +512,8 @@ export default function Ventas({
 
       setItems([createVentaItem()]);
       setSelectedClienteId("");
-      setEnvioCobradoCliente("");
-      setOtrosCargosCliente("");
-      setConceptoOtrosCargos("");
       setCostoEnvioVenta("");
-      setOtrosCostosVenta("");
-      setConceptoOtrosCostos("");
+      setEnvioCobradoCliente("");
       setComentariosVenta("");
       setCustomMarkup("");
       setUbicacionEntregaId("");
@@ -1085,13 +1049,14 @@ export default function Ventas({
           </div>
         </div>
 
-        {/* Sección colapsable: Envío y ajustes opcionales */}
+        {/* Entrega: únicamente costo real y parte cubierta por el cliente. */}
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-xs">
           <button
             type="button"
             onClick={() => setIsAjustesOpen(!isAjustesOpen)}
             className="w-full p-4 flex items-center justify-between text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors"
             id="toggle-ajustes-envio-btn"
+            aria-expanded={isAjustesOpen}
           >
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-700 dark:text-zinc-300">
@@ -1099,17 +1064,15 @@ export default function Ventas({
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-zinc-900 dark:text-white">
-                    Envío y ajustes opcionales
-                  </span>
-                  {(envioCobradoNum > 0 || otrosCargosNum > 0 || costoEnvioNum > 0 || otrosCostosNum > 0) && (
+                  <span className="text-sm font-bold text-zinc-900 dark:text-white">Entrega (opcional)</span>
+                  {(costoEnvioNum > 0 || envioCobradoNum > 0) && (
                     <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800">
-                      Ajustes activos
+                      Importe registrado
                     </span>
                   )}
                 </div>
                 <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                  Registra cobros de envío, cargos adicionales o costos asumidos por el negocio.
+                  Captura el costo de entrega y cuánto cubre el cliente.
                 </p>
               </div>
             </div>
@@ -1117,141 +1080,42 @@ export default function Ventas({
               {isAjustesOpen ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
             </div>
           </button>
-
           {isAjustesOpen && (
-            <div className="p-4 pt-2 border-t border-zinc-100 dark:border-zinc-800 space-y-5">
-              {/* Subsección: Importes cobrados al cliente */}
-              <div className="space-y-3">
-                <h4 className="text-xs font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider flex items-center gap-1.5">
-                  <span>Importes cobrados al cliente</span>
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
-                      Envío cobrado al cliente
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-2 text-zinc-400 text-xs">$</span>
-                      <MoneyInput
-                        min="0"
-                        
-                        placeholder="0.00"
-                        value={envioCobradoCliente}
-                        onChange={(e) => setEnvioCobradoCliente(e.target.value)}
-                        className="w-full pl-7 pr-3 py-2 bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs text-zinc-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
-                        id="envio-cobrado-cliente-input"
-                      />
-                    </div>
-                    <p className="text-[11px] text-zinc-400 mt-1">
-                      Importe adicional incluido en el cobro al cliente.
-                    </p>
+            <div className="p-4 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="costo-envio-venta-input" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                    Costo de la entrega
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2 text-zinc-400 text-xs">$</span>
+                    <MoneyInput
+                      min="0"
+                      placeholder="0.00"
+                      value={costoEnvioVenta}
+                      onChange={(e) => setCostoEnvioVenta(e.target.value)}
+                      className="w-full pl-7 pr-3 py-2 bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs text-zinc-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
+                      id="costo-envio-venta-input"
+                    />
                   </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
-                      Otros cargos cobrados al cliente
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-2 text-zinc-400 text-xs">$</span>
-                      <MoneyInput
-                        min="0"
-                        
-                        placeholder="0.00"
-                        value={otrosCargosCliente}
-                        onChange={(e) => setOtrosCargosCliente(e.target.value)}
-                        className="w-full pl-7 pr-3 py-2 bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs text-zinc-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
-                        id="otros-cargos-cliente-input"
-                      />
-                    </div>
-                    <p className="text-[11px] text-zinc-400 mt-1">
-                      Cargos adicionales como empaque especial o personalización.
-                    </p>
-                  </div>
-
-                  {otrosCargosNum > 0 && (
-                    <div className="sm:col-span-2">
-                      <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
-                        Concepto de otros cargos
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Ej. Empaque para regalo, personalización de prenda"
-                        value={conceptoOtrosCargos}
-                        onChange={(e) => setConceptoOtrosCargos(e.target.value)}
-                        className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
-                        id="concepto-otros-cargos-input"
-                      />
-                    </div>
-                  )}
+                  <p className="text-[11px] text-zinc-400 mt-1">Lo que cuesta realizar la entrega al negocio.</p>
                 </div>
-              </div>
-
-              {/* Divisor */}
-              <div className="border-t border-zinc-200 dark:border-zinc-800/60" />
-
-              {/* Subsección: Costos pagados por el negocio */}
-              <div className="space-y-3">
-                <h4 className="text-xs font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider flex items-center gap-1.5">
-                  <span>Costos pagados por el negocio</span>
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
-                      Costo real del envío
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-2 text-zinc-400 text-xs">$</span>
-                      <MoneyInput
-                        min="0"
-                        
-                        placeholder="0.00"
-                        value={costoEnvioVenta}
-                        onChange={(e) => setCostoEnvioVenta(e.target.value)}
-                        className="w-full pl-7 pr-3 py-2 bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs text-zinc-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
-                        id="costo-envio-venta-input"
-                      />
-                    </div>
-                    <p className="text-[11px] text-zinc-400 mt-1">
-                      Importe pagado por el negocio a la paquetería.
-                    </p>
+                <div>
+                  <label htmlFor="envio-cobrado-cliente-input" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                    Costo cubierto por el cliente
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2 text-zinc-400 text-xs">$</span>
+                    <MoneyInput
+                      min="0"
+                      placeholder="0.00"
+                      value={envioCobradoCliente}
+                      onChange={(e) => setEnvioCobradoCliente(e.target.value)}
+                      className="w-full pl-7 pr-3 py-2 bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs text-zinc-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
+                      id="envio-cobrado-cliente-input"
+                    />
                   </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
-                      Otros costos asociados a la venta
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-2 text-zinc-400 text-xs">$</span>
-                      <MoneyInput
-                        min="0"
-                        
-                        placeholder="0.00"
-                        value={otrosCostosVenta}
-                        onChange={(e) => setOtrosCostosVenta(e.target.value)}
-                        className="w-full pl-7 pr-3 py-2 bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs text-zinc-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
-                        id="otros-costos-venta-input"
-                      />
-                    </div>
-                    <p className="text-[11px] text-zinc-400 mt-1">
-                      Empaque, comisión, seguro u otro costo directo.
-                    </p>
-                  </div>
-
-                  {otrosCostosNum > 0 && (
-                    <div className="sm:col-span-2">
-                      <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
-                        Concepto de otros costos
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Ej. Caja reforzada, comisión de pasarela"
-                        value={conceptoOtrosCostos}
-                        onChange={(e) => setConceptoOtrosCostos(e.target.value)}
-                        className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white"
-                        id="concepto-otros-costos-input"
-                      />
-                    </div>
-                  )}
+                  <p className="text-[11px] text-zinc-400 mt-1">Se suma al cobro del cliente, sin modificar el costo real.</p>
                 </div>
               </div>
             </div>
@@ -1267,14 +1131,8 @@ export default function Ventas({
             </div>
             {envioCobradoNum > 0 && (
               <div className="flex justify-between items-center text-zinc-600 dark:text-zinc-400">
-                <span>+ Envío cobrado al cliente</span>
+                <span>+ Costo cubierto por el cliente</span>
                 <span className="font-mono font-medium">+${envioCobradoNum.toFixed(2)} MXN</span>
-              </div>
-            )}
-            {otrosCargosNum > 0 && (
-              <div className="flex justify-between items-center text-zinc-600 dark:text-zinc-400">
-                <span>+ Otros cargos {conceptoOtrosCargos.trim() ? `(${conceptoOtrosCargos.trim()})` : ""}</span>
-                <span className="font-mono font-medium">+${otrosCargosNum.toFixed(2)} MXN</span>
               </div>
             )}
             <div className="pt-2 border-t border-zinc-200 dark:border-zinc-700 flex justify-between items-center text-sm font-bold text-zinc-900 dark:text-white">
@@ -1294,30 +1152,14 @@ export default function Ventas({
               </>
             )}
           </div>
-
-          {(costoEnvioNum > 0 || otrosCostosNum > 0) && (
+          {costoEnvioNum > 0 && (
             <div className="pt-3 border-t border-dashed border-zinc-200 dark:border-zinc-700 space-y-1.5 text-xs">
-              <div className="font-semibold text-zinc-700 dark:text-zinc-300 text-[11px] uppercase tracking-wider">
-                Costos asumidos por el negocio
-              </div>
-              {costoEnvioNum > 0 && (
-                <div className="flex justify-between items-center text-zinc-500 dark:text-zinc-400">
-                  <span>- Costo real del envío</span>
-                  <span className="font-mono">-${costoEnvioNum.toFixed(2)} MXN</span>
-                </div>
-              )}
-              {otrosCostosNum > 0 && (
-                <div className="flex justify-between items-center text-zinc-500 dark:text-zinc-400">
-                  <span>- Otros costos {conceptoOtrosCostos.trim() ? `(${conceptoOtrosCostos.trim()})` : ""}</span>
-                  <span className="font-mono">-${otrosCostosNum.toFixed(2)} MXN</span>
-                </div>
-              )}
-              <div className="pt-1.5 border-t border-zinc-200/80 dark:border-zinc-700/80 flex justify-between items-center font-semibold text-zinc-700 dark:text-zinc-300">
-                <span>= Total de costos asociados</span>
-                <span className="font-mono text-zinc-900 dark:text-white">${totalCostosVenta.toFixed(2)} MXN</span>
+              <div className="flex justify-between items-center text-zinc-500 dark:text-zinc-400">
+                <span>- Costo de la entrega (negocio)</span>
+                <span className="font-mono">-${costoEnvioNum.toFixed(2)} MXN</span>
               </div>
               <p className="text-[10px] text-zinc-400 italic">
-                * Estos costos son asumidos por el negocio y no afectan el total cobrado al cliente.
+                El costo real de la entrega es un gasto; no aumenta el importe a cobrar al cliente.
               </p>
             </div>
           )}
