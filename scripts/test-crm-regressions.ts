@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { calcularInventarioDrop } from "../src/lib/inventarioDrops";
 import { construirPedidos, fechaLocal, fechaRegistro, leerMovimiento, leerVenta } from "../src/lib/lecturasVentas";
+import { pedidosPendientesPago } from "../src/lib/pedidosPendientes";
 import { mensajeError } from "../src/lib/errores";
 import type { Movimiento, VentaRegistroInput } from "../src/types";
 
@@ -80,13 +81,19 @@ assert.equal(memory.has("inventario_mvp_almacenes"), false);
 const preorder = await service.registerVentaTransaction({ ...input, afecta_stock: false, canal_venta: "bajo_pedido", anticipo_porcentaje: 50 });
 orders = await service.getPedidosVenta();
 assert.equal(orders.find(item => item.venta_id === preorder.id)?.saldo, 500);
+assert.equal(pedidosPendientesPago(orders).some(item => item.venta_id === preorder.id), true, "El pedido con anticipo permanece visible.");
 assert.equal(orders[0].fecha instanceof Date, true);
 await service.registrarPagoPedido(preorder.id, 200, "Efectivo");
 orders = await service.getPedidosVenta();
 assert.equal(orders.find(item => item.venta_id === preorder.id)?.saldo, 300);
+assert.equal(pedidosPendientesPago(orders).some(item => item.venta_id === preorder.id), true, "Los pagos parciales conservan el pedido en cobranza.");
 await assert.rejects(service.registrarPagoPedido(preorder.id, 400, "Efectivo"), /superar/);
 await assert.rejects(service.actualizarSeguimientoPedido(preorder.id, { marcar_entregado: true }), /saldo/);
 await service.registrarPagoPedido(preorder.id, 300, "Efectivo");
+orders = await service.getPedidosVenta();
+assert.equal(orders.find(item => item.venta_id === preorder.id)?.estado, "pagado", "La venta se conserva aun sin marcar entrega.");
+assert.equal(pedidosPendientesPago(orders).some(item => item.venta_id === preorder.id), false, "El pedido liquidado desaparece de Por pagar sin necesitar marcar entrega.");
+assert.equal((await service.getVentasMaestrasPaginated({ includeArchived: true })).items.some(item => item.id === preorder.id), true, "La venta pagada se conserva en el historial.");
 await service.actualizarSeguimientoPedido(preorder.id, { marcar_entregado: true, comentarios: "" });
 assert.equal((await service.getPedidosVenta()).find(item => item.venta_id === preorder.id)?.estado, "entregado");
 assert.equal((await service.getCuentasPorCobrar()).length, 0);
