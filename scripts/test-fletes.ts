@@ -72,6 +72,7 @@ assert.match(fletesView, /Quién entregó/);
 assert.match(fletesView, /Ubicación de entrega/);
 // Integración completa: registrar una venta con entrega alimenta automáticamente Fletes.
 const integration = await firebaseInMemory();
+integration.put("productos/SKU-ENTREGA", { sku: "SKU-ENTREGA", nombre: "Prenda de prueba", stock_minimo: 0, categoria: "General", unidad: "pieza" });
 const createdSale = await integration.service.registerVentaTransaction({
   items: [{ sku: "SKU-ENTREGA", cantidad: 1, precio_unitario_venta: 200, costo_unitario_venta: 100 }],
   referencia: "Venta con entrega", cliente_nombre: "Cliente prueba",
