@@ -374,6 +374,18 @@ export default function Ventas({
       setFormError("Selecciona un cliente para registrar el anticipo y saldo pendiente de esta venta bajo pedido.");
       return;
     }
+    if (deliveryCatalogLoading || deliveryCatalogError) {
+      setFormError("Es necesario cargar las ubicaciones y responsables de entrega antes de registrar la venta.");
+      return;
+    }
+    if (!ubicacionesEntrega.some(item => item.id === ubicacionEntregaId)) {
+      setFormError("Selecciona una ubicación de entrega válida. Puedes configurarla desde el botón Configurar.");
+      return;
+    }
+    if (!repartidores.some(item => item.id === repartidorId)) {
+      setFormError("Selecciona quién entrega la mercancía. Puedes configurarlo desde el botón Configurar.");
+      return;
+    }
 
     const normalizedItems: VentaPartidaInput[] = [];
     if (affectsStock && (dropsLoading || dropsError)) {
@@ -474,8 +486,8 @@ export default function Ventas({
 
       const cleanComentarios = comentariosVenta.trim();
       const comentariosVentaFinal = cleanComentarios ? cleanComentarios.slice(0, 500) : undefined;
-      const selectedDeliveryLocation = ubicacionesEntrega.find(item => item.id === ubicacionEntregaId);
-      const selectedDeliveryPerson = repartidores.find(item => item.id === repartidorId);
+      const selectedDeliveryLocation = ubicacionesEntrega.find(item => item.id === ubicacionEntregaId)!;
+      const selectedDeliveryPerson = repartidores.find(item => item.id === repartidorId)!;
       if (totalRecibido > 0 && !metodoPagoInicial) {
         setFormError("Selecciona el método de pago del importe recibido.");
         setLoading(false);
@@ -491,10 +503,10 @@ export default function Ventas({
         costo_envio_venta: costoEnvioFinal,
         envio_cobrado_cliente: envioCobradoFinal,
         comentarios_venta: comentariosVentaFinal,
-        ubicacion_entrega_id: selectedDeliveryLocation?.id,
-        ubicacion_entrega_nombre: selectedDeliveryLocation?.nombre,
-        repartidor_id: selectedDeliveryPerson?.id,
-        repartidor_nombre: selectedDeliveryPerson?.nombre,
+        ubicacion_entrega_id: selectedDeliveryLocation.id,
+        ubicacion_entrega_nombre: selectedDeliveryLocation.nombre,
+        repartidor_id: selectedDeliveryPerson.id,
+        repartidor_nombre: selectedDeliveryPerson.nombre,
         canal_venta: canal,
         canal_venta_nombre: channelConfig.nombre,
         porcentaje_precio: appliedMarkup,
@@ -967,7 +979,7 @@ export default function Ventas({
               )}
             </div>
 
-            {/* Datos opcionales de entrega */}
+            {/* Datos de entrega obligatorios para toda venta nueva */}
             <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="sm:col-span-2">
                 <label htmlFor="metodo-pago-venta" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
@@ -986,34 +998,44 @@ export default function Ventas({
               </div>
               <div>
                 <label htmlFor="ubicacion-entrega-select" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                  Ubicación de entrega (Opcional)
+                  Ubicación de entrega *
                 </label>
                 <select
                   id="ubicacion-entrega-select"
+                  required
                   value={ubicacionEntregaId}
                   onChange={(event) => setUbicacionEntregaId(event.target.value)}
                   disabled={deliveryCatalogLoading || Boolean(deliveryCatalogError)}
                   className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white disabled:opacity-60"
                 >
-                  <option value="">Sin especificar</option>
+                  <option value="">Seleccionar ubicación de entrega</option>
                   {ubicacionesEntrega.map(item => <option key={item.id} value={item.id}>{item.nombre}</option>)}
                 </select>
               </div>
               <div>
                 <label htmlFor="repartidor-select" className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                  Quién entrega (Opcional)
+                  Quién entrega *
                 </label>
                 <select
                   id="repartidor-select"
+                  required
                   value={repartidorId}
                   onChange={(event) => setRepartidorId(event.target.value)}
                   disabled={deliveryCatalogLoading || Boolean(deliveryCatalogError)}
                   className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white disabled:opacity-60"
                 >
-                  <option value="">Sin especificar</option>
+                  <option value="">Seleccionar responsable de entrega</option>
                   {repartidores.map(item => <option key={item.id} value={item.id}>{item.nombre}</option>)}
                 </select>
               </div>
+              {!deliveryCatalogLoading && !deliveryCatalogError && (!ubicacionesEntrega.length || !repartidores.length) && (
+                <p className="sm:col-span-2 text-[11px] text-amber-700 dark:text-amber-400">
+                  Para registrar ventas necesitas al menos una ubicación y un responsable de entrega activos.{" "}
+                  <button type="button" onClick={() => setIsSettingsOpen(true)} className="font-semibold underline">
+                    Configurar opciones de entrega
+                  </button>
+                </p>
+              )}
               {deliveryCatalogLoading && <p className="sm:col-span-2 text-[11px] text-zinc-400">Cargando opciones de entrega…</p>}
               {deliveryCatalogError && (
                 <div className="sm:col-span-2 flex items-center gap-2 text-[11px] text-rose-600 dark:text-rose-400">
