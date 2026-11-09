@@ -92,6 +92,7 @@ import { allocateRecognizedSaleIncome, calculateSaleTotals, requiresSaleRefund }
 import { construirPedidos, fechaRegistro, leerMovimiento, leerVenta } from "./lecturasVentas";
 import { calcularInventarioDrop, dropsDeVenta, validarDemandaDrops } from "./inventarioDrops";
 import { calcularBalanceGeneral, type BalanceGeneral } from "./balanceGeneral";
+import { obtenerFletesDeMovimientos, type FleteVenta } from "./fletesVentas";
 import type { DetalleInventarioDrop, InventarioDropFila } from "./inventarioDrops";
 
 // Detect if Firebase config is present in environment variables
@@ -5819,6 +5820,18 @@ export const firestoreService = {
         canal_venta_nombre: sale.canal_venta_nombre || "Venta"
       }))
       .sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
+  },
+
+  // Consulta solo los movimientos con costo de entrega: un desglose de gastos
+  // ya registrados en ventas, sin crear documentos ni egresos adicionales.
+  getFletesVentas: async (): Promise<FleteVenta[]> => {
+    const movimientos = isConfigured && realDb
+      ? (await getDocs(query(collection(realDb, "movimientos"), where("costo_envio_venta", ">", 0))))
+        .docs.map(item => leerMovimiento(item.id, item.data()))
+      : getLocalStorageItem<Movimiento[]>("movimientos", [])
+        .filter(item => Number(item.costo_envio_venta) > 0)
+        .map(item => leerMovimiento(item.id || item.folio || "", item));
+    return obtenerFletesDeMovimientos(movimientos);
   },
 
   getBalanceGeneral: async (): Promise<BalanceGeneral> => (await firestoreService.getResumenFinancieroConsolidado({ alcance: "todo" }, false)).balanceGeneral,

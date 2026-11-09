@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test:domain": "node --import tsx scripts/test-sales-domain.ts && node --import tsx scripts/test-crm-regressions.ts && node --import tsx scripts/test-firestore-reads.ts && node --import tsx scripts/test-workspace.ts && node --import tsx scripts/test-drop-inventory.ts && node --import tsx scripts/test-balance-general.ts && node --import tsx scripts/test-tallas-producto.ts && node --import tsx scripts/test-catalogo-productos.ts && node --import tsx scripts/test-numeric-inputs.ts && node --import tsx scripts/test-precio-venta-editable.ts && node --import tsx scripts/test-pedidos-pendientes.ts && node --import tsx scripts/test-entrega-venta.ts",
+    "test:domain": "node --import tsx scripts/test-sales-domain.ts && node --import tsx scripts/test-crm-regressions.ts && node --import tsx scripts/test-firestore-reads.ts && node --import tsx scripts/test-workspace.ts && node --import tsx scripts/test-drop-inventory.ts && node --import tsx scripts/test-balance-general.ts && node --import tsx scripts/test-tallas-producto.ts && node --import tsx scripts/test-catalogo-productos.ts && node --import tsx scripts/test-numeric-inputs.ts && node --import tsx scripts/test-precio-venta-editable.ts && node --import tsx scripts/test-pedidos-pendientes.ts && node --import tsx scripts/test-entrega-venta.ts && node --import tsx scripts/test-fletes.ts",
     "reset:inventory": "node scripts/reset-inventory.mjs",
     "migrate:financial-periods": "node scripts/rebuild-financial-period-index.mjs"
   },
