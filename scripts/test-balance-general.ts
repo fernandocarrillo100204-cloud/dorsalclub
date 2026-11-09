@@ -68,7 +68,7 @@ assert.ok(emptyTable.includes("<thead"));
 assert.ok(emptyTable.includes("Sin movimientos registrados"));
 const { default: ResumenBalance } = await import("../src/components/finanzas/ResumenBalance");
 const summary = renderToStaticMarkup(React.createElement(ResumenBalance, { data: mixed, loading: false }));
-for (const label of ["Ventas de mercancía cobradas", "Envíos y otros cargos cobrados", "Compras de mercancía", "Envíos y comisiones de compra", "Envíos y otros costos de venta", "Gastos operativos extra", "Otros ingresos anteriores"]) assert.ok(summary.includes(label));
+for (const label of ["Ventas de mercancía cobradas", "Envíos y otros cargos cobrados", "Compras de mercancía", "Envíos y comisiones de compra", "Fletes y otros costos de venta", "Gastos operativos extra", "Otros ingresos anteriores"]) assert.ok(summary.includes(label));
 assert.ok(summary.includes("<dl"));
 const many = calcularBalanceGeneral([], [], Array.from({ length: 25 }, (_, i) => ({ ...expense, id: `expense-${i}`, concepto: `Gasto ${i}`, fecha: new Date(2026, 0, i + 1) })), []);
 const paged = renderToStaticMarkup(React.createElement(MovimientosBalance, { data: many, loading: false, busy: false, onEdit: () => {}, onArchive: () => {} }));
