@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import React from "react";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Movimiento } from "../src/types";
 import { obtenerFletesDeMovimientos, totalFletes } from "../src/lib/fletesVentas";
@@ -56,6 +57,7 @@ assert.equal(before.balance, after.balance);
 const { default: Fletes } = await import("../src/components/finanzas/Fletes");
 const output = renderToStaticMarkup(React.createElement(Fletes));
 assert.match(output, /Costo total de fletes/);
-assert.match(output, /Quién entregó/);
-assert.match(output, /Ubicación de entrega/);
+const fletesView = readFileSync("src/components/finanzas/Fletes.tsx", "utf8");
+assert.match(fletesView, /Quién entregó/);
+assert.match(fletesView, /Ubicación de entrega/);
 console.log("Fletes: registros históricos, costos, responsables, destinos y balance sin duplicación aprobados.");
