@@ -54,6 +54,16 @@ const after = await remote.service.getBalanceGeneral();
 assert.equal(before.costosVentas, 190.5);
 assert.equal(before.egresos, after.egresos, "Consultar Fletes no duplica egresos.");
 assert.equal(before.balance, after.balance);
+// SSR no dispone de almacenamiento del navegador; simularlo al montar el componente.
+const local = new Map<string, string>();
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  value: {
+    getItem: (key: string) => local.get(key) ?? null,
+    setItem: (key: string, value: string) => { local.set(key, value); },
+    removeItem: (key: string) => { local.delete(key); }
+  }
+});
 const { default: Fletes } = await import("../src/components/finanzas/Fletes");
 const output = renderToStaticMarkup(React.createElement(Fletes));
 assert.match(output, /Costo total de fletes/);
