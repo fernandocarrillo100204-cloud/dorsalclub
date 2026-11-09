@@ -64,6 +64,7 @@ const Drops = lazyWithRetry(() => import("./components/Drops"));
 const AnalisisClientes = lazyWithRetry(() => import("./components/AnalisisClientes"));
 const Clientes = lazyWithRetry(() => import("./components/Clientes"));
 const Finanzas = lazyWithRetry(() => import("./components/Finanzas"));
+const Fletes = lazyWithRetry(() => import("./components/finanzas/Fletes"));
 const Papelera = lazyWithRetry(() => import("./components/Papelera"));
 const Configuracion = lazyWithRetry(() => import("./components/Configuracion"));
 
@@ -74,6 +75,7 @@ const getGastoIdFromPath = (path: string): string => {
 
 const getTabFromPath = (path: string): NavigationTab => {
   const normalized = path.toLowerCase().replace(/\/$/, "");
+  if (normalized === "/finanzas/fletes") return "finanzas_fletes";
   if (normalized.startsWith("/finanzas/")) return "finanzas";
   if (normalized === "/finanzas") {
     return "finanzas";
@@ -178,6 +180,8 @@ const getPathFromTab = (tab: NavigationTab): string => {
       return "/clientes";
     case "finanzas":
       return "/finanzas";
+    case "finanzas_fletes":
+      return "/finanzas/fletes";
     case "finanzas_gastos":
       return "/finanzas/movimientos";
     case "finanzas_cobrar":
@@ -560,16 +564,16 @@ export default function App() {
                   </motion.div>
                 )}
 
-                {/* Finanzas: Resumen y Gastos */}
-                {(activeTab === "finanzas" || activeTab === "finanzas_gastos" || activeTab === "finanzas_cobrar" || activeTab === "finanzas_gastos_nuevo" || activeTab === "finanzas_gastos_editar") && (
+                {/* Finanzas: Balance general y desglose independiente de fletes */}
+                {(activeTab === "finanzas" || activeTab === "finanzas_fletes" || activeTab === "finanzas_gastos" || activeTab === "finanzas_cobrar" || activeTab === "finanzas_gastos_nuevo" || activeTab === "finanzas_gastos_editar") && (
                   <motion.div
-                    key="finanzas"
+                    key={activeTab === "finanzas_fletes" ? "finanzas-fletes" : "finanzas"}
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -15 }}
                     transition={{ duration: 0.25, ease: "easeInOut" }}
                   >
-                    <Finanzas />
+                    {activeTab === "finanzas_fletes" ? <Fletes /> : <Finanzas />}
                   </motion.div>
                 )}
 
