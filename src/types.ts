@@ -349,6 +349,7 @@ export type NavigationTab =
   | "finanzas_gastos_nuevo"
   | "finanzas_gastos_editar"
   | "finanzas"
+  | "finanzas_fletes"
   | "analisis_clientes"
   | "catalogo"
   | "drops"
