@@ -1639,6 +1639,15 @@ export const firestoreService = {
       throw new Error("Una venta puede contener como máximo 50 partidas.");
     }
 
+    // Requisito para TODAS las ventas nuevas, incluso si se invoca el servicio sin formulario.
+    // Mantener opcionales los campos de lectura en registros antiguos para no alterar el historial.
+    if (!(venta.ubicacion_entrega_id || "").trim() || !(venta.ubicacion_entrega_nombre || "").trim()) {
+      throw new Error("Selecciona una ubicación de entrega válida antes de registrar la venta.");
+    }
+    if (!(venta.repartidor_id || "").trim() || !(venta.repartidor_nombre || "").trim()) {
+      throw new Error("Selecciona quién entrega la mercancía antes de registrar la venta.");
+    }
+
     const afectaStock = venta.afecta_stock !== false;
     let normalizedItems = venta.items.map((item, index) => {
       const sku = (item.sku || "").trim().toUpperCase();
