@@ -9,7 +9,7 @@ export const navigationGroups = [
   { id: "ventas", label: "Ventas", icon: ShoppingCart, items: [
     { id: "ventas_historial" as NavigationTab, label: "Historial de ventas", icon: History, keywords: "cobros devoluciones cancelar" },
     { id: "ventas_stock" as NavigationTab, label: "Registrar venta", icon: Plus, keywords: "nueva stock mayoreo emprendedor bajo pedido" },
-    { id: "ventas_pedidos" as NavigationTab, label: "Seguimiento de pedidos", icon: ClipboardList, keywords: "anticipo entrega pendiente pagado" }
+    { id: "ventas_pedidos" as NavigationTab, label: "Pedidos por pagar", icon: ClipboardList, keywords: "cobranza cobrar anticipo saldo pendiente pagos pedidos" }
   ] },
   { id: "clientes", label: "Clientes", icon: Users, items: [
     { id: "clientes" as NavigationTab, label: "Directorio de clientes", icon: Users, keywords: "contactos marcas teléfono" },
