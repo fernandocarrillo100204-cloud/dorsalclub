@@ -29,7 +29,7 @@ export default function ResumenBalance({ data, loading }: { data: BalanceGeneral
         <dl className="text-sm">
           {row("Compras de mercancía", data?.mercanciaComprada)}
           {row("Envíos y comisiones de compra", data?.costosCompras)}
-          {row("Envíos y otros costos de venta", data?.costosVentas)}
+          {row("Fletes y otros costos de venta", data?.costosVentas)}
           {row("Gastos operativos extra", data?.gastosExtra)}
           {Boolean(data?.salidasAnteriores) && row("Otras salidas anteriores", data?.salidasAnteriores)}
         </dl>
