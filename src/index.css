@@ -176,6 +176,10 @@ table { font-variant-numeric: tabular-nums; }
 .mobile-nav-content .sidebar-footer { margin-top: auto; }
 
 .order-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-items: start; }
+/* Bandeja única de cobranza: no reservar espacio para pagados ni entregados. */
+.order-board.pending-only { grid-template-columns: minmax(0, 1fr); }
+.order-board.pending-only .order-column > .space-y-3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 12px; }
+.order-board.pending-only .order-column > .space-y-3 > * { margin: 0; }
 .order-column { border-top: 3px solid #D4D4D8; border-radius: 12px; padding: 16px 12px; background: color-mix(in srgb, var(--text-secondary) 5%, var(--bg-app)); }
 .order-column.pedido { border-top-color: #F59E0B; }
 .order-column.pagado { border-top-color: #38BDF8; }
