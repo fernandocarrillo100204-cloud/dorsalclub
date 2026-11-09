@@ -1,4 +1,4 @@
-import { ArrowLeftRight, Boxes, CircleDollarSign, ClipboardList, History, Layers, Package, Plus, Settings2, ShoppingBag, ShoppingCart, Trash2, UserRoundSearch, Users, Wallet } from "lucide-react";
+import { ArrowLeftRight, Boxes, CircleDollarSign, ClipboardList, History, Layers, Package, Plus, Settings2, ShoppingBag, ShoppingCart, Trash2, Truck, UserRoundSearch, Users, Wallet } from "lucide-react";
 import { NavigationTab } from "../types";
 
 export const navigationGroups = [
@@ -21,7 +21,8 @@ export const navigationGroups = [
     { id: "historial" as NavigationTab, label: "Movimientos de inventario", icon: History, keywords: "entradas salidas ajustes historial" }
   ] },
   { id: "finanzas", label: "Finanzas", icon: Wallet, items: [
-    { id: "finanzas" as NavigationTab, label: "Balance general", icon: Wallet, keywords: "balance ingresos egresos flujo gastos extra" }
+    { id: "finanzas" as NavigationTab, label: "Balance general", icon: Wallet, keywords: "balance ingresos egresos flujo gastos extra" },
+    { id: "finanzas_fletes" as NavigationTab, label: "Fletes", icon: Truck, keywords: "costo entrega envío repartidor responsable destino ubicación transporte" }
   ] }
 ];
 export const utilityNavigation = [
