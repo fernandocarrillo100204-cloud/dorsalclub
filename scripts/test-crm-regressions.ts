@@ -54,9 +54,35 @@ const input: VentaRegistroInput = {
   items: ["SKU-A", "SKU-B"].map(sku => ({ sku, cantidad: 1, precio_unitario_venta: 500, costo_unitario_venta: 100 })),
   referencia: "Prueba", cliente_id: "client", cliente_nombre: "Cliente de prueba", canal_venta: "stock",
   canal_venta_nombre: "Venta directa", porcentaje_precio: 0, afecta_stock: true,
-  anticipo_porcentaje: 100, minimo_piezas: 1, metodo_pago_inicial: "Efectivo"
+  anticipo_porcentaje: 100, minimo_piezas: 1, metodo_pago_inicial: "Efectivo",
+  ubicacion_entrega_id: "ubicacion-test", ubicacion_entrega_nombre: "Entrega de prueba",
+  repartidor_id: "responsable-test", repartidor_nombre: "Responsable de prueba"
 };
+await assert.rejects(
+  service.registerVentaTransaction({ ...input, ubicacion_entrega_id: undefined }),
+  /ubicación de entrega/,
+  "No se puede registrar una venta sin ubicación de entrega."
+);
+await assert.rejects(
+  service.registerVentaTransaction({ ...input, ubicacion_entrega_nombre: "  " }),
+  /ubicación de entrega/,
+  "La ubicación debe incluir un nombre válido."
+);
+await assert.rejects(
+  service.registerVentaTransaction({ ...input, repartidor_id: undefined }),
+  /quién entrega/,
+  "No se puede registrar una venta sin responsable."
+);
+await assert.rejects(
+  service.registerVentaTransaction({ ...input, repartidor_nombre: "   " }),
+  /quién entrega/,
+  "El responsable debe tener un nombre válido."
+);
 const sale = await service.registerVentaTransaction(input);
+assert.equal(sale.id.length > 0, true);
+const saleMaster = (await service.getVentasMaestrasPaginated()).items.find(item => item.id === sale.id);
+assert.equal(saleMaster?.ubicacion_entrega_nombre, "Entrega de prueba");
+assert.equal(saleMaster?.repartidor_nombre, "Responsable de prueba");
 assert.equal((await service.getMovimientosCliente("client")).filter(item => !item.subtipo).length, 2);
 assert.equal((await service.getMovimientosCliente("other-client")).length, 0);
 assert.equal((await service.getVentasCliente("client")).length, 1);

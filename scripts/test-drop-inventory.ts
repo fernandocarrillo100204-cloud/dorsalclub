@@ -18,7 +18,9 @@ await purchase(dropB.id, 3);
 const input = (items: { drop_id?: string; cantidad: number; sku?: string; talla?: string }[], deposit = 100): VentaRegistroInput => ({
   items: items.map(item => ({ sku: "TEST", ...item, precio_unitario_venta: 250, costo_unitario_venta: 100 })),
   referencia: "Prueba", cliente_nombre: "Mostrador", canal_venta: "stock", canal_venta_nombre: "Stock", porcentaje_precio: 150,
-  afecta_stock: true, anticipo_porcentaje: deposit, minimo_piezas: 1, metodo_pago_inicial: "Efectivo"
+  afecta_stock: true, anticipo_porcentaje: deposit, minimo_piezas: 1, metodo_pago_inicial: "Efectivo",
+  ubicacion_entrega_id: "ubicacion-test", ubicacion_entrega_nombre: "Entrega de prueba",
+  repartidor_id: "responsable-test", repartidor_nombre: "Responsable de prueba"
 });
 const balance = async (id: string) => calcularInventarioDrop(id, await service.getDropDetail(id)).find(item => item.sku === "TEST")?.saldo || 0;
 const assertNoLocationWrites = () => {
