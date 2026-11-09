@@ -60,4 +60,25 @@ assert.match(output, /Costo total de fletes/);
 const fletesView = readFileSync("src/components/finanzas/Fletes.tsx", "utf8");
 assert.match(fletesView, /Quién entregó/);
 assert.match(fletesView, /Ubicación de entrega/);
-console.log("Fletes: registros históricos, costos, responsables, destinos y balance sin duplicación aprobados.");
+// Integración completa: registrar una venta con entrega alimenta automáticamente Fletes.
+const integration = await firebaseInMemory();
+const createdSale = await integration.service.registerVentaTransaction({
+  items: [{ sku: "SKU-ENTREGA", cantidad: 1, precio_unitario_venta: 200, costo_unitario_venta: 100 }],
+  referencia: "Venta con entrega", cliente_nombre: "Cliente prueba",
+  canal_venta: "bajo_pedido", canal_venta_nombre: "Bajo pedido",
+  porcentaje_precio: 100, afecta_stock: false, anticipo_porcentaje: 100,
+  minimo_piezas: 1, metodo_pago_inicial: "Efectivo",
+  costo_envio_venta: 80, envio_cobrado_cliente: 40,
+  ubicacion_entrega_id: "ubi-1", ubicacion_entrega_nombre: "Apodaca",
+  repartidor_id: "repartidor-1", repartidor_nombre: "Alicia"
+});
+const autoFletes = await integration.service.getFletesVentas();
+assert.equal(autoFletes.length, 1);
+assert.equal(autoFletes[0].ventaId, createdSale.id);
+assert.equal(autoFletes[0].costo, 80);
+assert.equal(autoFletes[0].quienEntrega, "Alicia");
+assert.equal(autoFletes[0].ubicacionEntrega, "Apodaca");
+const autoBalance = await integration.service.getBalanceGeneral();
+assert.equal(autoBalance.costosVentas, 80, "El mismo costo solo se registra una vez en Balance general.");
+
+console.log("Fletes: registros históricos, ventas reales, costos, responsables, destinos y balance sin duplicación aprobados.");
