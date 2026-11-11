@@ -4,7 +4,7 @@ import type { BalanceGeneral, BalanceMovimiento } from "../../lib/balanceGeneral
 import Dialog from "../ui/Dialog";
 import DetalleMovimientoBalance from "./DetalleMovimientoBalance";
 import type { Gasto, Producto, Venta } from "../../types";
-import { firestoreService } from "../../lib/firebase";
+
 import { idVentaRelacionada } from "../../lib/detallesFinancierosVenta";
 
 const money = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
@@ -52,7 +52,7 @@ export default function MovimientosBalance({ data, loading, busy, productos = []
     let cancelled = false;
     setMasterLoading(true);
     setMasterError("");
-    void firestoreService.getVentaMaestraById(ventaId).then(venta => {
+    void import("../../lib/firebase").then(({ firestoreService }) => firestoreService.getVentaMaestraById(ventaId)).then(venta => {
       if (cancelled) return;
       cache.current.set(ventaId, venta);
       setMaster({ id: ventaId, venta });
