@@ -1,6 +1,20 @@
 import type { Movimiento } from "../types";
 import { fechaRegistro } from "./lecturasVentas";
 
+/**
+ * El balance es flujo de efectivo: el flete solo egresa cuando está pagado.
+ * Se mantienen los demás costos asociados a la venta sin duplicarlos.
+ * Los fletes históricos sin estado de pago explícito siguen pendientes.
+ */
+export function costoVentaEfectivamentePagado(venta: Pick<Movimiento, "costo_envio_venta" | "otros_costos_venta" | "total_costos_venta" | "estado_pago_flete">): number {
+  const envio = Math.max(0, Number(venta.costo_envio_venta) || 0);
+  const total = typeof venta.total_costos_venta === "number" && Number.isFinite(venta.total_costos_venta)
+    ? Math.max(0, venta.total_costos_venta)
+    : envio + Math.max(0, Number(venta.otros_costos_venta) || 0);
+  const otros = Math.max(0, Math.round((total - envio) * 100) / 100);
+  return Math.round((otros + (venta.estado_pago_flete === "pagado" ? envio : 0)) * 100) / 100;
+}
+
 export interface FleteVenta {
   id: string;
   ventaId?: string;
