@@ -27,7 +27,7 @@ const balance = calcularBalanceGeneral([original], [], [], []);
 assert.equal(balance.ingresos, 1050);
 assert.equal(balance.egresos, 25);
 assert.equal(balance.balance, 1025);
-const sale = balance.movimientos.find(row => row.tipo === "Venta");
+const sale = balance.movimientos.find(row => row.tipo === "Anticipo");
 const cost = balance.movimientos.find(row => row.tipo === "Costo de venta");
 assert.ok(sale && cost);
 
