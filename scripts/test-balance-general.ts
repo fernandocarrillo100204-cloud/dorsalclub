@@ -112,7 +112,7 @@ for (const label of ["Datos de la venta", "Importes de la venta", "Entrega pagad
   assert.ok(saleDetail.includes(label), `El detalle de venta conserva: ${label}`);
 }
 const view = readFileSync(new URL("../src/components/finanzas/MovimientosBalance.tsx", import.meta.url), "utf8");
-assert.match(view, /className="balance-detail-dialog"/, "Solo el detalle financiero usa el modal ancho.");
+assert.match(view, /balance-detail-dialog-wide/, "Solo las compras necesitan una ventana de mayor ancho para sus columnas.");
 
 
 assert.ok(paged.includes("Gasto 24"));
