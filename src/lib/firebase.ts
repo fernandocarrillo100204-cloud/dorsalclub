@@ -3456,6 +3456,7 @@ export const firestoreService = {
       validItems.push({
         sku: cleanSku,
         nombre_producto: item.nombre_producto || "",
+        ...(item.marca?.trim() ? { marca: item.marca.trim() } : {}),
         variante_label: item.variante_label || "",
         ...(item.talla ? { talla: item.talla.trim() } : {}),
         cantidad: qty,

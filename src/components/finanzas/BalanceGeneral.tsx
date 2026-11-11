@@ -2,7 +2,7 @@ import { MoneyInput } from "../ui/NumericInputs";
 import React, { useCallback, useRef, useState } from "react";
 import { Plus, RefreshCw } from "lucide-react";
 import { firestoreService, getLocalDateString } from "../../lib/firebase";
-import type { Gasto } from "../../types";
+import type { Gasto, Producto } from "../../types";
 import { useConsulta } from "../../hooks/useConsulta";
 import { useUnsavedChanges, useWorkspace } from "../../context/WorkspaceContext";
 import { mensajeError } from "../../lib/errores";
@@ -57,7 +57,7 @@ function GastoExtraForm({ gasto, onClose, onSaved }: { gasto: Gasto | null; onCl
   </Dialog>;
 }
 
-export default function BalanceGeneral() {
+export default function BalanceGeneral({ productos = [] }: { productos?: Producto[] }) {
   const consult = useCallback(() => firestoreService.getBalanceGeneral(), []);
   const { data, loading, refreshing, error, cargar } = useConsulta("balance-general", consult);
   const [editing, setEditing] = useState<Gasto | null | undefined>(undefined);
@@ -78,7 +78,7 @@ export default function BalanceGeneral() {
     {error && <div role="alert" className="rounded-xl border border-rose-300 p-4 text-sm text-rose-600">{error}<button type="button" onClick={() => cargar()} disabled={loading || refreshing} className="ml-3 underline">Reintentar</button>{data && <p className="mt-1">Se muestran los últimos datos válidos; todavía no se pudo actualizar el balance.</p>}</div>}
     {(loading || data) && <>
       <ResumenBalance data={data} loading={loading} />
-      <MovimientosBalance data={data} loading={loading} busy={busy || refreshing} onEdit={setEditing} onArchive={archive} />
+      <MovimientosBalance data={data} loading={loading} busy={busy || refreshing} productos={productos} onEdit={setEditing} onArchive={archive} />
     </>}
     {editing !== undefined && <GastoExtraForm gasto={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); cargar(); }} />}
   </div>;

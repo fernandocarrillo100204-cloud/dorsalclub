@@ -42,7 +42,10 @@ function TablaArticulos({ headers, children }: { headers: [string, string, strin
   </div>;
 }
 
-export default function DetalleMovimientoBalance({ movimiento }: { movimiento: BalanceMovimiento }) {
+export default function DetalleMovimientoBalance({ movimiento, marcasPorSku }: {
+  movimiento: BalanceMovimiento;
+  marcasPorSku?: ReadonlyMap<string, string>;
+}) {
   const source = movimiento.origen;
   const income = movimiento.ingreso > 0;
   const refund = movimiento.ingreso < 0;
@@ -126,20 +129,42 @@ export default function DetalleMovimientoBalance({ movimiento }: { movimiento: B
           </div>
         </dl>
       </Seccion>
-      {(source.registro.items || []).length > 0 && <Seccion title="Artículos comprados" detail={`${(source.registro.items || []).reduce((sum, item) => sum + item.cantidad, 0)} unidades · ${source.registro.items.length} partidas`}>
-        <TablaArticulos headers={["Producto / SKU", "Cantidad", "Costo unitario", "Subtotal"]}>
-          {(source.registro.items || []).map((item, i) => <tr key={`${item.sku}-${item.talla || ""}-${i}`} className="hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30">
-            <td className="px-3 py-3 font-medium text-zinc-900 dark:text-zinc-100">
-              {item.nombre_producto || item.sku}
-              {(item.nombre_producto || item.talla) && <span className="block text-[11px] font-normal text-zinc-500">
-                {item.nombre_producto ? item.sku : ""}{item.nombre_producto && item.talla ? " · " : ""}{item.talla ? `Talla ${item.talla}` : ""}
-              </span>}
-            </td>
-            <td className="px-3 py-3 text-right tabular-nums">{item.cantidad}</td>
-            <td className="px-3 py-3 text-right tabular-nums">{money.format(item.costo_unitario)}</td>
-            <td className="px-3 py-3 text-right tabular-nums font-semibold">{money.format(item.subtotal)}</td>
-          </tr>)}
-        </TablaArticulos>
+      {(source.registro.items || []).length > 0 && <Seccion title="Artículos comprados" detail={`${source.registro.items.reduce((sum, item) => sum + item.cantidad, 0)} unidades · ${source.registro.items.length} partidas`}>
+        <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800" role="region" tabIndex={0} aria-label="Artículos comprados, tabla desplazable horizontalmente">
+          <table className="w-full min-w-[900px] text-left text-xs">
+            <thead className="bg-zinc-50 dark:bg-zinc-800/70 text-zinc-500 dark:text-zinc-400">
+              <tr>
+                {["Producto", "Marca", "SKU", "Talla", "Drop", "Cantidad", "Costo unitario", "Subtotal"].map((header, index) =>
+                  <th scope="col" key={header} className={`px-3 py-3 font-semibold whitespace-nowrap ${index >= 5 ? "text-right" : ""}`}>{header}</th>
+                )}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {source.registro.items.map((item, index) => {
+                const marca = item.marca?.trim() || marcasPorSku?.get(item.sku.trim().toUpperCase()) || "No registrada";
+                const drop = source.registro.drop_nombre || source.registro.drop_id || "Sin drop asignado";
+                return <tr key={`${item.sku}-${item.talla || ""}-${index}`} className="hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30">
+                  <td className="px-3 py-3 font-medium text-zinc-900 dark:text-zinc-100 min-w-[145px] break-words">{item.nombre_producto || item.sku}</td>
+                  <td className="px-3 py-3 text-zinc-600 dark:text-zinc-300">{marca}</td>
+                  <td className="px-3 py-3 text-zinc-600 dark:text-zinc-300 font-mono whitespace-nowrap">{item.sku}</td>
+                  <td className="px-3 py-3 whitespace-nowrap">{item.talla || "Única"}</td>
+                  <td className="px-3 py-3 text-zinc-600 dark:text-zinc-300 whitespace-nowrap">{drop}</td>
+                  <td className="px-3 py-3 text-right tabular-nums">{item.cantidad}</td>
+                  <td className="px-3 py-3 text-right tabular-nums whitespace-nowrap">{money.format(item.costo_unitario)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums whitespace-nowrap font-semibold">{money.format(item.subtotal)}</td>
+                </tr>;
+              })}
+            </tbody>
+            <tfoot className="bg-zinc-50 dark:bg-zinc-800/60 border-t border-zinc-200 dark:border-zinc-700 font-semibold">
+              <tr>
+                <th scope="row" colSpan={5} className="px-3 py-3 text-zinc-800 dark:text-zinc-100">Total de partidas</th>
+                <td className="px-3 py-3 text-right tabular-nums">{source.registro.items.reduce((sum, item) => sum + item.cantidad, 0)}</td>
+                <td className="px-3 py-3 text-right text-zinc-400">—</td>
+                <td className="px-3 py-3 text-right tabular-nums whitespace-nowrap">{money.format(source.registro.items.reduce((sum, item) => sum + item.subtotal, 0))}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
       </Seccion>}
     </>}
 

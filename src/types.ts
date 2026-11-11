@@ -361,6 +361,7 @@ export interface CompraItem {
   sku: string;
   talla?: string;
   nombre_producto?: string;
+  marca?: string; // Snapshot de la marca al registrar la compra
   variante_label?: string;
   cantidad: number;
   costo_unitario: number;
