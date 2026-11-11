@@ -88,7 +88,7 @@ for (const [tipo, expected] of [["Compra", "Proveedor"], ["Gasto extra", "Catego
   const row = mixed.movimientos.find(item => item.tipo === tipo);
   assert.ok(row, `Movimiento ${tipo} existe`);
   const html = renderToStaticMarkup(React.createElement(DetalleMovimientoBalance, { movimiento: row }));
-  assert.match(html, /Referencia \/ folio/);
+  assert.match(html, tipo === "Venta" ? /Folio/ : /Referencia \/ folio/);
   assert.ok(html.includes(expected), `El detalle de ${tipo} contiene ${expected}`);
 }
 const purchaseDetail = renderToStaticMarkup(React.createElement(DetalleMovimientoBalance, {
