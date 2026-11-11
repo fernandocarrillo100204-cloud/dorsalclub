@@ -73,7 +73,7 @@ export default function DetalleMovimientoBalance({ movimiento }: { movimiento: B
         <Importe label="Descuentos" value={source.registro.descuentos} />
         <Importe label="Total de la compra" value={source.registro.total} />
       </dl>
-      {source.registro.items.length > 0 && <div>
+      {(source.registro.items || []).length > 0 && <div>
         <h3 className="font-semibold mb-2">Artículos comprados</h3>
         <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
           <table className="w-full min-w-[440px] text-xs text-left">
@@ -81,7 +81,7 @@ export default function DetalleMovimientoBalance({ movimiento }: { movimiento: B
               <tr><th className="px-3 py-2">Producto / SKU</th><th className="px-3 py-2 text-right">Cantidad</th><th className="px-3 py-2 text-right">Costo unitario</th><th className="px-3 py-2 text-right">Subtotal</th></tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {source.registro.items.map((item, i) => <tr key={`${item.sku}-${item.talla || ""}-${i}`}>
+              {(source.registro.items || []).map((item, i) => <tr key={`${item.sku}-${item.talla || ""}-${i}`}>
                 <td className="px-3 py-2">{item.nombre_producto || item.sku}{item.talla ? ` · ${item.talla}` : ""}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{item.cantidad}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{money.format(item.costo_unitario)}</td>
