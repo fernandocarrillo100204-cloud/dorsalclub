@@ -61,7 +61,6 @@ export default function BalanceGeneral() {
   const consult = useCallback(() => firestoreService.getBalanceGeneral(), []);
   const { data, loading, refreshing, error, cargar } = useConsulta("balance-general", consult);
   const [editing, setEditing] = useState<Gasto | null | undefined>(undefined);
-  const [showDetail, setShowDetail] = useState(false);
   const [busy, setBusy] = useState(false);
   const mutationLock = useRef(false);
   const { confirm, notify } = useWorkspace();
@@ -78,12 +77,8 @@ export default function BalanceGeneral() {
     <PageHeader eyebrow="Finanzas" title="Balance general" description="Todo el historial · MXN" actions={<><button type="button" onClick={() => cargar()} disabled={loading || refreshing || busy} className="btn-secondary" aria-label="Actualizar balance"><RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} /></button><button type="button" onClick={() => setEditing(null)} className="btn-primary" disabled={busy}><Plus className="h-4 w-4" />Registrar gasto extra</button></>} />
     {error && <div role="alert" className="rounded-xl border border-rose-300 p-4 text-sm text-rose-600">{error}<button type="button" onClick={() => cargar()} disabled={loading || refreshing} className="ml-3 underline">Reintentar</button>{data && <p className="mt-1">Se muestran los últimos datos válidos; todavía no se pudo actualizar el balance.</p>}</div>}
     {(loading || data) && <>
-      <ResumenBalance data={data} loading={loading} detailOpen={showDetail} onToggleDetail={() => setShowDetail(open => !open)} />
-      {showDetail && (
-        <div id="balance-general-movimientos">
-          <MovimientosBalance data={data} loading={loading} busy={busy || refreshing} onEdit={setEditing} onArchive={archive} />
-        </div>
-      )}
+      <ResumenBalance data={data} loading={loading} />
+      <MovimientosBalance data={data} loading={loading} busy={busy || refreshing} onEdit={setEditing} onArchive={archive} />
     </>}
     {editing !== undefined && <GastoExtraForm gasto={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); cargar(); }} />}
   </div>;
