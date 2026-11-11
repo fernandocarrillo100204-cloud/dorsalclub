@@ -408,6 +408,7 @@ export default function Compras({
         return {
           sku: it.sku.trim().toUpperCase(),
           nombre_producto: it.nombre_producto,
+          ...(getProductBySku(it.sku)?.marca?.trim() ? { marca: getProductBySku(it.sku)!.marca!.trim() } : {}),
           variante_label: tipo === "unica" ? "Talla única" : `Talla ${talla}`,
           talla,
           cantidad: qty,
