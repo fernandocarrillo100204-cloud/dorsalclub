@@ -70,6 +70,22 @@ const { default: ResumenBalance } = await import("../src/components/finanzas/Res
 const summary = renderToStaticMarkup(React.createElement(ResumenBalance, { data: mixed, loading: false }));
 for (const label of ["Ventas de mercancía cobradas", "Envíos y otros cargos cobrados", "Compras de mercancía", "Envíos y comisiones de compra", "Fletes y otros costos de venta", "Gastos operativos extra", "Otros ingresos anteriores"]) assert.ok(summary.includes(label));
 assert.ok(summary.includes("<dl"));
+const closed = renderToStaticMarkup(React.createElement(ResumenBalance, {
+  data: mixed, loading: false, detailOpen: false, onToggleDetail: () => {}
+}));
+assert.match(closed, /Ver detalle/);
+assert.match(closed, /aria-controls="balance-general-movimientos"/);
+assert.match(closed, /aria-expanded="false"/);
+const opened = renderToStaticMarkup(React.createElement(ResumenBalance, {
+  data: mixed, loading: false, detailOpen: true, onToggleDetail: () => {}
+}));
+assert.match(opened, /Ocultar detalle/);
+assert.match(opened, /aria-expanded="true"/);
+const disabled = renderToStaticMarkup(React.createElement(ResumenBalance, {
+  data: null, loading: true, detailOpen: false, onToggleDetail: () => {}
+}));
+assert.match(disabled, /disabled=""/);
+
 const many = calcularBalanceGeneral([], [], Array.from({ length: 25 }, (_, i) => ({ ...expense, id: `expense-${i}`, concepto: `Gasto ${i}`, fecha: new Date(2026, 0, i + 1) })), []);
 const paged = renderToStaticMarkup(React.createElement(MovimientosBalance, { data: many, loading: false, busy: false, onEdit: () => {}, onArchive: () => {} }));
 assert.ok(paged.includes("Cargar más"));
@@ -100,6 +116,8 @@ const { default: BalanceGeneral } = await import("../src/components/finanzas/Bal
 const markup = renderToStaticMarkup(React.createElement(WorkspaceProvider, { children: React.createElement(BalanceGeneral) }));
 for (const title of ["Balance general", "Ingresos totales", "Egresos totales", "Registrar gasto extra", "Envíos y comisiones de compra", "Gastos operativos extra"]) assert.ok(markup.includes(title));
 assert.doesNotMatch(markup, /<select|Por mes|Cuentas por cobrar|Caja total|Operación<|recharts/);
+assert.match(markup, /Ver detalle/, "El botón aparece en Balance general.");
+assert.doesNotMatch(markup, /Historial acumulado de ingresos y egresos/, "El historial inicia cerrado, sin duplicar el resumen.");
 
 const remote = await firebaseInMemory();
 remote.put("movimientos/1", { ...first, fecha: new Date() });
