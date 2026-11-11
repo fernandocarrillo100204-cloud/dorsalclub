@@ -1,9 +1,11 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Eye, Pencil, Trash2 } from "lucide-react";
 import type { BalanceGeneral, BalanceMovimiento } from "../../lib/balanceGeneral";
 import Dialog from "../ui/Dialog";
 import DetalleMovimientoBalance from "./DetalleMovimientoBalance";
-import type { Gasto, Producto } from "../../types";
+import type { Gasto, Producto, Venta } from "../../types";
+import { firestoreService } from "../../lib/firebase";
+import { idVentaRelacionada } from "../../lib/detallesFinancierosVenta";
 
 const money = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
 const date = new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric" });
@@ -24,8 +26,53 @@ export default function MovimientosBalance({ data, loading, busy, productos = []
   const marcasPorSku = useMemo(() => new Map(
     productos.filter(producto => producto.marca?.trim()).map(producto => [producto.sku.trim().toUpperCase(), producto.marca!.trim()])
   ), [productos]);
+  const productosPorSku = useMemo(() => new Map(
+    productos.map(producto => [producto.sku.trim().toUpperCase(), producto])
+  ), [productos]);
   const [visible, setVisible] = useState(20);
   const [selected, setSelected] = useState<BalanceMovimiento | null>(null);
+  const [master, setMaster] = useState<{ id: string; venta: Venta | null } | null>(null);
+  const [masterLoading, setMasterLoading] = useState(false);
+  const [masterError, setMasterError] = useState("");
+  const cache = useRef(new Map<string, Venta | null>());
+  const ventaId = selected?.origen?.tipo === "venta" ? idVentaRelacionada(selected.origen.registro) : "";
+
+  useEffect(() => {
+    if (!ventaId) {
+      setMasterLoading(false);
+      setMasterError("");
+      return;
+    }
+    if (cache.current.has(ventaId)) {
+      setMaster({ id: ventaId, venta: cache.current.get(ventaId) ?? null });
+      setMasterLoading(false);
+      setMasterError("");
+      return;
+    }
+    let cancelled = false;
+    setMasterLoading(true);
+    setMasterError("");
+    void firestoreService.getVentaMaestraById(ventaId).then(venta => {
+      if (cancelled) return;
+      cache.current.set(ventaId, venta);
+      setMaster({ id: ventaId, venta });
+      setMasterLoading(false);
+    }).catch(() => {
+      if (cancelled) return;
+      setMasterLoading(false);
+      setMasterError("No se pudo consultar la venta actual.");
+    });
+    return () => { cancelled = true; };
+  }, [ventaId]);
+
+  const ventaRelacionada = selected?.tipo === "Costo de venta" && ventaId
+    ? data?.movimientos.find(row =>
+        row.origen?.tipo === "venta" &&
+        row.tipo !== "Costo de venta" &&
+        !row.origen.registro.subtipo &&
+        idVentaRelacionada(row.origen.registro) === ventaId
+      )
+    : undefined;
   return <section className="min-w-0 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
     <div className="px-4 sm:px-5 py-4 flex flex-wrap items-center justify-between gap-2">
       <h2 className="font-semibold">Movimientos</h2>
@@ -73,10 +120,23 @@ export default function MovimientosBalance({ data, loading, busy, productos = []
         {visible < data!.movimientos.length && <button type="button" className="btn-secondary" onClick={() => setVisible(value => value + 20)}>Cargar más</button>}
       </div>}
       <Dialog open={Boolean(selected)} onClose={() => setSelected(null)}
-        title={selected ? `Detalle de ${selected.tipo}` : "Detalle del movimiento"}
+        title={!selected ? "Detalle del movimiento" :
+          selected.tipo === "Costo de venta"
+            ? "Detalle de entrega y costos"
+            : `Detalle de ${selected.tipo}`}
         description={selected?.referencia || "Información del registro financiero"}
-        className={selected?.origen?.tipo === "compra" ? "balance-detail-dialog balance-detail-dialog-wide" : "balance-detail-dialog"}>
-        {selected && <DetalleMovimientoBalance movimiento={selected} marcasPorSku={marcasPorSku} />}
+        className={selected?.origen?.tipo === "compra" ||
+          (selected?.origen?.tipo === "venta" && selected.tipo !== "Costo de venta")
+          ? "balance-detail-dialog balance-detail-dialog-wide" : "balance-detail-dialog"}>
+        {selected && <DetalleMovimientoBalance
+          movimiento={selected}
+          marcasPorSku={marcasPorSku}
+          productosPorSku={productosPorSku}
+          ventaActual={master?.id === ventaId ? master.venta : null}
+          cargandoVenta={masterLoading || Boolean(ventaId && !master && !masterError)}
+          errorVenta={masterError}
+          onVerVenta={ventaRelacionada ? () => setSelected(ventaRelacionada) : undefined}
+        />}
       </Dialog>
   </section>;
 }
