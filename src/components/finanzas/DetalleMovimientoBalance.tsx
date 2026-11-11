@@ -129,7 +129,12 @@ export default function DetalleMovimientoBalance({ movimiento }: { movimiento: B
       {(source.registro.items || []).length > 0 && <Seccion title="Artículos comprados" detail={`${(source.registro.items || []).reduce((sum, item) => sum + item.cantidad, 0)} unidades · ${source.registro.items.length} partidas`}>
         <TablaArticulos headers={["Producto / SKU", "Cantidad", "Costo unitario", "Subtotal"]}>
           {(source.registro.items || []).map((item, i) => <tr key={`${item.sku}-${item.talla || ""}-${i}`} className="hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30">
-            <td className="px-3 py-3 font-medium text-zinc-900 dark:text-zinc-100">{item.nombre_producto || item.sku}{item.talla ? <span className="block text-[11px] font-normal text-zinc-500">Talla {item.talla}</span> : null}</td>
+            <td className="px-3 py-3 font-medium text-zinc-900 dark:text-zinc-100">
+              {item.nombre_producto || item.sku}
+              {(item.nombre_producto || item.talla) && <span className="block text-[11px] font-normal text-zinc-500">
+                {item.nombre_producto ? item.sku : ""}{item.nombre_producto && item.talla ? " · " : ""}{item.talla ? `Talla ${item.talla}` : ""}
+              </span>}
+            </td>
             <td className="px-3 py-3 text-right tabular-nums">{item.cantidad}</td>
             <td className="px-3 py-3 text-right tabular-nums">{money.format(item.costo_unitario)}</td>
             <td className="px-3 py-3 text-right tabular-nums font-semibold">{money.format(item.subtotal)}</td>
