@@ -2178,12 +2178,7 @@ export const firestoreService = {
             metodo_pago: cleanMethod,
             estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo"
           });
-          for (const [key, count] of deltas) {
-          const ref = periodRefs.get(key);
-          if (!ref) throw new Error("La fecha de la venta cambió; vuelve a intentar la restauración.");
-          const snapshot = periodSnapshots.get(key);
-          transaction.set(ref, computeNewPeriodIndexData(snapshot?.exists() ? snapshot.data() : null, key, count, 0, 0), { merge: true });
-        }
+          if (periodRef && periodoKey) transaction.set(periodRef, computeNewPeriodIndexData(periodSnap?.exists() ? periodSnap.data() : null, periodoKey, 1, 0, 0), { merge: true });
         });
         clearFinanzasCache();
         clearPeriodosFinancierosCache();
@@ -3034,7 +3029,12 @@ export const firestoreService = {
             ? { en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField(), actualizado_at: now }
             : { estado: "activo", en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField(), anulado_at: deleteField(), anulado_por: deleteField(), motivo_anulacion: deleteField(), actualizado_at: now });
         }
-        if (periodRef && periodoKey) transaction.set(periodRef, computeNewPeriodIndexData(periodSnap?.exists() ? periodSnap.data() : null, periodoKey, 1, 0, 0), { merge: true });
+        for (const [key, count] of deltas) {
+          const ref = periodRefs.get(key);
+          if (!ref) throw new Error("La fecha de la venta cambió; vuelve a intentar la restauración.");
+          const snapshot = periodSnapshots.get(key);
+          transaction.set(ref, computeNewPeriodIndexData(snapshot?.exists() ? snapshot.data() : null, key, count, 0, 0), { merge: true });
+        }
       });
       clearFinanzasCache(); clearPeriodosFinancierosCache();
       return;
