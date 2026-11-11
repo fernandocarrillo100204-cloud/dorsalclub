@@ -126,7 +126,10 @@ export default function MovimientosBalance({ data, loading, busy, productos = []
       <Dialog open={Boolean(selected)} onClose={() => setSelected(null)}
         title={!selected ? "Detalle del movimiento" :
           selected.tipo === "Costo de venta"
-            ? "Detalle de entrega y costos"
+            ? (selected.origen?.tipo === "venta" &&
+                Number(selected.origen.registro.costo_envio_venta) > 0 &&
+                Math.abs(Number(selected.origen.registro.costo_envio_venta) - selected.egreso) < 0.009
+                ? "Detalle de flete" : "Detalle de costo de venta")
             : `Detalle de ${selected.tipo}`}
         description={selected?.referencia || "Información del registro financiero"}
         className={selected?.origen?.tipo === "compra" ||
