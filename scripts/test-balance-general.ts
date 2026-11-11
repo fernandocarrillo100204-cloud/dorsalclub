@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 import { calcularBalanceGeneral } from "../src/lib/balanceGeneral";
 import { firebaseInMemory } from "./helpers/firestoreMemory";
 
@@ -95,11 +96,24 @@ const purchaseDetail = renderToStaticMarkup(React.createElement(DetalleMovimient
 }));
 assert.match(purchaseDetail, /Artículos comprados/);
 assert.match(purchaseDetail, /Flete de compra/);
+for (const label of ["Importe del movimiento", "Tipo de movimiento", "Fecha y hora", "Referencia / folio", "Concepto", "Ingreso registrado en esta fila", "Egreso registrado en esta fila", "Proveedor", "Drop", "Referencia de proveedor", "Subtotal de mercancía", "Flete de compra", "Comisiones", "Descuentos", "Total de la compra", "Artículos comprados", "Cantidad", "Costo unitario"]) {
+  assert.ok(purchaseDetail.includes(label), `El nuevo diseño debe conservar el dato: ${label}`);
+}
+assert.ok(purchaseDetail.includes("Desglose de importes"), "Los importes están organizados por sección.");
+assert.ok(purchaseDetail.includes("SKU-COMPRA"), "La tabla conserva las partidas.");
+assert.ok(purchaseDetail.includes("Camisa"), "La tabla conserva el nombre de producto.");
+assert.match(purchaseDetail, /text-3xl/, "Importe principal destacado.");
 const saleDetail = renderToStaticMarkup(React.createElement(DetalleMovimientoBalance, {
   movimiento: mixed.movimientos.find(item => item.tipo === "Venta")!
 }));
 assert.match(saleDetail, /Productos de la venta/);
 assert.match(saleDetail, /Precio unitario/);
+for (const label of ["Datos de la venta", "Importes de la venta", "Entrega pagada por el negocio", "Entrega cubierta por el cliente", "Cliente", "Quién entregó", "Ubicación de entrega"]) {
+  assert.ok(saleDetail.includes(label), `El detalle de venta conserva: ${label}`);
+}
+const view = readFileSync(new URL("../src/components/finanzas/MovimientosBalance.tsx", import.meta.url), "utf8");
+assert.match(view, /className="balance-detail-dialog"/, "Solo el detalle financiero usa el modal ancho.");
+
 
 assert.ok(paged.includes("Gasto 24"));
 assert.ok(!paged.includes('>Gasto 0<'));

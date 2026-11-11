@@ -71,7 +71,7 @@ export default function MovimientosBalance({ data, loading, busy, onEdit, onArch
       <Dialog open={Boolean(selected)} onClose={() => setSelected(null)}
         title={selected ? `Detalle de ${selected.tipo}` : "Detalle del movimiento"}
         description={selected?.referencia || "Información del registro financiero"}
-        className="max-w-3xl">
+        className="balance-detail-dialog">
         {selected && <DetalleMovimientoBalance movimiento={selected} />}
       </Dialog>
   </section>;
