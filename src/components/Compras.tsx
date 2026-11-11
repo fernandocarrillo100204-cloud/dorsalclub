@@ -403,12 +403,13 @@ export default function Compras({
       const formattedItems: CompraItem[] = items.map((it) => {
         const qty = typeof it.cantidad === "number" ? it.cantidad : 1;
         const unitCost = typeof it.costo_unitario === "number" ? it.costo_unitario : 0;
-        const tipo = tipoTallaDeProducto(getProductBySku(it.sku));
+        const producto = getProductBySku(it.sku);
+        const tipo = tipoTallaDeProducto(producto);
         const talla = tallaNormalizadaCompra(tipo, it.talla);
         return {
           sku: it.sku.trim().toUpperCase(),
           nombre_producto: it.nombre_producto,
-          ...(getProductBySku(it.sku)?.marca?.trim() ? { marca: getProductBySku(it.sku)!.marca!.trim() } : {}),
+          ...(producto?.marca?.trim() ? { marca: producto.marca.trim() } : {}),
           variante_label: tipo === "unica" ? "Talla única" : `Talla ${talla}`,
           talla,
           cantidad: qty,
