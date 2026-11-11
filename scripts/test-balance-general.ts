@@ -14,6 +14,11 @@ assert.equal(value.costosCompras, 60);
 assert.equal(value.egresos, 540);
 assert.equal(value.balance, 460);
 assert.equal(calcularBalanceGeneral([], [], [], []).balance, 0);
+const fletePendiente: any = { ...sale, id: "flete-pendiente", costo_envio_venta: 80, total_costos_venta: 90 };
+assert.equal(calcularBalanceGeneral([fletePendiente], [], [], []).costosVentas, 10, "Otros costos sí se reflejan.");
+assert.equal(calcularBalanceGeneral([{ ...fletePendiente, estado_pago_flete: "pendiente" }], [], [], []).costosVentas, 10);
+assert.equal(calcularBalanceGeneral([{ ...fletePendiente, estado_pago_flete: "pagado" }], [], [], []).costosVentas, 90);
+
 assert.equal(calcularBalanceGeneral([{ ...sale, estado: "anulado" }], [{ ...purchase, estado: "anulada" }], [{ ...expense, en_papelera: true }], []).balance, 0);
 value = calcularBalanceGeneral([sale], [{ ...purchase, clasificacion_financiera: "inversion_inicial" }], [{ ...expense, clasificacion_financiera: "inversion_inicial" }], []);
 assert.equal(value.balance, 460, "La inversión inicial no queda oculta por la antigua clasificación.");
