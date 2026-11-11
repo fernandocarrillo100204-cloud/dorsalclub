@@ -363,13 +363,18 @@ export default function HistorialVentas({
 
   const archiveSale = async (venta: VentaAgrupada) => {
     if (!venta.master && !venta.principal?.id) return;
-    if (!(await confirm({ title: `Enviar ${venta.folio} a la papelera`, description: "La venta se retirará del historial activo y se revertirá su efecto según su estado. Podrás restaurarla desde la papelera.", confirmLabel: "Enviar a la papelera", danger: true }))) return;
+    if (!(await confirm({
+      title: `Eliminar registro de venta ${venta.folio}`,
+      description: "Se enviará la venta completa y todos sus pagos a Papelera. Desaparecerán del historial, de los saldos por cobrar, del desglose de fletes y del balance financiero; el inventario se recalculará. No se registra un reembolso ni se devuelve dinero: utiliza esta opción para eliminar pruebas. Para una venta real, utiliza Devolución.",
+      confirmLabel: "Eliminar registro de prueba",
+      danger: true
+    }))) return;
     setProcessingId(venta.key);
     setError(null);
     try {
       await firestoreService.enviarVentaPapelera(venta.key);
       setVentasMaestras(current => current.filter(item => item.id !== venta.key));
-      setMovimientos((current) => current.filter((item) => item.venta_id !== venta.key));
+      setMovimientos((current) => current.filter((item) => item.venta_id !== venta.key && item.venta_relacionada_id !== venta.key));
       setSuccess(`La venta ${venta.folio} se envió a la Papelera.`);
     } catch (archiveError: any) {
       setError(archiveError?.message || "No se pudo enviar la venta a la Papelera.");
