@@ -93,7 +93,7 @@ import { construirPedidos, fechaRegistro, leerMovimiento, leerVenta } from "./le
 import { calcularInventarioDrop, dropsDeVenta, validarDemandaDrops } from "./inventarioDrops";
 import { calcularBalanceGeneral, type BalanceGeneral } from "./balanceGeneral";
 import { ajustePeriodosRegistrosVenta, registrosIndiceVenta } from "./papeleraVentas";
-import { obtenerFletesDeMovimientos, type FleteVenta } from "./fletesVentas";
+import { obtenerFletesDeMovimientos, repartirCostoFlete, type FleteVenta } from "./fletesVentas";
 import type { DetalleInventarioDrop, InventarioDropFila } from "./inventarioDrops";
 
 // Detect if Firebase config is present in environment variables
@@ -5927,6 +5927,136 @@ export const firestoreService = {
         canal_venta_nombre: sale.canal_venta_nombre || "Venta"
       }))
       .sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
+  },
+
+  /**
+   * Editar el flete modifica el gasto ya registrado, no crea otra salida de efectivo.
+   * El estado de pago al repartidor es independiente del cobro del cliente y
+   * no añade otra partida contable (evita duplicaciones).
+   */
+  actualizarFleteVenta: async (
+    flete: Pick<FleteVenta, "id" | "ventaId">,
+    cambios: { costo?: number; estadoPago?: "pagado" | "pendiente" }
+  ): Promise<void> => {
+    if (!flete.id.trim() || (cambios.costo === undefined && cambios.estadoPago === undefined)) {
+      throw new Error("Selecciona un flete y un cambio válido.");
+    }
+    if (cambios.estadoPago !== undefined && cambios.estadoPago !== "pagado" && cambios.estadoPago !== "pendiente") {
+      throw new Error("Selecciona un estado de pago válido.");
+    }
+    // La misma función pura valida montos y redondeos antes de tocar Firebase.
+    if (cambios.costo !== undefined) repartirCostoFlete(
+      [{ id: "validacion", sku: "", tipo: "salida", cantidad: 1, referencia: "", usuario: "",
+        fecha: new Date(), costo_envio_venta: 1 }], cambios.costo
+    );
+
+    const esOriginalActivo = (item: Movimiento) =>
+      item.tipo === "salida" && !item.subtipo && item.en_papelera !== true && item.estado !== "anulado";
+    if (isConfigured && realDb) {
+      // Solo una colección por venta, no se recupera todo el historial.
+      const snapshot = flete.ventaId
+        ? await getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", flete.ventaId)))
+        : await getDocs(query(collection(realDb, "movimientos"), where("folio", "==", flete.id)));
+      const docs = snapshot.empty && !flete.ventaId
+        ? [await getDoc(doc(realDb, "movimientos", flete.id))]
+        : snapshot.docs;
+      if (!docs.length) throw new Error("El flete ya no existe.");
+      const saleRef = flete.ventaId ? doc(realDb, "ventas", flete.ventaId) : null;
+
+      await runTransaction(realDb, async transaction => {
+        // Todas las lecturas ocurren antes de cualquier escritura.
+        const itemSnapshots = [];
+        for (const item of docs) itemSnapshots.push(await transaction.get(item.ref));
+        const master = saleRef ? await transaction.get(saleRef) : null;
+        const rows: Movimiento[] = itemSnapshots.filter(item => item.exists())
+          .map(item => leerMovimiento(item.id, item.data()));
+        const activos = rows.filter(esOriginalActivo);
+        const oldCost = Math.round(activos.reduce((sum, item) => sum + (Math.max(0, Number(item.costo_envio_venta) || 0)), 0) * 100) / 100;
+        if (oldCost <= 0 || (master?.exists() && (master.data().en_papelera === true ||
+          ["anulado", "devuelto"].includes(master.data().estado || "")))) {
+          throw new Error("Este flete ya no está activo. Actualiza la lista antes de editar.");
+        }
+        const updates = cambios.costo === undefined ? [] : repartirCostoFlete(activos, cambios.costo);
+        const byId = new Map(updates.map(item => [item.id, item]));
+        const now = Timestamp.now();
+        for (const snap of itemSnapshots) {
+          if (!snap.exists()) continue;
+          const active = activos.find(item => item.id === snap.id);
+          if (!active) continue;
+          const costUpdate = byId.get(snap.id);
+          const patch: Record<string, any> = {};
+          if (costUpdate) {
+            patch.costo_envio_venta = costUpdate.costo_envio_venta;
+            patch.total_costos_venta = costUpdate.total_costos_venta;
+            patch.venta_total_costos = costUpdate.venta_total_costos;
+          }
+          if (cambios.estadoPago !== undefined) {
+            patch.estado_pago_flete = cambios.estadoPago;
+            patch.flete_pagado_at = cambios.estadoPago === "pagado" ? now : deleteField();
+          }
+          if (Object.keys(patch).length) transaction.update(snap.ref, patch);
+        }
+        if (master?.exists() && saleRef) {
+          const old = master.data();
+          const patch: Record<string, any> = { actualizado_at: now };
+          if (cambios.costo !== undefined) {
+            patch.costo_envio_venta = cambios.costo;
+            patch.costos_totales = Math.round(
+              (Math.max(0, Number(old.costos_totales) || 0) + cambios.costo - oldCost) * 100
+            ) / 100;
+          }
+          if (cambios.estadoPago !== undefined) {
+            patch.estado_pago_flete = cambios.estadoPago;
+            patch.flete_pagado_at = cambios.estadoPago === "pagado" ? now : deleteField();
+          }
+          transaction.update(saleRef, patch);
+        }
+      });
+      clearFinanzasCache();
+      return;
+    }
+
+    const all = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const matches = all.filter(item => flete.ventaId
+      ? item.venta_id === flete.ventaId
+      : (item.folio === flete.id || item.id === flete.id));
+    const active = matches.filter(esOriginalActivo);
+    const oldCost = active.reduce((sum, item) => sum + (Math.max(0, Number(item.costo_envio_venta) || 0)), 0);
+    if (oldCost <= 0) throw new Error("Este flete ya no está activo. Actualiza la lista.");
+    const updates = cambios.costo !== undefined ? repartirCostoFlete(active, cambios.costo) : [];
+    const byId = new Map(updates.map(item => [item.id, item]));
+    const now = new Date();
+    const next = all.map(item => {
+      if (!active.includes(item)) return item;
+      return {
+        ...item,
+        ...(byId.get(item.id || "") || {}),
+        ...(cambios.estadoPago !== undefined ? {
+          estado_pago_flete: cambios.estadoPago,
+          flete_pagado_at: cambios.estadoPago === "pagado" ? now : undefined
+        } : {})
+      };
+    });
+    const masters = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+    const nextMasters = masters.map(item => {
+      if (item.id !== flete.ventaId) return item;
+      return {
+        ...item,
+        ...(cambios.costo !== undefined ? {
+          costo_envio_venta: cambios.costo,
+          costos_totales: Math.round((Math.max(0, Number(item.costos_totales) || 0) + cambios.costo - oldCost) * 100) / 100
+        } : {}),
+        ...(cambios.estadoPago !== undefined ? {
+          estado_pago_flete: cambios.estadoPago,
+          flete_pagado_at: cambios.estadoPago === "pagado" ? now : undefined
+        } : {}),
+        actualizado_at: now
+      };
+    });
+    setLocalStorageItem("movimientos", next);
+    setLocalStorageItem("ventas_maestras", nextMasters);
+    notifyListeners("movimientos", next);
+    clearFinanzasCache();
   },
 
   // Consulta solo los movimientos con costo de entrega: un desglose de gastos

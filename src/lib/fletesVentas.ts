@@ -9,6 +9,11 @@ export interface FleteVenta {
   costo: number;
   quienEntrega: string | null;
   ubicacionEntrega: string | null;
+  cliente: string | null;
+  canal: string | null;
+  cubiertoCliente: number;
+  estadoPago: "pagado" | "pendiente" | null;
+  pagadoAt: Date | null;
 }
 
 /**
@@ -30,12 +35,23 @@ export function obtenerFletesDeMovimientos(movimientos: Movimiento[]): FleteVent
     if (!key) continue;
     const who = (item.repartidor_nombre || "").trim() || null;
     const where = (item.ubicacion_entrega_nombre || "").trim() || null;
+    const cliente = (item.cliente_nombre || "").trim() || null;
+    const canal = (item.canal_venta_nombre || "").trim() || null;
+    const cubiertoCliente = Math.max(0, Number(item.envio_cobrado_cliente) || 0);
+    const estadoPago = item.estado_pago_flete === "pagado" || item.estado_pago_flete === "pendiente"
+      ? item.estado_pago_flete : null;
+    const pagadoAt = item.flete_pagado_at ? fechaRegistro(item.flete_pagado_at) : null;
     const previous = grouped.get(key);
     if (previous) {
       previous.centavos += centavos;
       previous.costo = previous.centavos / 100;
       if (!previous.quienEntrega && who) previous.quienEntrega = who;
       if (!previous.ubicacionEntrega && where) previous.ubicacionEntrega = where;
+      if (!previous.cliente && cliente) previous.cliente = cliente;
+      if (!previous.canal && canal) previous.canal = canal;
+      previous.cubiertoCliente += cubiertoCliente;
+      if (!previous.estadoPago && estadoPago) previous.estadoPago = estadoPago;
+      if (!previous.pagadoAt && pagadoAt) previous.pagadoAt = pagadoAt;
       continue;
     }
     grouped.set(key, {
@@ -46,7 +62,12 @@ export function obtenerFletesDeMovimientos(movimientos: Movimiento[]): FleteVent
       costo: centavos / 100,
       centavos,
       quienEntrega: who,
-      ubicacionEntrega: where
+      ubicacionEntrega: where,
+      cliente,
+      canal,
+      cubiertoCliente,
+      estadoPago,
+      pagadoAt
     });
   }
   return [...grouped.values()]
@@ -56,4 +77,38 @@ export function obtenerFletesDeMovimientos(movimientos: Movimiento[]): FleteVent
 
 export function totalFletes(fletes: FleteVenta[]): number {
   return fletes.reduce((sum, item) => sum + Math.round(item.costo * 100), 0) / 100;
+}
+
+/** Los costos de flete viven en el movimiento original de venta.
+ * Al editar, preservar cualquier otro costo histórico y evitar duplicar
+ * egresos cuando la venta contiene varias partidas. */
+export function repartirCostoFlete(
+  movimientos: Movimiento[],
+  nuevoCosto: number
+): Array<{ id: string; costo_envio_venta: number; total_costos_venta: number; venta_total_costos: number }> {
+  if (!Number.isFinite(nuevoCosto) || nuevoCosto <= 0 || nuevoCosto > 999999999.99 ||
+    Math.abs(Math.round(nuevoCosto * 100) - nuevoCosto * 100) > 0.00001) {
+    throw new Error("El costo del flete debe ser mayor a cero y tener máximo dos decimales.");
+  }
+  const originales = movimientos.filter(item =>
+    item.tipo === "salida" && !item.subtipo && !item.en_papelera && item.estado !== "anulado");
+  if (!originales.length || !originales.some(item => Number(item.costo_envio_venta) > 0)) {
+    throw new Error("No existe un flete activo asociado a esta venta.");
+  }
+  const primario = originales.find(item => item.venta_partida === 1 && Number(item.costo_envio_venta) > 0) ||
+    originales.find(item => Number(item.costo_envio_venta) > 0)!;
+  const updates = originales.map(item => {
+    const anterior = Math.max(0, Number(item.costo_envio_venta) || 0);
+    const totalAnterior = typeof item.total_costos_venta === "number" ?
+      Math.max(0, item.total_costos_venta) : anterior + Math.max(0, Number(item.otros_costos_venta) || 0);
+    const otros = Math.max(0, Math.round((totalAnterior - anterior) * 100) / 100);
+    return {
+      id: item.id || "",
+      costo_envio_venta: item === primario ? Math.round(nuevoCosto * 100) / 100 : 0,
+      total_costos_venta: otros + (item === primario ? Math.round(nuevoCosto * 100) / 100 : 0),
+      venta_total_costos: 0
+    };
+  });
+  const totalVenta = Math.round(updates.reduce((sum, item) => sum + item.total_costos_venta, 0) * 100) / 100;
+  return updates.map(item => ({ ...item, venta_total_costos: totalVenta }));
 }

@@ -92,6 +92,34 @@ service cloud.firestore {
           && (!('drop_id' in incoming()) || (incoming().drop_id is string && incoming().drop_id.size() > 0 && incoming().drop_id.size() <= 128))
           && (!('drop_nombre' in incoming()) || (incoming().drop_nombre is string && incoming().drop_nombre.size() <= 100))
         )
+        ||
+        (
+          // Ajuste específico de un flete, nunca de precios/cantidades/inventario.
+          existing().tipo == 'salida'
+          && (!('subtipo' in existing()) || existing().subtipo == null)
+          && (!('en_papelera' in existing()) || existing().en_papelera != true)
+          && (!('estado' in existing()) || existing().estado == 'activo')
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'costo_envio_venta', 'total_costos_venta', 'venta_total_costos',
+            'estado_pago_flete', 'flete_pagado_at'
+          ])
+          && incoming().diff(existing()).affectedKeys().hasAny([
+            'costo_envio_venta', 'total_costos_venta', 'venta_total_costos',
+            'estado_pago_flete', 'flete_pagado_at'
+          ])
+          && (!('costo_envio_venta' in incoming()) ||
+              (incoming().costo_envio_venta is number && incoming().costo_envio_venta >= 0))
+          && (!('total_costos_venta' in incoming()) ||
+              (incoming().total_costos_venta is number && incoming().total_costos_venta >= 0))
+          && (!('venta_total_costos' in incoming()) ||
+              (incoming().venta_total_costos is number && incoming().venta_total_costos >= 0))
+          && (!('estado_pago_flete' in incoming()) ||
+              incoming().estado_pago_flete in ['pagado', 'pendiente'])
+          && (!('flete_pagado_at' in incoming()) ||
+              (incoming().flete_pagado_at is timestamp && incoming().estado_pago_flete == 'pagado'))
+          && (!('estado_pago_flete' in incoming()) || incoming().estado_pago_flete != 'pagado' ||
+              ('flete_pagado_at' in incoming() && incoming().flete_pagado_at is timestamp))
+        )
       );
       allow delete: if isSignedIn() && existing().tipo != 'transferencia' && existing().en_papelera == true;
     }

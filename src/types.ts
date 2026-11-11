@@ -64,6 +64,8 @@ export interface Movimiento {
   otros_cargos_cliente?: number;
   concepto_otros_cargos?: string;
   costo_envio_venta?: number;
+  estado_pago_flete?: "pagado" | "pendiente"; // Pago al repartidor, independiente del cobro de la venta
+  flete_pagado_at?: { seconds: number; nanoseconds: number } | Date;
   otros_costos_venta?: number;
   concepto_otros_costos?: string;
   total_cobrado?: number;
@@ -158,6 +160,8 @@ export interface Venta {
   total: number;
   costo_mercancia: number;
   costo_envio_venta: number;
+  estado_pago_flete?: "pagado" | "pendiente";
+  flete_pagado_at?: { seconds: number; nanoseconds: number } | Date;
   otros_costos_venta: number;
   concepto_otros_costos?: string;
   costos_totales: number;
