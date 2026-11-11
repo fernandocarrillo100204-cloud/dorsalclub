@@ -70,25 +70,37 @@ const { default: ResumenBalance } = await import("../src/components/finanzas/Res
 const summary = renderToStaticMarkup(React.createElement(ResumenBalance, { data: mixed, loading: false }));
 for (const label of ["Ventas de mercancía cobradas", "Envíos y otros cargos cobrados", "Compras de mercancía", "Envíos y comisiones de compra", "Fletes y otros costos de venta", "Gastos operativos extra", "Otros ingresos anteriores"]) assert.ok(summary.includes(label));
 assert.ok(summary.includes("<dl"));
-const closed = renderToStaticMarkup(React.createElement(ResumenBalance, {
-  data: mixed, loading: false, detailOpen: false, onToggleDetail: () => {}
-}));
-assert.match(closed, /Ver detalle/);
-assert.match(closed, /aria-controls="balance-general-movimientos"/);
-assert.match(closed, /aria-expanded="false"/);
-const opened = renderToStaticMarkup(React.createElement(ResumenBalance, {
-  data: mixed, loading: false, detailOpen: true, onToggleDetail: () => {}
-}));
-assert.match(opened, /Ocultar detalle/);
-assert.match(opened, /aria-expanded="true"/);
-const disabled = renderToStaticMarkup(React.createElement(ResumenBalance, {
-  data: null, loading: true, detailOpen: false, onToggleDetail: () => {}
-}));
-assert.match(disabled, /disabled=""/);
+assert.doesNotMatch(summary, /Ver detalle|Ocultar detalle/, "No debe aparecer un botón global en el resumen.");
 
 const many = calcularBalanceGeneral([], [], Array.from({ length: 25 }, (_, i) => ({ ...expense, id: `expense-${i}`, concepto: `Gasto ${i}`, fecha: new Date(2026, 0, i + 1) })), []);
 const paged = renderToStaticMarkup(React.createElement(MovimientosBalance, { data: many, loading: false, busy: false, onEdit: () => {}, onArchive: () => {} }));
 assert.ok(paged.includes("Cargar más"));
+assert.equal((paged.match(/>Ver detalle<\/button>/g) || []).length, 20, "Cada fila visible tiene un botón individual.");
+assert.equal(mixed.movimientos.every(item => item.origen !== undefined), true, "Toda fila conserva sus datos de origen.");
+assert.equal(mixed.movimientos.find(item => item.tipo === "Compra")?.origen?.tipo, "compra");
+assert.equal(mixed.movimientos.find(item => item.tipo === "Reembolso")?.origen?.tipo, "venta");
+assert.equal(mixed.movimientos.find(item => item.tipo === "Gasto extra")?.origen?.tipo, "gasto");
+assert.equal(mixed.movimientos.find(item => item.tipo === "Ingreso anterior")?.origen?.tipo, "manual");
+
+const { default: DetalleMovimientoBalance } = await import("../src/components/finanzas/DetalleMovimientoBalance");
+for (const [tipo, expected] of [["Compra", "Proveedor"], ["Gasto extra", "Categoría"], ["Venta", "Cliente"], ["Ingreso anterior", "Tipo de registro"]] as const) {
+  const row = mixed.movimientos.find(item => item.tipo === tipo);
+  assert.ok(row, `Movimiento ${tipo} existe`);
+  const html = renderToStaticMarkup(React.createElement(DetalleMovimientoBalance, { movimiento: row }));
+  assert.match(html, /Referencia \/ folio/);
+  assert.ok(html.includes(expected), `El detalle de ${tipo} contiene ${expected}`);
+}
+const purchaseDetail = renderToStaticMarkup(React.createElement(DetalleMovimientoBalance, {
+  movimiento: mixed.movimientos.find(item => item.tipo === "Compra")!
+}));
+assert.match(purchaseDetail, /Artículos comprados/);
+assert.match(purchaseDetail, /Flete de compra/);
+const saleDetail = renderToStaticMarkup(React.createElement(DetalleMovimientoBalance, {
+  movimiento: mixed.movimientos.find(item => item.tipo === "Venta")!
+}));
+assert.match(saleDetail, /Productos de la venta/);
+assert.match(saleDetail, /Precio unitario/);
+
 assert.ok(paged.includes("Gasto 24"));
 assert.ok(!paged.includes('>Gasto 0<'));
 assert.equal(many.egresos, 2500);
@@ -116,8 +128,9 @@ const { default: BalanceGeneral } = await import("../src/components/finanzas/Bal
 const markup = renderToStaticMarkup(React.createElement(WorkspaceProvider, { children: React.createElement(BalanceGeneral) }));
 for (const title of ["Balance general", "Ingresos totales", "Egresos totales", "Registrar gasto extra", "Envíos y comisiones de compra", "Gastos operativos extra"]) assert.ok(markup.includes(title));
 assert.doesNotMatch(markup, /<select|Por mes|Cuentas por cobrar|Caja total|Operación<|recharts/);
-assert.match(markup, /Ver detalle/, "El botón aparece en Balance general.");
-assert.doesNotMatch(markup, /Historial acumulado de ingresos y egresos/, "El historial inicia cerrado, sin duplicar el resumen.");
+assert.match(markup, /Historial acumulado de ingresos y egresos/, "La tabla vuelve a estar siempre visible.");
+assert.match(markup, /Ver detalle/, "Las filas tienen su propio botón de detalle.");
+
 
 const remote = await firebaseInMemory();
 remote.put("movimientos/1", { ...first, fecha: new Date() });
