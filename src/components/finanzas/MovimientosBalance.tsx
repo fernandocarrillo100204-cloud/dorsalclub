@@ -1,6 +1,8 @@
 import React, { useState } from "react";
-import { Pencil, Trash2 } from "lucide-react";
-import type { BalanceGeneral } from "../../lib/balanceGeneral";
+import { Eye, Pencil, Trash2 } from "lucide-react";
+import type { BalanceGeneral, BalanceMovimiento } from "../../lib/balanceGeneral";
+import Dialog from "../ui/Dialog";
+import DetalleMovimientoBalance from "./DetalleMovimientoBalance";
 import type { Gasto } from "../../types";
 
 const money = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
@@ -19,6 +21,7 @@ export default function MovimientosBalance({ data, loading, busy, onEdit, onArch
   onEdit: (gasto: Gasto) => void; onArchive: (gasto: Gasto) => void;
 }) {
   const [visible, setVisible] = useState(20);
+  const [selected, setSelected] = useState<BalanceMovimiento | null>(null);
   return <section className="min-w-0 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
     <div className="px-4 sm:px-5 py-4 flex flex-wrap items-center justify-between gap-2">
       <h2 className="font-semibold">Movimientos</h2>
@@ -39,10 +42,19 @@ export default function MovimientosBalance({ data, loading, busy, onEdit, onArch
             <td className={`px-4 py-3 text-right whitespace-nowrap font-medium tabular-nums ${row.ingreso < 0 ? "text-rose-700 dark:text-rose-400" : row.ingreso > 0 ? "text-emerald-700 dark:text-emerald-400" : "text-zinc-400"}`}>{row.ingreso ? money.format(row.ingreso) : "—"}</td>
             <td className={`px-4 py-3 text-right whitespace-nowrap font-medium tabular-nums ${row.egreso ? "text-rose-700 dark:text-rose-400" : "text-zinc-400"}`}>{row.egreso ? money.format(row.egreso) : "—"}</td>
             <td className="px-4 py-3 min-w-36 max-w-xs text-zinc-600 dark:text-zinc-300"><CellText text={row.comentario || "—"} limit={70} /></td>
-            <td className="px-4 py-3">{row.gasto ? <div className="flex justify-end gap-1">
-              <button type="button" className="btn-icon" title="Editar gasto" aria-label={`Editar ${row.descripcion}`} disabled={busy} onClick={() => onEdit(row.gasto!)}><Pencil className="h-4 w-4" /></button>
-              <button type="button" className="btn-icon text-rose-600" title="Enviar a papelera" aria-label={`Enviar ${row.descripcion} a papelera`} disabled={busy} onClick={() => onArchive(row.gasto!)}><Trash2 className="h-4 w-4" /></button>
-            </div> : <span className="block text-right text-zinc-400">—</span>}</td>
+            <td className="px-4 py-3">
+              <div className="flex items-center justify-end gap-2">
+                <button type="button" className="btn-secondary whitespace-nowrap" title="Consultar esta operación"
+                  aria-label={`Ver detalle de ${row.tipo}: ${row.referencia || row.descripcion}`}
+                  onClick={() => setSelected(row)}>
+                  <Eye aria-hidden="true" className="h-4 w-4" /> Ver detalle
+                </button>
+                {row.gasto && <>
+                  <button type="button" className="btn-icon" title="Editar gasto" aria-label={`Editar ${row.descripcion}`} disabled={busy} onClick={() => onEdit(row.gasto!)}><Pencil className="h-4 w-4" /></button>
+                  <button type="button" className="btn-icon text-rose-600" title="Enviar a papelera" aria-label={`Enviar ${row.descripcion} a papelera`} disabled={busy} onClick={() => onArchive(row.gasto!)}><Trash2 className="h-4 w-4" /></button>
+                </>}
+              </div>
+            </td>
           </tr>)}</tbody>
           {!loading && data && <tfoot className="bg-zinc-50 dark:bg-zinc-800 font-semibold"><tr>
             <th scope="row" colSpan={3} className="p-4">Total acumulado</th>
@@ -56,5 +68,11 @@ export default function MovimientosBalance({ data, loading, busy, onEdit, onArch
         <p className="text-xs text-zinc-500 dark:text-zinc-400">{Math.min(visible, data!.movimientos.length)} de {data!.movimientos.length}</p>
         {visible < data!.movimientos.length && <button type="button" className="btn-secondary" onClick={() => setVisible(value => value + 20)}>Cargar más</button>}
       </div>}
+      <Dialog open={Boolean(selected)} onClose={() => setSelected(null)}
+        title={selected ? `Detalle de ${selected.tipo}` : "Detalle del movimiento"}
+        description={selected?.referencia || "Información del registro financiero"}
+        className="max-w-3xl">
+        {selected && <DetalleMovimientoBalance movimiento={selected} />}
+      </Dialog>
   </section>;
 }
