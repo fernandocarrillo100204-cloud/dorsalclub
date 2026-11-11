@@ -39,6 +39,10 @@ export default function MovimientosBalance({ data, loading, busy, productos = []
 
   useEffect(() => {
     if (!ventaId) {
+      // Al cerrar, evitar presentar un estado de pago obsoleto si después
+      // se reciben nuevos abonos y el usuario vuelve a consultar la venta.
+      cache.current.clear();
+      setMaster(null);
       setMasterLoading(false);
       setMasterError("");
       return;
