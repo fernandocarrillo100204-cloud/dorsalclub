@@ -49,7 +49,7 @@ const mixed = calcularBalanceGeneral([
   { ...first, sku: "SKU-A", comentarios_venta: "Entrega personal" },
   { ...second, sku: "SKU-B" }, payment, refund,
   { ...sale, id: "cancelled", estado: "anulado" }
-], [{ ...purchase, folio: "COMP-1", notas: "Primer pedido" }], [expense], [{ id: "capital", tipo: "aportacion_capital", monto: 500, concepto: "Capital", notas: "Anterior" }] as any);
+], [{ ...purchase, folio: "COMP-1", notas: "Primer pedido", items: [{ sku: "SKU-COMPRA", cantidad: 2, costo_unitario: 200, subtotal: 400, nombre_producto: "Camisa" }] }], [expense], [{ id: "capital", tipo: "aportacion_capital", monto: 500, concepto: "Capital", notas: "Anterior" }] as any);
 assert.equal(mixed.movimientos.length, 7, "Un cobro por venta, abono, devolución, costo, compra, gasto y capital.");
 assert.equal(mixed.movimientos.reduce((sum, row) => sum + Math.round(row.ingreso * 100), 0), Math.round(mixed.ingresos * 100));
 assert.equal(mixed.movimientos.reduce((sum, row) => sum + Math.round(row.egreso * 100), 0), Math.round(mixed.egresos * 100));
