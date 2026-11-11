@@ -92,6 +92,7 @@ import { allocateRecognizedSaleIncome, calculateSaleTotals, requiresSaleRefund }
 import { construirPedidos, fechaRegistro, leerMovimiento, leerVenta } from "./lecturasVentas";
 import { calcularInventarioDrop, dropsDeVenta, validarDemandaDrops } from "./inventarioDrops";
 import { calcularBalanceGeneral, type BalanceGeneral } from "./balanceGeneral";
+import { ajustePeriodosRegistrosVenta, registrosIndiceVenta } from "./papeleraVentas";
 import { obtenerFletesDeMovimientos, type FleteVenta } from "./fletesVentas";
 import type { DetalleInventarioDrop, InventarioDropFila } from "./inventarioDrops";
 
@@ -2819,6 +2820,7 @@ export const firestoreService = {
       const initialData = initial.data();
       if (initialData.tipo === "transferencia") throw new Error("Este movimiento histórico es de solo lectura.");
       if (initialData.compra_id) return inventoryOperations.enviarCompraPapelera(initialData.compra_id);
+      if (initialData.venta_id) return inventoryOperations.enviarVentaPapelera(initialData.venta_id);
       const masterSaleSnap = initialData.venta_id ? await getDoc(doc(realDb, "ventas", initialData.venta_id)) : null;
       const isReturnedSale = masterSaleSnap?.exists() && masterSaleSnap.data().estado === "devuelto";
       const snapshots = initialData.venta_id
@@ -2853,6 +2855,7 @@ export const firestoreService = {
     if (!selected) throw new Error("El movimiento no existe.");
     if (selected.tipo === "transferencia") throw new Error("Este movimiento histórico es de solo lectura.");
     if (selected.compra_id) return inventoryOperations.enviarCompraPapelera(selected.compra_id);
+    if (selected.venta_id) return inventoryOperations.enviarVentaPapelera(selected.venta_id);
     const localMasterSales = getLocalStorageItem<Venta[]>("ventas_maestras", []);
     const localMasterSale = selected.venta_id ? localMasterSales.find(item => item.id === selected.venta_id) : undefined;
     const isReturnedSale = localMasterSale?.estado === "devuelto";
@@ -2887,14 +2890,97 @@ export const firestoreService = {
 
   enviarVentaPapelera: async (ventaId: string): Promise<void> => {
     if (!ventaId) throw new Error("ID de venta no proporcionado.");
+
+    // Papelera es para depurar registros (incluyendo pruebas pagadas/entregadas):
+    // oculta toda la venta y sus cobros de los reportes, sin simular un reembolso.
+    // La devolución real se mantiene como una operación distinta.
     if (isConfigured && realDb) {
-      const snapshot = await getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", ventaId), limit(1)));
-      if (snapshot.empty) throw new Error("No se encontraron las partidas de la venta.");
-      return inventoryOperations.enviarMovimientoPapelera(snapshot.docs[0].id);
+      const [saleDocs, eventDocs] = await Promise.all([
+        getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", ventaId))),
+        getDocs(query(collection(realDb, "movimientos"), where("venta_relacionada_id", "==", ventaId)))
+      ]);
+      if (saleDocs.empty) throw new Error("No se encontraron las partidas de la venta.");
+      const docs = [...saleDocs.docs, ...eventDocs.docs];
+      const refs = docs.map(item => item.ref);
+      const indexPeriodKeys = [...new Set(docs.map(item => getPeriodoKey(item.data().fecha)).filter((key): key is string => Boolean(key)))];
+      const periodRefs = new Map(indexPeriodKeys.map(key => [key, doc(realDb!, "periodos_financieros", key)]));
+      const masterRef = doc(realDb, "ventas", ventaId);
+
+      await runInventoryTransaction(realDb, async transaction => {
+        const current = [];
+        for (const ref of refs) current.push(await transaction.get(ref));
+        const masterSnap = await transaction.get(masterRef);
+        const rows: Movimiento[] = current.filter(item => item.exists())
+          .map(item => ({ ...item.data(), id: item.id } as Movimiento));
+        if (rows.length === 0 || rows.every(item => item.en_papelera)) {
+          throw new Error("La venta ya está en Papelera o no contiene registros.");
+        }
+        const counted = registrosIndiceVenta(rows, "archivar");
+        const countedIds = new Set(counted.map(item => item.id));
+        const deltas = ajustePeriodosRegistrosVenta(counted);
+        const periodSnapshots = new Map<string, any>();
+        for (const [key, ref] of periodRefs) periodSnapshots.set(key, await transaction.get(ref));
+        const now = Timestamp.now();
+
+        for (const movement of current) {
+          if (!movement.exists() || movement.data().en_papelera === true) continue;
+          const data = movement.data();
+          transaction.update(movement.ref, {
+            en_papelera: true,
+            desactivado_at: now,
+            estado_antes_papelera: data.estado === "anulado" ? "anulado" : "activo",
+            periodo_descontado_papelera: countedIds.has(movement.id)
+          });
+        }
+        if (masterSnap.exists()) {
+          transaction.update(masterRef, {
+            en_papelera: true,
+            desactivado_at: now,
+            estado_antes_papelera: masterSnap.data().estado || "activo",
+            actualizado_at: now
+          });
+        }
+        for (const [key, count] of deltas) {
+          const ref = periodRefs.get(key);
+          if (!ref) throw new Error("La fecha de la venta cambió; vuelve a intentar el borrado.");
+          const snapshot = periodSnapshots.get(key);
+          transaction.set(ref, computeNewPeriodIndexData(snapshot?.exists() ? snapshot.data() : null, key, -count, 0, 0), { merge: true });
+        }
+      });
+      clearFinanzasCache();
+      clearPeriodosFinancierosCache();
+      return;
     }
-    const movement = getLocalStorageItem<Movimiento[]>("movimientos", []).find(item => item.venta_id === ventaId);
-    if (!movement?.id) throw new Error("No se encontraron las partidas de la venta.");
-    return inventoryOperations.enviarMovimientoPapelera(movement.id);
+
+    const movements = getLocalStorageItem<Movimiento[]>("movimientos", []);
+    const linked = movements.filter(item => item.venta_id === ventaId || item.venta_relacionada_id === ventaId);
+    if (!linked.some(item => item.venta_id === ventaId)) throw new Error("No se encontraron las partidas de la venta.");
+    if (linked.every(item => item.en_papelera)) throw new Error("La venta ya está en Papelera.");
+    const indexed = new Set(registrosIndiceVenta(linked, "archivar").map(item => item.id));
+    const now = new Date();
+    const updated = movements.map(item => {
+      if ((item.venta_id !== ventaId && item.venta_relacionada_id !== ventaId) || item.en_papelera) return item;
+      return {
+        ...item,
+        en_papelera: true,
+        desactivado_at: now,
+        estado_antes_papelera: item.estado === "anulado" ? "anulado" as const : "activo" as const,
+        periodo_descontado_papelera: indexed.has(item.id)
+      };
+    });
+    const masters = getLocalStorageItem<Venta[]>("ventas_maestras", []);
+    const updatedMasters = masters.map(item => item.id === ventaId ? {
+      ...item,
+      en_papelera: true,
+      desactivado_at: now,
+      estado_antes_papelera: item.estado,
+      actualizado_at: now
+    } : item);
+    setLocalStorageItem("movimientos", updated);
+    setLocalStorageItem("ventas_maestras", updatedMasters);
+    notifyListeners("movimientos", updated);
+    clearFinanzasCache();
+    clearPeriodosFinancierosCache();
   },
 
   restaurarMovimientoPapelera: async (id: string): Promise<void> => {
@@ -2905,12 +2991,15 @@ export const firestoreService = {
       const initialData = initial.data();
       if (initialData.tipo === "transferencia") throw new Error("Este movimiento histórico es de solo lectura.");
       if (initialData.compra_id) return inventoryOperations.restaurarCompraPapelera(initialData.compra_id);
-      const refs = initialData.venta_id
+      const relatedDocs = initialData.venta_id
         ? (await Promise.all([
             getDocs(query(collection(realDb, "movimientos"), where("venta_id", "==", initialData.venta_id))),
             getDocs(query(collection(realDb, "movimientos"), where("venta_relacionada_id", "==", initialData.venta_id)))
-          ])).flatMap(result => result.docs.map(item => item.ref))
-        : [doc(realDb, "movimientos", id)];
+          ])).flatMap(result => result.docs)
+        : [initial];
+      const refs = relatedDocs.map(item => item.ref);
+      const indexPeriodKeys = [...new Set(relatedDocs.map(item => getPeriodoKey(item.data().fecha)).filter((key): key is string => Boolean(key)))];
+      const periodRefs = new Map(indexPeriodKeys.map(key => [key, doc(realDb!, "periodos_financieros", key)]));
       const masterRef = initialData.venta_id ? doc(realDb, "ventas", initialData.venta_id) : null;
 
       await runInventoryTransaction(realDb, async transaction => {
@@ -2922,11 +3011,10 @@ export const firestoreService = {
         const restorableTargets = activeTargets.filter(snapshot => snapshot.data().estado_antes_papelera !== "anulado");
 
         await validateDropDemand(restorableTargets.map(snapshot => snapshot.data()).filter(data => data.tipo === "salida" && data.afecta_stock !== false && data.drop_id && !data.subtipo).map(data => ({ sku: data.sku, cantidad: Number(data.cantidad) || 0, drop_id: data.drop_id })), transaction, false);
-        const saleTargets = restorableTargets.filter(snapshot => snapshot.data().tipo === "salida" && !snapshot.data().subtipo && String(snapshot.data().sku || "").toUpperCase() !== "ABONO");
-        const restorePeriodCount = saleTargets.some(snapshot => snapshot.data().periodo_descontado_papelera === true);
-        const periodoKey = restorePeriodCount ? getPeriodoKey(saleTargets[0].data().fecha) : null;
-        const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
-        const periodSnap = periodRef ? await transaction.get(periodRef) : null;
+        const indexRows: Movimiento[] = activeTargets.map(item => ({ ...item.data(), id: item.id } as Movimiento));
+        const deltas = ajustePeriodosRegistrosVenta(registrosIndiceVenta(indexRows, "restaurar"));
+        const periodSnapshots = new Map<string, any>();
+        for (const [key, ref] of periodRefs) periodSnapshots.set(key, await transaction.get(ref));
         const now = Timestamp.now();
 
         activeTargets.forEach(snapshot => {
@@ -2941,7 +3029,12 @@ export const firestoreService = {
             ? { en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField(), actualizado_at: now }
             : { estado: "activo", en_papelera: false, desactivado_at: deleteField(), estado_antes_papelera: deleteField(), anulado_at: deleteField(), anulado_por: deleteField(), motivo_anulacion: deleteField(), actualizado_at: now });
         }
-        if (periodRef && periodoKey) transaction.set(periodRef, computeNewPeriodIndexData(periodSnap?.exists() ? periodSnap.data() : null, periodoKey, 1, 0, 0), { merge: true });
+        for (const [key, count] of deltas) {
+          const ref = periodRefs.get(key);
+          if (!ref) throw new Error("La fecha de la venta cambió; vuelve a intentar la restauración.");
+          const snapshot = periodSnapshots.get(key);
+          transaction.set(ref, computeNewPeriodIndexData(snapshot?.exists() ? snapshot.data() : null, key, count, 0, 0), { merge: true });
+        }
       });
       clearFinanzasCache(); clearPeriodosFinancierosCache();
       return;
