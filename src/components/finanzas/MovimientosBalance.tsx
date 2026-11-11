@@ -133,7 +133,7 @@ export default function MovimientosBalance({ data, loading, busy, productos = []
           marcasPorSku={marcasPorSku}
           productosPorSku={productosPorSku}
           ventaActual={master?.id === ventaId ? master.venta : null}
-          cargandoVenta={masterLoading || Boolean(ventaId && !master && !masterError)}
+          cargandoVenta={masterLoading || Boolean(ventaId && master?.id !== ventaId && !masterError)}
           errorVenta={masterError}
           onVerVenta={ventaRelacionada ? () => setSelected(ventaRelacionada) : undefined}
         />}
