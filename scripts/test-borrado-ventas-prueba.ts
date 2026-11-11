@@ -1,9 +1,19 @@
 import assert from "node:assert/strict";
 import { firebaseInMemory } from "./helpers/firestoreMemory";
 import { calcularInventarioDrop } from "../src/lib/inventarioDrops";
-import { getPeriodoKey } from "../src/lib/periodosFinancieros";
-import { registrosIndiceVenta, ajustePeriodosRegistrosVenta } from "../src/lib/papeleraVentas";
 import type { Movimiento, VentaRegistroInput } from "../src/types";
+
+const storage = new Map<string, string>();
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  value: {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => { storage.set(key, value); },
+    removeItem: (key: string) => { storage.delete(key); }
+  }
+});
+const { getPeriodoKey } = await import("../src/lib/periodosFinancieros");
+const { registrosIndiceVenta, ajustePeriodosRegistrosVenta } = await import("../src/lib/papeleraVentas");
 
 const date = new Date("2026-11-01T12:00:00");
 const movement = (id: string, extra: Partial<Movimiento> = {}): Movimiento => ({
