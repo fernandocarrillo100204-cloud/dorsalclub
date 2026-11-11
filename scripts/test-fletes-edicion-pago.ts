@@ -27,6 +27,16 @@ for (const invalid of [0, -1, NaN, Infinity, 1.234, 1000000000]) {
 }
 assert.deepEqual(obtenerFletesDeMovimientos(base).map(flete => flete.costo), [60]);
 
+// El simulador de Firebase se ejecuta en Node y necesita almacenamiento de prueba.
+const localStorageDatos = new Map<string, string>();
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  value: {
+    getItem: (key: string) => localStorageDatos.get(key) ?? null,
+    setItem: (key: string, value: string) => { localStorageDatos.set(key, value); },
+    removeItem: (key: string) => { localStorageDatos.delete(key); }
+  }
+});
 // Edición transaccional, con varias partidas y sin repetir el costo de entrega.
 const remote = await firebaseInMemory();
 remote.put("productos/SKU-A", { sku: "SKU-A", nombre: "Producto A", stock_minimo: 0, categoria: "General", unidad: "pieza" });
