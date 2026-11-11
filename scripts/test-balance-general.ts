@@ -75,7 +75,7 @@ assert.doesNotMatch(summary, /Ver detalle|Ocultar detalle/, "No debe aparecer un
 const many = calcularBalanceGeneral([], [], Array.from({ length: 25 }, (_, i) => ({ ...expense, id: `expense-${i}`, concepto: `Gasto ${i}`, fecha: new Date(2026, 0, i + 1) })), []);
 const paged = renderToStaticMarkup(React.createElement(MovimientosBalance, { data: many, loading: false, busy: false, onEdit: () => {}, onArchive: () => {} }));
 assert.ok(paged.includes("Cargar más"));
-assert.equal((paged.match(/>Ver detalle<\/button>/g) || []).length, 20, "Cada fila visible tiene un botón individual.");
+assert.equal((paged.match(/Ver detalle<\/button>/g) || []).length, 20, "Cada fila visible tiene un botón individual.");
 assert.equal(mixed.movimientos.every(item => item.origen !== undefined), true, "Toda fila conserva sus datos de origen.");
 assert.equal(mixed.movimientos.find(item => item.tipo === "Compra")?.origen?.tipo, "compra");
 assert.equal(mixed.movimientos.find(item => item.tipo === "Reembolso")?.origen?.tipo, "venta");
