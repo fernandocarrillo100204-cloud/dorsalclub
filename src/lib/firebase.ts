@@ -2009,6 +2009,19 @@ export const firestoreService = {
     return { id: ventaId, folio: generatedFolio, movimientosCount: normalizedItems.length };
   },
 
+  /** Lectura puntual al abrir un detalle financiero; no descarga el historial completo. */
+  getVentaMaestraById: async (ventaId: string): Promise<Venta | null> => {
+    const id = ventaId.trim();
+    if (!id) return null;
+    if (isConfigured && realDb) {
+      const snapshot = await getDoc(doc(realDb, "ventas", id));
+      return snapshot.exists() ? leerVenta(snapshot.id, snapshot.data()) : null;
+    }
+    const stored = getLocalStorageItem<Venta[]>("ventas_maestras", [])
+      .find(item => item.id === id);
+    return stored ? leerVenta(id, stored) : null;
+  },
+
   getVentasMaestrasPaginated: async (options: {
     pageSize?: number;
     lastDoc?: any;

@@ -88,7 +88,7 @@ for (const [tipo, expected] of [["Compra", "Proveedor"], ["Gasto extra", "Catego
   const row = mixed.movimientos.find(item => item.tipo === tipo);
   assert.ok(row, `Movimiento ${tipo} existe`);
   const html = renderToStaticMarkup(React.createElement(DetalleMovimientoBalance, { movimiento: row }));
-  assert.match(html, /Referencia \/ folio/);
+  assert.match(html, tipo === "Venta" ? /Folio/ : /Referencia \/ folio/);
   assert.ok(html.includes(expected), `El detalle de ${tipo} contiene ${expected}`);
 }
 const purchaseDetail = renderToStaticMarkup(React.createElement(DetalleMovimientoBalance, {
@@ -106,11 +106,17 @@ assert.match(purchaseDetail, /text-3xl/, "Importe principal destacado.");
 const saleDetail = renderToStaticMarkup(React.createElement(DetalleMovimientoBalance, {
   movimiento: mixed.movimientos.find(item => item.tipo === "Venta")!
 }));
-assert.match(saleDetail, /Productos de la venta/);
+assert.match(saleDetail, /Artículos vendidos/);
 assert.match(saleDetail, /Precio unitario/);
-for (const label of ["Datos de la venta", "Importes de la venta", "Entrega pagada por el negocio", "Entrega cubierta por el cliente", "Cliente", "Quién entregó", "Ubicación de entrega"]) {
-  assert.ok(saleDetail.includes(label), `El detalle de venta conserva: ${label}`);
+for (const label of ["Cliente y operación", "Cobro y saldo", "Artículos vendidos", "Entrega cobrada al cliente", "Cliente", "Responsable de entrega", "Ubicación de entrega", "Estado del pago al registrar", "Método de este movimiento"]) {
+  assert.ok(saleDetail.includes(label), `El detalle de venta incluye: ${label}`);
 }
+assert.doesNotMatch(saleDetail, /Costo absorbido por el negocio/, "No se mezcla la ficha de entrega con los cobros.");
+const costDetail = renderToStaticMarkup(React.createElement(DetalleMovimientoBalance, {
+  movimiento: mixed.movimientos.find(item => item.tipo === "Costo de venta")!
+}));
+assert.match(costDetail, /Costo absorbido por el negocio/);
+assert.doesNotMatch(costDetail, /Artículos vendidos|Productos de la venta/, "El costo de entrega no repite la tabla de mercancía.");
 const view = readFileSync(new URL("../src/components/finanzas/MovimientosBalance.tsx", import.meta.url), "utf8");
 assert.match(view, /balance-detail-dialog-wide/, "Solo las compras necesitan una ventana de mayor ancho para sus columnas.");
 
