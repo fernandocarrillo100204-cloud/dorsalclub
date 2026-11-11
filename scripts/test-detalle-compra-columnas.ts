@@ -59,7 +59,7 @@ const result = await remote.service.registerCompraTransaction({
   proveedor: "CHUNCHI", drop_id: drop.id,
   items: [{ sku: "BA-211", nombre_producto: "Balenciaga Tape", marca: "Balenciaga", talla: "M", cantidad: 1, costo_unitario: 420, subtotal: 420 }]
 });
-const stored = (await remote.service.getCompras()).find(item => item.id === result.id);
+const stored = remote.data.get(`compras/${result.id}`);
 assert.equal(stored?.items[0]?.marca, "Balenciaga", "La marca se conserva en la operación.");
 assert.equal(stored?.drop_id, drop.id, "El drop es la asociación real de la compra.");
 assert.equal(stored?.drop_nombre, "DROP 2");
