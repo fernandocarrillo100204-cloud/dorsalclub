@@ -43,6 +43,15 @@ assert.match(source, /productos\.filter/, "Se usa el catálogo ya cargado para c
 assert.match(readFileSync("src/App.tsx", "utf8"), /<Finanzas productos=\{productos\}/, "No se repite una consulta de catálogo.");
 
 // Integración real: la marca queda almacenada como snapshot en cada compra nueva.
+const localStore = new Map<string, string>();
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  value: {
+    getItem: (key: string) => localStore.get(key) ?? null,
+    setItem: (key: string, value: string) => { localStore.set(key, value); },
+    removeItem: (key: string) => { localStore.delete(key); }
+  }
+});
 const remote = await firebaseInMemory();
 remote.put("productos/BA-211", { sku: "BA-211", nombre: "Balenciaga Tape", marca: "Balenciaga", categoria: "General", unidad: "pieza", stock_minimo: 0 });
 const drop = await remote.service.addDrop({ nombre: "DROP 2", estado: "en_venta" });
