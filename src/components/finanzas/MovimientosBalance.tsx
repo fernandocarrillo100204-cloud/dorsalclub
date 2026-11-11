@@ -1,9 +1,9 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Eye, Pencil, Trash2 } from "lucide-react";
 import type { BalanceGeneral, BalanceMovimiento } from "../../lib/balanceGeneral";
 import Dialog from "../ui/Dialog";
 import DetalleMovimientoBalance from "./DetalleMovimientoBalance";
-import type { Gasto } from "../../types";
+import type { Gasto, Producto } from "../../types";
 
 const money = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
 const date = new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric" });
@@ -16,10 +16,14 @@ function CellText({ text, limit = 100 }: { text: string; limit?: number }) {
   </summary><p className="whitespace-pre-wrap break-words mt-1">{text}</p></details>;
 }
 
-export default function MovimientosBalance({ data, loading, busy, onEdit, onArchive }: {
+export default function MovimientosBalance({ data, loading, busy, productos = [], onEdit, onArchive }: {
   data: BalanceGeneral | null; loading: boolean; busy: boolean;
+  productos?: Producto[];
   onEdit: (gasto: Gasto) => void; onArchive: (gasto: Gasto) => void;
 }) {
+  const marcasPorSku = useMemo(() => new Map(
+    productos.filter(producto => producto.marca?.trim()).map(producto => [producto.sku.trim().toUpperCase(), producto.marca!.trim()])
+  ), [productos]);
   const [visible, setVisible] = useState(20);
   const [selected, setSelected] = useState<BalanceMovimiento | null>(null);
   return <section className="min-w-0 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
@@ -72,7 +76,7 @@ export default function MovimientosBalance({ data, loading, busy, onEdit, onArch
         title={selected ? `Detalle de ${selected.tipo}` : "Detalle del movimiento"}
         description={selected?.referencia || "Información del registro financiero"}
         className="balance-detail-dialog">
-        {selected && <DetalleMovimientoBalance movimiento={selected} />}
+        {selected && <DetalleMovimientoBalance movimiento={selected} marcasPorSku={marcasPorSku} />}
       </Dialog>
   </section>;
 }
