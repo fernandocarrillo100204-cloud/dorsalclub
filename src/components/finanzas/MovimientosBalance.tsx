@@ -75,7 +75,7 @@ export default function MovimientosBalance({ data, loading, busy, productos = []
       <Dialog open={Boolean(selected)} onClose={() => setSelected(null)}
         title={selected ? `Detalle de ${selected.tipo}` : "Detalle del movimiento"}
         description={selected?.referencia || "Información del registro financiero"}
-        className="balance-detail-dialog">
+        className={selected?.origen?.tipo === "compra" ? "balance-detail-dialog balance-detail-dialog-wide" : "balance-detail-dialog"}>
         {selected && <DetalleMovimientoBalance movimiento={selected} marcasPorSku={marcasPorSku} />}
       </Dialog>
   </section>;
