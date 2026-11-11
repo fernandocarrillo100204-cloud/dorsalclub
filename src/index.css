@@ -157,6 +157,7 @@ table { font-variant-numeric: tabular-nums; }
 .app-dialog::backdrop { background: #10182080; backdrop-filter: blur(3px); }
 /* Detalles financieros: más espacio horizontal, sin modificar las demás ventanas. */
 .app-dialog.balance-detail-dialog { width: min(720px, calc(100% - 32px)); }
+.app-dialog.balance-detail-dialog-wide { width: min(1010px, calc(100% - 32px)); }
 .balance-detail-dialog .dialog-header { padding-bottom: 20px; }
 .balance-detail-dialog .dialog-header p { margin-top: 3px; }
 .balance-detail-dialog .dialog-body { padding-top: 2px; }
