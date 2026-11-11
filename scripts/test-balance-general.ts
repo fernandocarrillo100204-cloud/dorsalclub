@@ -106,7 +106,7 @@ assert.match(purchaseDetail, /text-3xl/, "Importe principal destacado.");
 const saleDetail = renderToStaticMarkup(React.createElement(DetalleMovimientoBalance, {
   movimiento: mixed.movimientos.find(item => item.tipo === "Venta")!
 }));
-assert.match(saleDetail, /Productos de la venta/);
+assert.match(saleDetail, /Artículos vendidos/);
 assert.match(saleDetail, /Precio unitario/);
 for (const label of ["Cliente y operación", "Cobro y saldo", "Artículos vendidos", "Entrega cobrada al cliente", "Cliente", "Responsable de entrega", "Ubicación de entrega", "Estado del pago al registrar", "Método de este movimiento"]) {
   assert.ok(saleDetail.includes(label), `El detalle de venta incluye: ${label}`);
