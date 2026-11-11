@@ -1,6 +1,9 @@
 import React from "react";
 import { ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import type { BalanceMovimiento } from "../../lib/balanceGeneral";
+import type { Producto, Venta } from "../../types";
+import DetalleVentaBalance from "./DetalleVentaBalance";
+import DetalleFleteBalance from "./DetalleFleteBalance";
 
 const money = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
 const dateTime = new Intl.DateTimeFormat("es-MX", { dateStyle: "long", timeStyle: "short" });
@@ -42,11 +45,22 @@ function TablaArticulos({ headers, children }: { headers: [string, string, strin
   </div>;
 }
 
-export default function DetalleMovimientoBalance({ movimiento, marcasPorSku }: {
+export default function DetalleMovimientoBalance({ movimiento, marcasPorSku, productosPorSku, ventaActual, cargandoVenta, errorVenta, onVerVenta }: {
   movimiento: BalanceMovimiento;
   marcasPorSku?: ReadonlyMap<string, string>;
+  productosPorSku?: ReadonlyMap<string, Producto>;
+  ventaActual?: Venta | null;
+  cargandoVenta?: boolean;
+  errorVenta?: string;
+  onVerVenta?: () => void;
 }) {
   const source = movimiento.origen;
+  if (source?.tipo === "venta") {
+    return movimiento.tipo === "Costo de venta"
+      ? <DetalleFleteBalance movimiento={movimiento} ventaActual={ventaActual} onVerVenta={onVerVenta} />
+      : <DetalleVentaBalance movimiento={movimiento} ventaActual={ventaActual} cargandoVenta={cargandoVenta}
+          errorVenta={errorVenta} productosPorSku={productosPorSku} />;
+  }
   const income = movimiento.ingreso > 0;
   const refund = movimiento.ingreso < 0;
   const amount = movimiento.ingreso !== 0 ? movimiento.ingreso : movimiento.egreso;
@@ -76,39 +90,6 @@ export default function DetalleMovimientoBalance({ movimiento, marcasPorSku }: {
         {movimiento.comentario && <Dato wide label="Comentarios" value={movimiento.comentario} />}
       </dl>
     </section>
-
-    {source?.tipo === "venta" && <>
-      <Seccion title="Datos de la venta">
-        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
-          <Dato label="Cliente" value={source.registro.cliente_nombre} />
-          <Dato label="Canal de venta" value={source.registro.canal_venta_nombre || source.registro.canal_venta} />
-          <Dato label="Estado del pago" value={source.registro.estado_pago} />
-          <Dato label="Método de pago" value={source.registro.metodo_pago} />
-          <Dato label="Drop" value={source.registro.drop_nombre || source.registro.drop_id} />
-          <Dato label="Quién entregó" value={source.registro.repartidor_nombre} />
-          <Dato label="Ubicación de entrega" value={source.registro.ubicacion_entrega_nombre} />
-        </dl>
-      </Seccion>
-      <Seccion title="Importes de la venta">
-        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
-          <Importe label="Subtotal de mercancía" value={source.registro.venta_subtotal ?? source.registro.total_venta} />
-          <Importe label="Entrega pagada por el negocio" value={source.registro.costo_envio_venta} />
-          <Importe label="Entrega cubierta por el cliente" value={source.registro.envio_cobrado_cliente} />
-          {source.registro.venta_total_cobrado !== undefined && <Importe label="Total de la venta" value={source.registro.venta_total_cobrado} />}
-          {source.registro.venta_saldo_pendiente !== undefined && <Importe label="Saldo pendiente al registrar el movimiento" value={source.registro.venta_saldo_pendiente} />}
-        </dl>
-      </Seccion>
-      {source.partidas.length > 0 && <Seccion title="Productos de la venta" detail={`${source.partidas.reduce((sum, item) => sum + item.cantidad, 0)} unidades`}>
-        <TablaArticulos headers={["SKU / Talla", "Cantidad", "Precio unitario", "Subtotal"]}>
-          {source.partidas.map((item, i) => <tr key={item.id || i} className="hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30">
-            <td className="px-3 py-3 font-medium text-zinc-900 dark:text-zinc-100">{item.sku}{item.talla ? <span className="block text-[11px] font-normal text-zinc-500">Talla {item.talla}</span> : null}</td>
-            <td className="px-3 py-3 text-right tabular-nums">{item.cantidad}</td>
-            <td className="px-3 py-3 text-right tabular-nums">{item.precio_unitario_venta === undefined ? "—" : money.format(item.precio_unitario_venta)}</td>
-            <td className="px-3 py-3 text-right tabular-nums font-semibold">{item.total_venta === undefined ? item.precio_unitario_venta === undefined ? "—" : money.format(item.precio_unitario_venta * item.cantidad) : money.format(item.total_venta)}</td>
-          </tr>)}
-        </TablaArticulos>
-      </Seccion>}
-    </>}
 
     {source?.tipo === "compra" && <>
       <Seccion title="Datos de la compra">
