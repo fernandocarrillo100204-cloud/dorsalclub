@@ -93,7 +93,7 @@ import { construirPedidos, fechaRegistro, leerMovimiento, leerVenta } from "./le
 import { calcularInventarioDrop, dropsDeVenta, validarDemandaDrops } from "./inventarioDrops";
 import { calcularBalanceGeneral, type BalanceGeneral } from "./balanceGeneral";
 import { ajustePeriodosRegistrosVenta, registrosIndiceVenta } from "./papeleraVentas";
-import { obtenerFletesDeMovimientos, repartirCostoFlete, type FleteVenta } from "./fletesVentas";
+import { obtenerFletesDeMovimientos, repartirCostoFlete, type FleteVenta, costoVentaEfectivamentePagado } from "./fletesVentas";
 import type { DetalleInventarioDrop, InventarioDropFila } from "./inventarioDrops";
 
 // Detect if Firebase config is present in environment variables
@@ -6130,7 +6130,7 @@ export const firestoreService = {
       else if (typeof item.total_venta === "number") recognized = Number(item.total_venta) || 0;
       else recognized = (Number(item.precio_unitario_venta) || 0) * (Number(item.cantidad) || 0);
       ingresosVentas += recognized;
-      const saleCosts = Math.max(0, Number(item.total_costos_venta) || ((Number(item.costo_envio_venta) || 0) + (Number(item.otros_costos_venta) || 0)));
+      const saleCosts = costoVentaEfectivamentePagado(item);
       costosAsociadosVentas += saleCosts;
       if (Math.abs(recognized) > 0.009) {
         movements.push({ id: `venta-${item.id || saleKey}`, fecha: toSafeDate(item.fecha), tipo: "venta", origen: item.folio || "Venta", concepto: item.referencia || (item.subtipo === "reembolso_venta" ? "Reembolso de venta" : "Cobro de venta"), entrada: Math.max(0, recognized), salida: Math.max(0, -recognized), estado: "Activo", referencia: saleKey });
