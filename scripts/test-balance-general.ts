@@ -129,7 +129,7 @@ const markup = renderToStaticMarkup(React.createElement(WorkspaceProvider, { chi
 for (const title of ["Balance general", "Ingresos totales", "Egresos totales", "Registrar gasto extra", "Envíos y comisiones de compra", "Gastos operativos extra"]) assert.ok(markup.includes(title));
 assert.doesNotMatch(markup, /<select|Por mes|Cuentas por cobrar|Caja total|Operación<|recharts/);
 assert.match(markup, /Historial acumulado de ingresos y egresos/, "La tabla vuelve a estar siempre visible.");
-assert.match(markup, /Ver detalle/, "Las filas tienen su propio botón de detalle.");
+assert.match(table, /Ver detalle/, "Cada fila de movimientos cargada muestra su propio botón de detalle.");
 
 
 const remote = await firebaseInMemory();
