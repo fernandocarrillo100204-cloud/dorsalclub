@@ -1,4 +1,5 @@
 import type { Movimiento, PedidoVenta, Venta } from "../types";
+import { folioComercial } from "./folios";
 
 export const fechaRegistro = (value: any): Date => {
   const date = value instanceof Date ? value
@@ -19,6 +20,7 @@ const active = (item: { estado?: string; en_papelera?: boolean }) =>
 export const leerMovimiento = (id: string, data: any): Movimiento => ({
   ...data,
   id,
+  folio: folioComercial(data.folio),
   fecha: fechaRegistro(data.fecha),
   cantidad: amount(data.cantidad),
   referencia: String(data.referencia || ""),
@@ -30,7 +32,7 @@ export const leerMovimiento = (id: string, data: any): Movimiento => ({
 export const leerVenta = (id: string, data: any): Venta => ({
   ...data,
   id,
-  folio: String(data.folio || id),
+  folio: folioComercial(String(data.folio || id)),
   fecha: fechaRegistro(data.fecha),
   fecha_str: data.fecha_str || fechaLocal(fechaRegistro(data.fecha)),
   items: Array.isArray(data.items) ? data.items.filter(Boolean).map((item: any) => ({
@@ -85,7 +87,7 @@ export const construirPedidos = (ventas: Venta[], movimientos: Movimiento[]): Pe
       .reduce((sum, item) => sum + Math.max(0, amount(item.ingreso_reconocido)), 0)));
     const saldo = Math.max(0, money(total - recibido));
     legacy.push({
-      venta_id: ventaId, es_consolidado: false, folio: first.folio || ventaId,
+      venta_id: ventaId, es_consolidado: false, folio: folioComercial(first.folio || ventaId),
       cliente_id: first.cliente_id, cliente_nombre: first.cliente_nombre || "Cliente sin nombre",
       canal_venta: first.canal_venta as PedidoVenta["canal_venta"],
       canal_venta_nombre: first.canal_venta_nombre || (first.canal_venta === "mayoreo" ? "Mayoreo" : "Bajo pedido"),
@@ -99,7 +101,7 @@ export const construirPedidos = (ventas: Venta[], movimientos: Movimiento[]): Pe
   });
   const masters: PedidoVenta[] = ventas.filter(item => active(item) && item.afecta_stock === false &&
     (item.canal_venta === "bajo_pedido" || item.canal_venta === "mayoreo")).map(item => ({
-    venta_id: item.id, es_consolidado: true, folio: item.folio, cliente_id: item.cliente_id,
+    venta_id: item.id, es_consolidado: true, folio: folioComercial(item.folio), cliente_id: item.cliente_id,
     cliente_nombre: item.cliente_nombre, canal_venta: item.canal_venta as PedidoVenta["canal_venta"],
     canal_venta_nombre: item.canal_venta_nombre, fecha: fechaRegistro(item.fecha), total: item.total,
     recibido: item.recibido, saldo: item.saldo,
