@@ -35,7 +35,7 @@ export interface Producto {
 
 export interface Movimiento {
   id?: string;
-  folio?: string; // Folio consecutivo único: Entrada-1, Salida-1, Transferencia-1
+  folio?: string; // Folio comercial: VTA-00001, ENT-00001, AJU-00001
   sku: string;
   almacen_id?: string;
   tipo: "entrada" | "salida" | "ajuste" | "transferencia";
@@ -374,7 +374,7 @@ export interface CompraItem {
 
 export interface Compra {
   id?: string;
-  folio: string; // ej. COMP-1
+  folio: string; // ej. CMP-00001
   proveedor: string;
   fecha: {
     seconds: number;
