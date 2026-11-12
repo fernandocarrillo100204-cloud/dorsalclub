@@ -547,6 +547,7 @@ export const METODOS_PAGO_GASTO: MetodoPagoGasto[] = [
 
 export interface Gasto {
   id?: string;
+  folio?: string; // GTO-00001 para nuevos gastos; los históricos no se alteran
   concepto: string;
   categoria: CategoriaGasto | string;
   monto: number;
@@ -585,6 +586,7 @@ export type TipoMovimientoFinanciero =
 
 export interface MovimientoFinancieroManual {
   id?: string;
+  folio?: string; // AJU-00001 en ajustes de caja
   tipo: TipoMovimientoFinanciero;
   concepto: string;
   monto: number;
