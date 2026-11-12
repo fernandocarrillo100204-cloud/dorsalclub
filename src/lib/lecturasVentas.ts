@@ -94,7 +94,7 @@ export const construirPedidos = (ventas: Venta[], movimientos: Movimiento[]): Pe
       fecha_estimada: tracking?.pedido_fecha_estimada ?? first.pedido_fecha_estimada,
       comentarios: tracking?.pedido_comentarios ?? first.pedido_comentarios ?? first.comentarios_venta,
       ubicacion_entrega_nombre: first.ubicacion_entrega_nombre, repartidor_nombre: first.repartidor_nombre,
-      items: ordered.map(item => ({ sku: item.sku, cantidad: amount(item.cantidad), precio_unitario: amount(item.precio_unitario_venta), total: amount(item.total_venta) }))
+      items: ordered.map(item => ({ sku: item.sku, talla: item.talla, cantidad: amount(item.cantidad), precio_unitario: amount(item.precio_unitario_venta), total: amount(item.total_venta) }))
     });
   });
   const masters: PedidoVenta[] = ventas.filter(item => active(item) && item.afecta_stock === false &&
@@ -106,7 +106,7 @@ export const construirPedidos = (ventas: Venta[], movimientos: Movimiento[]): Pe
     estado: item.estado_pedido === "entregado" ? "entregado" : item.saldo <= 0 ? "pagado" : "pedido",
     fecha_estimada: item.fecha_estimada, comentarios: item.comentarios_pedido ?? item.comentarios,
     ubicacion_entrega_nombre: item.ubicacion_entrega_nombre, repartidor_nombre: item.repartidor_nombre,
-    items: item.items.map(line => ({ sku: line.sku, cantidad: line.cantidad, precio_unitario: line.precio_unitario, total: line.total })), pagos: item.pagos
+    items: item.items.map(line => ({ sku: line.sku, talla: line.talla, cantidad: line.cantidad, precio_unitario: line.precio_unitario, total: line.total })), pagos: item.pagos
   }));
   return [...masters, ...legacy].sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
 };
