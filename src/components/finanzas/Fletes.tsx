@@ -3,7 +3,7 @@ import { CheckCircle2, CircleDashed, Eye, Pencil, RefreshCw, Search } from "luci
 import { firestoreService } from "../../lib/firebase";
 import type { Venta } from "../../types";
 import { mensajeError } from "../../lib/errores";
-import { type FleteVenta, totalFletes } from "../../lib/fletesVentas";
+import { type FleteVenta, totalFletes, mesFlete, mesesConFletes, adeudosPorRepartidor } from "../../lib/fletesVentas";
 import { useConsulta } from "../../hooks/useConsulta";
 import { ErrorState, FilterSummary, LoadingState, PageHeader, StatCard } from "../ui/Page";
 import { MoneyInput } from "../ui/NumericInputs";
@@ -13,6 +13,7 @@ const money = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN
 const date = new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric" });
 const dateTime = new Intl.DateTimeFormat("es-MX", { dateStyle: "medium", timeStyle: "short" });
 const pageSize = 30;
+const monthName = new Intl.DateTimeFormat("es-MX", { month: "long", year: "numeric" });
 
 function Dato({ label, value }: { label: string; value?: string | null }) {
   return <div className="min-w-0">
@@ -39,6 +40,7 @@ export default function Fletes() {
   const consultar = useCallback(() => firestoreService.getFletesVentas(), []);
   const { data, loading, refreshing, error, cargar } = useConsulta("fletes-ventas", consultar);
   const [search, setSearch] = useState("");
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const [visible, setVisible] = useState(pageSize);
   const [detalle, setDetalle] = useState<FleteVenta | null>(null);
   const [editando, setEditando] = useState<FleteVenta | null>(null);
@@ -48,14 +50,23 @@ export default function Fletes() {
   const [master, setMaster] = useState<Venta | null>(null);
   const [masterLoading, setMasterLoading] = useState(false);
 
+  const availableMonths = useMemo(() => mesesConFletes(data || []), [data]);
+  // Al abrir: último mes con registros; "Todos los meses" queda disponible.
+  const activeMonth = selectedMonth === null ? (availableMonths[0] || "todos") : selectedMonth;
+  const monthlyFletes = useMemo(() => activeMonth === "todos"
+    ? (data || [])
+    : (data || []).filter(item => mesFlete(item.fecha) === activeMonth), [data, activeMonth]);
+  const adeudos = useMemo(() => adeudosPorRepartidor(monthlyFletes), [monthlyFletes]);
+  const totalAdeudado = adeudos.reduce((sum, item) => sum + Math.round(item.totalPendiente * 100), 0) / 100;
+
   const filtered = useMemo(() => {
     const term = search.trim().toLocaleLowerCase("es-MX");
-    if (!term) return data || [];
-    return (data || []).filter(item =>
+    if (!term) return monthlyFletes;
+    return monthlyFletes.filter(item =>
       [item.folio, item.quienEntrega, item.ubicacionEntrega]
         .some(value => (value || "").toLocaleLowerCase("es-MX").includes(term))
     );
-  }, [data, search]);
+  }, [monthlyFletes, search]);
 
   useEffect(() => {
     const id = detalle?.ventaId;
@@ -135,14 +146,25 @@ export default function Fletes() {
     {actionError && !editando && <ErrorState message={actionError} onRetry={() => { setActionError(""); void cargar(); }} />}
     <div className="grid gap-3 sm:grid-cols-2">
       <StatCard label="Costo total de fletes" tone="warning"
-        value={loading && !data ? "—" : money.format(totalFletes(data || []))}
+        value={loading && !data ? "—" : money.format(totalFletes(monthlyFletes))}
         hint="Costo registrado en ventas, pagado o pendiente" />
       <StatCard label="Entregas con costo registrado"
-        value={loading && !data ? "—" : (data || []).length}
+        value={loading && !data ? "—" : monthlyFletes.length}
         hint="Ventas activas con costo de entrega" />
     </div>
-    <div className="surface p-4">
-      <label className="relative block">
+    <div className="surface p-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+      <label className="block sm:w-64 shrink-0">
+        <span className="mb-1.5 block text-xs font-semibold">Mes de los fletes</span>
+        <select aria-label="Mes de los fletes" value={activeMonth}
+          onChange={event => { setSelectedMonth(event.target.value); setVisible(pageSize); }}
+          className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2.5 text-sm">
+          <option value="todos">Todos los meses</option>
+          {availableMonths.map(month => <option key={month} value={month}>
+            {monthName.format(new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1))}
+          </option>)}
+        </select>
+      </label>
+      <label className="relative block flex-1">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
         <input type="search" aria-label="Buscar fletes" value={search}
           onChange={event => { setSearch(event.target.value); setVisible(pageSize); }}
@@ -168,7 +190,7 @@ export default function Fletes() {
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
               {filtered.length === 0 ? <tr><td colSpan={6} className="px-5 py-12 text-center text-zinc-500">
-                {error && !data ? "No se pudieron cargar los fletes." : search ? "No se encontraron fletes con esa búsqueda." : "Todavía no hay entregas con un costo registrado."}
+                {error && !data ? "No se pudieron cargar los fletes." : search ? "No se encontraron fletes con esa búsqueda." : "No hay fletes registrados en este periodo."}
               </td></tr> : filtered.slice(0, visible).map(flete => (
                 <tr key={flete.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
                   <td className="px-4 py-3 whitespace-nowrap text-zinc-600 dark:text-zinc-300">
@@ -209,6 +231,42 @@ export default function Fletes() {
           </div>}
         </div>
       )}
+    </section>
+    <section className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-4 border-b border-zinc-200 dark:border-zinc-800">
+        <div>
+          <h2 className="text-sm font-semibold">Pendiente de pagar por repartidor</h2>
+          <p className="mt-1 text-xs text-zinc-500">Todos los fletes no pagados del periodo seleccionado, aunque no coincidan con la búsqueda.</p>
+        </div>
+        <strong className="font-mono tabular-nums text-lg">{money.format(totalAdeudado)}</strong>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-zinc-50 dark:bg-zinc-800/60 text-xs text-zinc-500 uppercase">
+            <tr>
+              <th className="px-4 py-3">Quién entregó</th>
+              <th className="px-4 py-3 text-right">Fletes sin pagar</th>
+              <th className="px-4 py-3 text-right">Total a pagar</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            {adeudos.length === 0 ? <tr><td colSpan={3} className="px-4 py-6 text-center text-zinc-500">No hay fletes pendientes de pago en este periodo.</td></tr> :
+              adeudos.map(item => <tr key={item.repartidor}>
+                <td className="px-4 py-3 font-medium">{item.repartidor}</td>
+                <td className="px-4 py-3 text-right tabular-nums">{item.entregasPendientes}</td>
+                <td className="px-4 py-3 text-right font-semibold font-mono tabular-nums">{money.format(item.totalPendiente)}</td>
+              </tr>)}
+          </tbody>
+          <tfoot className="border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40">
+            <tr>
+              <th className="px-4 py-3 text-left">Total pendiente</th>
+              <td className="px-4 py-3 text-right tabular-nums">{adeudos.reduce((sum, item) => sum + item.entregasPendientes, 0)}</td>
+              <td className="px-4 py-3 text-right font-semibold font-mono tabular-nums">{money.format(totalAdeudado)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <p className="px-4 py-3 text-xs text-zinc-500 border-t border-zinc-200 dark:border-zinc-800">Los fletes sin estado confirmado también cuentan como no pagados. Los que no tienen repartidor se presentan por separado. El mes corresponde a la fecha del registro del flete.</p>
     </section>
     <p className="text-xs text-zinc-500 dark:text-zinc-400">
       Los fletes pendientes se muestran aquí sin descontarse del balance. Solo al marcarlos como pagados
