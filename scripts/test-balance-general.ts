@@ -60,8 +60,6 @@ assert.equal(mixed.movimientos.length, 7, "Un cobro por venta, abono, devolució
 assert.equal(mixed.movimientos.reduce((sum, row) => sum + Math.round(row.ingreso * 100), 0), Math.round(mixed.ingresos * 100));
 assert.equal(mixed.movimientos.reduce((sum, row) => sum + Math.round(row.egreso * 100), 0), Math.round(mixed.egresos * 100));
 assert.ok(mixed.movimientos.find(row => row.id === "venta-sale")?.descripcion.includes("SKU-A, 1 × SKU-B"));
-assert.match(table, />Folio<\/th>/, "El balance tiene una columna de folio.");
-assert.match(table, />COMP-1<\/td>/, "Los folios de compras aparecen en su propia columna.");
 assert.equal(mixed.movimientos.find(row => row.id === "venta-sale")?.comentario, "Entrega personal");
 assert.equal(mixed.movimientos.find(row => row.tipo === "Compra")?.egreso, 440);
 assert.equal(mixed.movimientos.find(row => row.tipo === "Compra")?.comentario, "Primer pedido");
@@ -69,6 +67,8 @@ assert.equal(mixed.movimientos.find(row => row.tipo === "Reembolso")?.ingreso, -
 assert.equal(mixed.movimientos.find(row => row.tipo === "Gasto extra")?.gasto?.id, expense.id);
 const { default: MovimientosBalance } = await import("../src/components/finanzas/MovimientosBalance");
 const table = renderToStaticMarkup(React.createElement(MovimientosBalance, { data: mixed, loading: false, busy: false, onEdit: () => {}, onArchive: () => {} }));
+assert.match(table, />Folio<\/th>/, "El balance tiene una columna de folio.");
+assert.match(table, />COMP-1<\/td>/, "Los folios de compras aparecen en su propia columna.");
 for (const text of ["Movimientos", "Descripción", "Comentario", "Primer pedido", "Reembolso", "Entrega personal", "Total acumulado"]) assert.ok(table.includes(text));
 assert.ok(!table.includes("No necesitas capturarlos otra vez"));
 const emptyTable = renderToStaticMarkup(React.createElement(MovimientosBalance, { data: calcularBalanceGeneral([], [], [], []), loading: false, busy: false, onEdit: () => {}, onArchive: () => {} }));
