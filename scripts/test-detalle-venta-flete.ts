@@ -20,12 +20,13 @@ const original: Movimiento = {
   drop_id: "drop-1", drop_nombre: "DROP 1",
   venta_total_recibido: 1050, ingreso_reconocido: 1050,
   venta_subtotal: 1050, venta_total_cobrado: 1050, venta_saldo_pendiente: 0,
-  costo_envio_venta: 25, total_costos_venta: 25,
+  costo_envio_venta: 25, total_costos_venta: 25, estado_pago_flete: "pagado",
   repartidor_nombre: "Fernando", ubicacion_entrega_nombre: "Galerías Monterrey"
 };
 const balance = calcularBalanceGeneral([original], [], [], []);
 assert.equal(balance.ingresos, 1050);
 assert.equal(balance.egresos, 25);
+assert.equal(calcularBalanceGeneral([{ ...original, estado_pago_flete: "pendiente" }], [], [], []).egresos, 0, "Un flete pendiente no se descuenta del balance.");
 assert.equal(balance.balance, 1025);
 const sale = balance.movimientos.find(row => row.tipo === "Anticipo");
 const cost = balance.movimientos.find(row => row.tipo === "Costo de venta");

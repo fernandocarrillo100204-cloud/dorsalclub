@@ -51,7 +51,7 @@ assert.ok(remote.queries.some(q => q.path === "movimientos" && q.constraints?.so
 const before = await remote.service.getBalanceGeneral();
 await remote.service.getFletesVentas();
 const after = await remote.service.getBalanceGeneral();
-assert.equal(before.costosVentas, 190.5);
+assert.equal(before.costosVentas, 0, "Sin confirmación de pago no se registra egreso por fletes.");
 assert.equal(before.egresos, after.egresos, "Consultar Fletes no duplica egresos.");
 assert.equal(before.balance, after.balance);
 // SSR no dispone de almacenamiento del navegador; simularlo al montar el componente.
@@ -90,6 +90,8 @@ assert.equal(autoFletes[0].costo, 80);
 assert.equal(autoFletes[0].quienEntrega, "Alicia");
 assert.equal(autoFletes[0].ubicacionEntrega, "Apodaca");
 const autoBalance = await integration.service.getBalanceGeneral();
-assert.equal(autoBalance.costosVentas, 80, "El mismo costo solo se registra una vez en Balance general.");
+assert.equal(autoBalance.costosVentas, 0, "El flete recién registrado no es egreso hasta marcarlo pagado.");
+await integration.service.actualizarFleteVenta(autoFletes[0], { estadoPago: "pagado" });
+assert.equal((await integration.service.getBalanceGeneral()).costosVentas, 80, "Un flete pagado se registra una sola vez.");
 
 console.log("Fletes: registros históricos, ventas reales, costos, responsables, destinos y balance sin duplicación aprobados.");

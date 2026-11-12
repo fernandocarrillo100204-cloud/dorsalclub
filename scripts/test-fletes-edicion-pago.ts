@@ -3,7 +3,7 @@ import React from "react";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { firebaseInMemory } from "./helpers/firestoreMemory";
-import { repartirCostoFlete, obtenerFletesDeMovimientos } from "../src/lib/fletesVentas";
+import { repartirCostoFlete, obtenerFletesDeMovimientos, mesFlete, mesesConFletes, adeudosPorRepartidor } from "../src/lib/fletesVentas";
 import type { Movimiento } from "../src/types";
 
 const now = new Date("2026-11-11T12:00:00");
@@ -26,6 +26,18 @@ for (const invalid of [0, -1, NaN, Infinity, 1.234, 1000000000]) {
   assert.throws(() => repartirCostoFlete(base, invalid), /costo del flete/i);
 }
 assert.deepEqual(obtenerFletesDeMovimientos(base).map(flete => flete.costo), [60]);
+const examples = [
+  { ...obtenerFletesDeMovimientos([move("n1", 40, { venta_id: "n1", repartidor_nombre: "Alex", estado_pago_flete: "pendiente" })])[0], fecha: new Date(2026, 10, 1) },
+  { ...obtenerFletesDeMovimientos([move("n2", 60, { venta_id: "n2", repartidor_nombre: "alex" })])[0], fecha: new Date(2026, 10, 2) },
+  { ...obtenerFletesDeMovimientos([move("n3", 90, { venta_id: "n3", repartidor_nombre: "Alex", estado_pago_flete: "pagado" })])[0], fecha: new Date(2026, 10, 3) },
+  { ...obtenerFletesDeMovimientos([move("n4", 25, { venta_id: "n4" })])[0], fecha: new Date(2026, 9, 30) }
+];
+assert.deepEqual(mesesConFletes(examples), ["2026-11", "2026-10"]);
+assert.equal(mesFlete(new Date(0)), "", "Fecha faltante no inventa periodo.");
+const noviembre = examples.filter(item => mesFlete(item.fecha) === "2026-11");
+assert.deepEqual(adeudosPorRepartidor(noviembre).map(item => [item.repartidor, item.entregasPendientes, item.totalPendiente]), [["Alex", 2, 100]]);
+assert.equal(adeudosPorRepartidor(examples).reduce((sum, item) => sum + item.totalPendiente, 0), 125, "Meses, pendientes y repartidores sin nombre.");
+
 
 // El simulador de Firebase se ejecuta en Node y necesita almacenamiento de prueba.
 const localStorageDatos = new Map<string, string>();
@@ -124,4 +136,6 @@ Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
   getItem: () => null, setItem: () => {}, removeItem: () => {}
 }});
 assert.match(renderToStaticMarkup(React.createElement(Fletes)), /Costo total de fletes/);
+assert.match(view, /Mes de los fletes/);
+assert.match(view, /Pendiente de pagar por repartidor/);
 console.log("Fletes: edición, estatus pagado/pendiente, histórico, balance, cobro de cliente y detalle aprobados.");
