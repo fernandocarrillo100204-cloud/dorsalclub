@@ -246,7 +246,7 @@ export default function Fletes() {
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 dark:border-zinc-800 pt-4">
           <p className="text-xs text-zinc-500">El estado de pago al repartidor no afecta lo cobrado al cliente.</p>
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn-secondary" disabled={Boolean(busyId)}
+            <button type="button" className="btn-secondary"
               onClick={() => void actualizarEstado(detalle, "pendiente")}
               disabled={Boolean(busyId) || detalle.estadoPago === "pendiente"}>Marcar pendiente</button>
             <button type="button" className="btn-primary"
