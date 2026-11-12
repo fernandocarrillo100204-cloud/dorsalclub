@@ -267,7 +267,7 @@ export interface PedidoVenta {
   comentarios?: string;
   ubicacion_entrega_nombre?: string;
   repartidor_nombre?: string;
-  items: Array<{ sku: string; cantidad: number; precio_unitario: number; total: number }>;
+  items: Array<{ sku: string; talla?: string; cantidad: number; precio_unitario: number; total: number }>;
   pagos?: PagoVenta[];
 }
 
