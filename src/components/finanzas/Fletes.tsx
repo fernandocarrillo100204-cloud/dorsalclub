@@ -58,6 +58,8 @@ export default function Fletes() {
     : (data || []).filter(item => mesFlete(item.fecha) === activeMonth), [data, activeMonth]);
   const adeudos = useMemo(() => adeudosPorRepartidor(monthlyFletes), [monthlyFletes]);
   const totalAdeudado = adeudos.reduce((sum, item) => sum + Math.round(item.totalPendiente * 100), 0) / 100;
+  const totalPagado = adeudos.reduce((sum, item) => sum + Math.round(item.totalPagado * 100), 0) / 100;
+  const totalPeriodo = Math.round((totalAdeudado + totalPagado) * 100) / 100;
 
   const filtered = useMemo(() => {
     const term = search.trim().toLocaleLowerCase("es-MX");
@@ -235,38 +237,53 @@ export default function Fletes() {
     <section className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-4 border-b border-zinc-200 dark:border-zinc-800">
         <div>
-          <h2 className="text-sm font-semibold">Pendiente de pagar por repartidor</h2>
-          <p className="mt-1 text-xs text-zinc-500">Todos los fletes no pagados del periodo seleccionado, aunque no coincidan con la búsqueda.</p>
+          <h2 className="text-sm font-semibold">Resumen de fletes por repartidor</h2>
+          <p className="mt-1 text-xs text-zinc-500">Desglose de fletes pendientes y pagados del periodo seleccionado.</p>
         </div>
-        <strong className="font-mono tabular-nums text-lg">{money.format(totalAdeudado)}</strong>
+        <div className="text-right">
+          <p className="text-xs text-zinc-500">Total pendiente por pagar</p>
+          <strong className="font-mono tabular-nums text-lg">{money.format(totalAdeudado)}</strong>
+        </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
+        <table className="w-full min-w-[850px] text-left text-sm">
           <thead className="bg-zinc-50 dark:bg-zinc-800/60 text-xs text-zinc-500 uppercase">
             <tr>
               <th className="px-4 py-3">Quién entregó</th>
-              <th className="px-4 py-3 text-right">Fletes sin pagar</th>
-              <th className="px-4 py-3 text-right">Total a pagar</th>
+              <th className="px-4 py-3 text-right">Fletes pendientes</th>
+              <th className="px-4 py-3 text-right">Total pendiente</th>
+              <th className="px-4 py-3 text-right">Fletes pagados</th>
+              <th className="px-4 py-3 text-right">Total pagado</th>
+              <th className="px-4 py-3 text-right">Total fletes</th>
+              <th className="px-4 py-3 text-right">Importe total</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {adeudos.length === 0 ? <tr><td colSpan={3} className="px-4 py-6 text-center text-zinc-500">No hay fletes pendientes de pago en este periodo.</td></tr> :
+            {adeudos.length === 0 ? <tr><td colSpan={7} className="px-4 py-6 text-center text-zinc-500">No hay fletes registrados en este periodo.</td></tr> :
               adeudos.map(item => <tr key={item.repartidor}>
                 <td className="px-4 py-3 font-medium">{item.repartidor}</td>
                 <td className="px-4 py-3 text-right tabular-nums">{item.entregasPendientes}</td>
-                <td className="px-4 py-3 text-right font-semibold font-mono tabular-nums">{money.format(item.totalPendiente)}</td>
+                <td className="px-4 py-3 text-right font-mono tabular-nums">{money.format(item.totalPendiente)}</td>
+                <td className="px-4 py-3 text-right tabular-nums">{item.entregasPagadas}</td>
+                <td className="px-4 py-3 text-right font-mono tabular-nums">{money.format(item.totalPagado)}</td>
+                <td className="px-4 py-3 text-right tabular-nums">{item.totalFletes}</td>
+                <td className="px-4 py-3 text-right font-semibold font-mono tabular-nums">{money.format(item.importeTotal)}</td>
               </tr>)}
           </tbody>
           <tfoot className="border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40">
             <tr>
-              <th className="px-4 py-3 text-left">Total pendiente</th>
+              <th className="px-4 py-3 text-left">Total general</th>
               <td className="px-4 py-3 text-right tabular-nums">{adeudos.reduce((sum, item) => sum + item.entregasPendientes, 0)}</td>
-              <td className="px-4 py-3 text-right font-semibold font-mono tabular-nums">{money.format(totalAdeudado)}</td>
+              <td className="px-4 py-3 text-right font-mono tabular-nums">{money.format(totalAdeudado)}</td>
+              <td className="px-4 py-3 text-right tabular-nums">{adeudos.reduce((sum, item) => sum + item.entregasPagadas, 0)}</td>
+              <td className="px-4 py-3 text-right font-mono tabular-nums">{money.format(totalPagado)}</td>
+              <td className="px-4 py-3 text-right tabular-nums">{adeudos.reduce((sum, item) => sum + item.totalFletes, 0)}</td>
+              <td className="px-4 py-3 text-right font-semibold font-mono tabular-nums">{money.format(totalPeriodo)}</td>
             </tr>
           </tfoot>
         </table>
       </div>
-      <p className="px-4 py-3 text-xs text-zinc-500 border-t border-zinc-200 dark:border-zinc-800">Los fletes sin estado confirmado también cuentan como no pagados. Los que no tienen repartidor se presentan por separado. El mes corresponde a la fecha del registro del flete.</p>
+      <p className="px-4 py-3 text-xs text-zinc-500 border-t border-zinc-200 dark:border-zinc-800">Los fletes sin confirmar cuentan como pendientes. Los importes corresponden al mes de registro del flete, independientemente de la fecha de pago. El resumen incluye todo el periodo, aunque haya filtros de búsqueda o paginación.</p>
     </section>
     <p className="text-xs text-zinc-500 dark:text-zinc-400">
       Los fletes pendientes se muestran aquí sin descontarse del balance. Solo al marcarlos como pagados

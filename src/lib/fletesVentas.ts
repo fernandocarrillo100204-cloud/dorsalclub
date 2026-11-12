@@ -141,27 +141,45 @@ export interface AdeudoRepartidor {
   repartidor: string;
   entregasPendientes: number;
   totalPendiente: number;
+  entregasPagadas: number;
+  totalPagado: number;
+  totalFletes: number;
+  importeTotal: number;
 }
 
-/** Resumen sobre todos los fletes del mes (independiente del buscador y paginación).
- * Un flete sin estado confirmado se trata como no pagado, nunca como pagado.
+/** Resume todo el periodo por repartidor; fletes sin estado confirmado son pendientes.
+ * Acumula en centavos para conservar importes exactos y evitar duplicaciones.
  */
 export function adeudosPorRepartidor(fletes: FleteVenta[]): AdeudoRepartidor[] {
-  const grouped = new Map<string, { repartidor: string; cantidad: number; centavos: number }>();
+  const grouped = new Map<string, {
+    repartidor: string;
+    pendientes: number;
+    centavosPendientes: number;
+    pagados: number;
+    centavosPagados: number;
+  }>();
   for (const flete of fletes) {
-    if (flete.estadoPago === "pagado") continue;
     const repartidor = flete.quienEntrega?.trim() || "Sin repartidor asignado";
     const key = repartidor.toLocaleLowerCase("es-MX");
-    const previous = grouped.get(key) || { repartidor, cantidad: 0, centavos: 0 };
-    previous.cantidad++;
-    previous.centavos += Math.round(flete.costo * 100);
-    grouped.set(key, previous);
+    const item = grouped.get(key) || { repartidor, pendientes: 0, centavosPendientes: 0, pagados: 0, centavosPagados: 0 };
+    if (flete.estadoPago === "pagado") {
+      item.pagados += 1;
+      item.centavosPagados += Math.round(flete.costo * 100);
+    } else {
+      item.pendientes += 1;
+      item.centavosPendientes += Math.round(flete.costo * 100);
+    }
+    grouped.set(key, item);
   }
   return [...grouped.values()]
     .map(item => ({
       repartidor: item.repartidor,
-      entregasPendientes: item.cantidad,
-      totalPendiente: item.centavos / 100
+      entregasPendientes: item.pendientes,
+      totalPendiente: item.centavosPendientes / 100,
+      entregasPagadas: item.pagados,
+      totalPagado: item.centavosPagados / 100,
+      totalFletes: item.pendientes + item.pagados,
+      importeTotal: (item.centavosPendientes + item.centavosPagados) / 100
     }))
     .sort((a, b) => b.totalPendiente - a.totalPendiente || a.repartidor.localeCompare(b.repartidor, "es-MX"));
 }

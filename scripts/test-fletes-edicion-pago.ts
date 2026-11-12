@@ -35,7 +35,7 @@ const examples = [
 assert.deepEqual(mesesConFletes(examples), ["2026-11", "2026-10"]);
 assert.equal(mesFlete(new Date(0)), "", "Fecha faltante no inventa periodo.");
 const noviembre = examples.filter(item => mesFlete(item.fecha) === "2026-11");
-assert.deepEqual(adeudosPorRepartidor(noviembre).map(item => [item.repartidor, item.entregasPendientes, item.totalPendiente]), [["Alex", 2, 100]]);
+assert.deepEqual(adeudosPorRepartidor(noviembre).map(item => [item.repartidor, item.entregasPendientes, item.totalPendiente, item.entregasPagadas, item.totalPagado, item.totalFletes, item.importeTotal]), [["Alex", 2, 100, 1, 90, 3, 190]]);
 assert.equal(adeudosPorRepartidor(examples).reduce((sum, item) => sum + item.totalPendiente, 0), 125, "Meses, pendientes y repartidores sin nombre.");
 
 
@@ -137,5 +137,8 @@ Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
 }});
 assert.match(renderToStaticMarkup(React.createElement(Fletes)), /Costo total de fletes/);
 assert.match(view, /Mes de los fletes/);
-assert.match(view, /Pendiente de pagar por repartidor/);
+assert.match(view, /Resumen de fletes por repartidor/);
+assert.match(view, /Fletes pagados/);
+assert.match(view, /Total pagado/);
+assert.equal(adeudosPorRepartidor(examples).reduce((sum, item) => sum + item.totalPagado, 0), 90, "Un flete pagado se suma solamente en pagados.");
 console.log("Fletes: edición, estatus pagado/pendiente, histórico, balance, cobro de cliente y detalle aprobados.");
