@@ -48,7 +48,8 @@ export default function DetalleVentaBalance({ movimiento, ventaActual, cargandoV
   const values = resumenCobroVenta(registro, ventaActual, partidas);
   const reembolso = movimiento.ingreso < 0;
   const abono = registro.subtipo === "abono_venta";
-  const titulo = reembolso ? "Reembolso registrado" : abono ? "Abono recibido" : "Cobro registrado";
+  const liquidacion = abono && registro.estado_pago === "pagado" && typeof registro.venta_saldo_pendiente === "number" && registro.venta_saldo_pendiente <= 0;
+  const titulo = reembolso ? "Reembolso registrado" : liquidacion ? "Liquidación recibida" : abono ? "Abono recibido" : "Cobro registrado";
   const fecha = movimiento.fecha.getTime() ? dateTime.format(movimiento.fecha) : "Sin fecha";
   const unidades = partidas.reduce((sum, item) => sum + item.cantidad, 0);
   const statusCurrent = estadoVentaActual(ventaActual);
@@ -61,7 +62,7 @@ export default function DetalleVentaBalance({ movimiento, ventaActual, cargandoV
         <div className="space-y-2">
           <span className="inline-flex items-center gap-1.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-1 text-[11px] font-semibold">
             {reembolso ? <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true"/> : <ArrowDownLeft className="h-3.5 w-3.5" aria-hidden="true"/>}
-            {reembolso ? "Devolución" : abono ? "Abono" : "Venta"}
+            {reembolso ? "Devolución" : liquidacion ? "Liquidación" : abono ? "Abono" : "Venta"}
           </span>
           <p className="text-zinc-500 dark:text-zinc-400 text-xs">{titulo}</p>
         </div>
