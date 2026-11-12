@@ -13,3 +13,16 @@ export const pedidosPendientesPago = (pedidos: PedidoVenta[]): PedidoVenta[] =>
 
 export const saldoPendientePedidos = (pedidos: PedidoVenta[]): number =>
   Math.round(pedidosPendientesPago(pedidos).reduce((total, pedido) => total + pedido.saldo, 0) * 100) / 100;
+
+/** Solo es válido recibir el saldo completo; la diferencia se calcula en centavos. */
+export function validarLiquidacionPedido(saldo: number, monto: number): number {
+  const saldoCentavos = Math.round(saldo * 100);
+  const montoCentavos = Math.round(monto * 100);
+  if (!Number.isFinite(saldo) || saldoCentavos <= 0) {
+    throw new Error("Este pedido ya está pagado.");
+  }
+  if (!Number.isFinite(monto) || montoCentavos !== saldoCentavos) {
+    throw new Error(`Solo se permite liquidar el saldo pendiente completo de $${(saldoCentavos / 100).toFixed(2)}.`);
+  }
+  return saldoCentavos / 100;
+}

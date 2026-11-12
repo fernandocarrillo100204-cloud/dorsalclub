@@ -92,6 +92,7 @@ import { allocateRecognizedSaleIncome, calculateSaleTotals, requiresSaleRefund }
 import { construirPedidos, fechaRegistro, leerMovimiento, leerVenta } from "./lecturasVentas";
 import { calcularInventarioDrop, dropsDeVenta, validarDemandaDrops } from "./inventarioDrops";
 import { calcularBalanceGeneral, type BalanceGeneral } from "./balanceGeneral";
+import { validarLiquidacionPedido } from "./pedidosPendientes";
 import { ajustePeriodosRegistrosVenta, registrosIndiceVenta } from "./papeleraVentas";
 import { obtenerFletesDeMovimientos, repartirCostoFlete, type FleteVenta, costoVentaEfectivamentePagado } from "./fletesVentas";
 import type { DetalleInventarioDrop, InventarioDropFila } from "./inventarioDrops";
@@ -2123,6 +2124,7 @@ export const firestoreService = {
     );
   },
 
+  // "abono_venta" se conserva como subtipo interno para compatibilidad con los historiales.
   registrarPagoPedido: async (ventaId: string, monto: number, metodoPago: string): Promise<void> => {
     const cleanAmount = Math.round((Number(monto) + Number.EPSILON) * 100) / 100;
     if (!Number.isFinite(cleanAmount) || cleanAmount <= 0) throw new Error("El pago debe ser mayor a cero.");
@@ -2148,7 +2150,7 @@ export const firestoreService = {
           const currentReceived = Math.max(0, Number(data.recibido) || 0);
           const currentBalance = Math.max(0, Math.round((total - currentReceived + Number.EPSILON) * 100) / 100);
           if (currentBalance <= 0) throw new Error("Este pedido ya está pagado.");
-          if (cleanAmount > currentBalance) throw new Error(`El pago no puede superar el saldo de $${currentBalance.toFixed(2)}.`);
+          validarLiquidacionPedido(currentBalance, cleanAmount);
           const timestamp = Timestamp.now();
           const nuevoRecibido = Math.round((currentReceived + cleanAmount + Number.EPSILON) * 100) / 100;
           const nuevoSaldo = Math.max(0, Math.round((total - nuevoRecibido + Number.EPSILON) * 100) / 100);
@@ -2163,14 +2165,14 @@ export const firestoreService = {
             actualizado_at: timestamp
           });
           transaction.set(paymentRef, {
-            folio: `Abono-${data.folio || ventaId}`,
+            folio: `Liquidación-${data.folio || ventaId}`,
             venta_relacionada_id: ventaId,
             subtipo: "abono_venta",
             sku: "ABONO",
 
             tipo: "salida",
             cantidad: 1,
-            referencia: `Pago de ${data.folio || ventaId}`,
+            referencia: `Liquidación de ${data.folio || ventaId}`,
             usuario: user?.email || "Sistema",
             fecha: timestamp,
             estado: "activo",
@@ -2221,19 +2223,19 @@ export const firestoreService = {
         const previousPayments = currentPayments.reduce((sum, item) => sum + (item.exists() && item.data().estado !== "anulado" && item.data().en_papelera !== true ? Math.max(0, Number(item.data().ingreso_reconocido) || 0) : 0), 0);
         const saldoActual = Math.max(0, Math.round((total - initialReceived - previousPayments + Number.EPSILON) * 100) / 100);
         if (saldoActual <= 0) throw new Error("Este pedido ya está pagado.");
-        if (cleanAmount > saldoActual) throw new Error(`El pago no puede superar el saldo de $${saldoActual.toFixed(2)}.`);
+        validarLiquidacionPedido(saldoActual, cleanAmount);
         const nuevoSaldo = Math.max(0, Math.round((saldoActual - cleanAmount + Number.EPSILON) * 100) / 100);
         const timestamp = Timestamp.now();
 
         transaction.set(paymentRef, {
-          folio: `Abono-${data.folio || ventaId}`,
+          folio: `Liquidación-${data.folio || ventaId}`,
           venta_relacionada_id: ventaId,
           subtipo: "abono_venta",
           sku: "ABONO",
 
           tipo: "salida",
           cantidad: 1,
-          referencia: `Pago de ${data.folio || ventaId}`,
+          referencia: `Liquidación de ${data.folio || ventaId}`,
           usuario: user?.email || "Sistema",
           fecha: timestamp,
           estado: "activo",
@@ -2266,12 +2268,12 @@ export const firestoreService = {
       if (masterIndex >= 0) {
         const sale = masterSales[masterIndex];
         if (sale.estado === "anulado" || sale.estado === "devuelto" || sale.en_papelera) throw new Error("El pedido está cancelado, devuelto o ya no está disponible.");
-        if (cleanAmount > sale.saldo) throw new Error(`El pago no puede superar el saldo de $${sale.saldo.toFixed(2)}.`);
+        validarLiquidacionPedido(Math.max(0, Math.round((sale.total - sale.recibido) * 100) / 100), cleanAmount);
         const paymentId = `abono_${Math.random().toString(36).slice(2, 11)}`;
         const nuevoRecibido = Math.round((sale.recibido + cleanAmount + Number.EPSILON) * 100) / 100;
         const nuevoSaldo = Math.max(0, Math.round((sale.total - nuevoRecibido + Number.EPSILON) * 100) / 100);
         masterSales[masterIndex] = { ...sale, recibido: nuevoRecibido, saldo: nuevoSaldo, estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo", estado_pedido: nuevoSaldo === 0 ? "pagado" : "pedido", actualizado_at: now, pagos: [...sale.pagos, { id: paymentId, monto: cleanAmount, metodo_pago: cleanMethod, fecha: now, usuario: user?.email || "Sistema", estado: "activo" }] };
-        movimientos.push({ id: paymentId, folio: `Abono-${sale.folio}`, venta_relacionada_id: ventaId, subtipo: "abono_venta", sku: "ABONO", tipo: "salida", cantidad: 1, referencia: `Pago de ${sale.folio}`, usuario: user?.email || "Sistema", fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, venta_total_recibido: cleanAmount, venta_saldo_pendiente: nuevoSaldo, ingreso_reconocido: cleanAmount, venta_subtotal: sale.subtotal, venta_total_cobrado: sale.total, envio_cobrado_cliente: sale.envio_cobrado_cliente, otros_cargos_cliente: sale.otros_cargos_cliente, total_venta: 0, total_cobrado: cleanAmount, estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo" });
+        movimientos.push({ id: paymentId, folio: `Liquidación-${sale.folio}`, venta_relacionada_id: ventaId, subtipo: "abono_venta", sku: "ABONO", tipo: "salida", cantidad: 1, referencia: `Liquidación de ${sale.folio}`, usuario: user?.email || "Sistema", fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, venta_total_recibido: cleanAmount, venta_saldo_pendiente: nuevoSaldo, ingreso_reconocido: cleanAmount, venta_subtotal: sale.subtotal, venta_total_cobrado: sale.total, envio_cobrado_cliente: sale.envio_cobrado_cliente, otros_cargos_cliente: sale.otros_cargos_cliente, total_venta: 0, total_cobrado: cleanAmount, estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo" });
         setLocalStorageItem("ventas_maestras", masterSales);
         setLocalStorageItem("movimientos", movimientos);
         notifyListeners("movimientos", movimientos);
@@ -2286,18 +2288,18 @@ export const firestoreService = {
       const previousPayments = movimientos.filter(item => item.venta_relacionada_id === ventaId && item.subtipo === "abono_venta" && item.estado !== "anulado" && item.en_papelera !== true).reduce((sum, item) => sum + Math.max(0, Number(item.ingreso_reconocido) || 0), 0);
       const saldoActual = Math.max(0, Math.round((total - initialReceived - previousPayments + Number.EPSILON) * 100) / 100);
       if (saldoActual <= 0) throw new Error("Este pedido ya está pagado.");
-      if (cleanAmount > saldoActual) throw new Error(`El pago no puede superar el saldo de $${saldoActual.toFixed(2)}.`);
+      validarLiquidacionPedido(saldoActual, cleanAmount);
       const nuevoSaldo = Math.max(0, Math.round((saldoActual - cleanAmount + Number.EPSILON) * 100) / 100);
       movimientos.push({
         id: `abono_${Math.random().toString(36).slice(2, 11)}`,
-        folio: `Abono-${principal.folio}`,
+        folio: `Liquidación-${principal.folio}`,
         venta_relacionada_id: ventaId,
         subtipo: "abono_venta",
         sku: "ABONO",
 
         tipo: "salida",
         cantidad: 1,
-        referencia: `Pago de ${principal.folio}`,
+        referencia: `Liquidación de ${principal.folio}`,
         usuario: user?.email || "Sistema",
         fecha: now,
         estado: "activo",
