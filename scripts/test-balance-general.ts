@@ -14,6 +14,13 @@ assert.equal(value.costosCompras, 60);
 assert.equal(value.egresos, 540);
 assert.equal(value.balance, 460);
 assert.equal(calcularBalanceGeneral([], [], [], []).balance, 0);
+const abonoParcial: any = { ...sale, id: "abono-parcial", subtipo: "abono_venta", ingreso_reconocido: 250, venta_total_recibido: 250, venta_subtotal: 1000, venta_saldo_pendiente: 500, estado_pago: "anticipo" };
+const pagoFinal: any = { ...abonoParcial, id: "pago-final", ingreso_reconocido: 500, venta_total_recibido: 500, venta_saldo_pendiente: 0, estado_pago: "pagado" };
+assert.equal(calcularBalanceGeneral([abonoParcial], [], [], []).movimientos[0]?.tipo, "Abono");
+assert.equal(calcularBalanceGeneral([pagoFinal], [], [], []).movimientos[0]?.tipo, "Liquidación");
+assert.equal(calcularBalanceGeneral([{ ...pagoFinal, venta_saldo_pendiente: undefined }], [], [], []).movimientos[0]?.tipo, "Abono", "Registros antiguos sin saldo comprobable no se clasifican como liquidación.");
+assert.equal(calcularBalanceGeneral([abonoParcial, pagoFinal], [], [], []).ingresos, 750, "Cambiar la etiqueta no modifica importes.");
+
 const fletePendiente: any = { ...sale, id: "flete-pendiente", costo_envio_venta: 80, total_costos_venta: 90 };
 assert.equal(calcularBalanceGeneral([fletePendiente], [], [], []).costosVentas, 10, "Otros costos sí se reflejan.");
 assert.equal(calcularBalanceGeneral([{ ...fletePendiente, estado_pago_flete: "pendiente" }], [], [], []).costosVentas, 10);
