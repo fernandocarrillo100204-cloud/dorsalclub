@@ -103,7 +103,8 @@ export default function Fletes() {
   };
 
   const actualizarEstado = async (flete: FleteVenta, estadoPago: "pagado" | "pendiente") => {
-    if (busyId) return;
+    // No efectuar escrituras innecesarias si el estado ya coincide.
+    if (busyId || flete.estadoPago === estadoPago) return;
     setBusyId(flete.id);
     setActionError("");
     try {
@@ -210,8 +211,8 @@ export default function Fletes() {
       )}
     </section>
     <p className="text-xs text-zinc-500 dark:text-zinc-400">
-      Los costos de los fletes ya están incluidos en Balance general y no se contabilizan dos veces.
-      Marcar un flete como pagado solo registra su estado frente al repartidor; no genera otro egreso.
+      Los fletes pendientes se muestran aquí sin descontarse del balance. Solo al marcarlos como pagados
+      se contabilizan como egreso, una sola vez. Otros costos de venta mantienen su registro.
     </p>
 
     <Dialog open={Boolean(detalle)} onClose={() => setDetalle(null)}
@@ -245,9 +246,11 @@ export default function Fletes() {
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 dark:border-zinc-800 pt-4">
           <p className="text-xs text-zinc-500">El estado de pago al repartidor no afecta lo cobrado al cliente.</p>
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn-secondary" disabled={Boolean(busyId)}
-              onClick={() => void actualizarEstado(detalle, "pendiente")}>Marcar pendiente</button>
-            <button type="button" className="btn-primary" disabled={Boolean(busyId)}
+            <button type="button" className="btn-secondary"
+              onClick={() => void actualizarEstado(detalle, "pendiente")}
+              disabled={Boolean(busyId) || detalle.estadoPago === "pendiente"}>Marcar pendiente</button>
+            <button type="button" className="btn-primary"
+              disabled={Boolean(busyId) || detalle.estadoPago === "pagado"}
               onClick={() => void actualizarEstado(detalle, "pagado")}>Marcar pagado</button>
           </div>
         </div>
@@ -258,7 +261,7 @@ export default function Fletes() {
       title="Editar costo del flete" description={editando?.folio} busy={Boolean(busyId)}>
       <form onSubmit={guardarImporte} className="space-y-4">
         <p className="text-sm text-zinc-600 dark:text-zinc-300">
-          Modificarás el costo de la entrega vinculado a esta venta. Se actualizarán también los totales de Balance general, sin modificar el precio cobrado al cliente.
+          Modificarás el costo de la entrega vinculado a esta venta. Solo afectará al Balance general si el flete está pagado. No modifica el precio cobrado al cliente.
         </p>
         <label className="block text-xs font-semibold">
           Costo real · MXN

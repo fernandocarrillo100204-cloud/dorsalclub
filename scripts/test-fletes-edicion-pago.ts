@@ -63,7 +63,7 @@ assert.equal(initialList[0].quienEntrega, "Fernando");
 assert.equal(initialList[0].ubicacionEntrega, "Galerías Monterrey");
 assert.equal(initialList[0].estadoPago, null, "No inventar un estado de pago para ventas antiguas.");
 const initialBalance = await remote.service.getBalanceGeneral();
-assert.equal(initialBalance.costosVentas, 80);
+assert.equal(initialBalance.costosVentas, 0, "Los fletes sin confirmar no son egresos.");
 
 await remote.service.actualizarFleteVenta(initialList[0], { estadoPago: "pendiente" });
 let flete = (await remote.service.getFletesVentas())[0];
@@ -75,7 +75,7 @@ flete = (await remote.service.getFletesVentas())[0];
 assert.equal(flete.estadoPago, "pagado");
 assert.ok(flete.pagadoAt instanceof Date);
 assert.equal(remote.data.get(`ventas/${sale.id}`).estado_pago_flete, "pagado");
-assert.equal((await remote.service.getBalanceGeneral()).balance, initialBalance.balance, "Marcar pagado no duplica el costo.");
+assert.equal((await remote.service.getBalanceGeneral()).balance, initialBalance.balance - 80, "El flete se descuenta al pagar.");
 
 await remote.service.actualizarFleteVenta(flete, { costo: 135.5 });
 flete = (await remote.service.getFletesVentas())[0];
@@ -87,7 +87,7 @@ assert.equal(movs.reduce((sum,[,value]) => sum + (value.costo_envio_venta || 0),
 assert.equal(movs.reduce((sum,[,value]) => sum + (value.total_costos_venta || 0), 0), 135.5);
 assert.equal(remote.data.get(`ventas/${sale.id}`).costo_envio_venta, 135.5);
 assert.equal((await remote.service.getBalanceGeneral()).costosVentas, 135.5);
-assert.equal((await remote.service.getBalanceGeneral()).balance, initialBalance.balance - 55.5);
+assert.equal((await remote.service.getBalanceGeneral()).balance, initialBalance.balance - 135.5);
 assert.equal(remote.data.get(`ventas/${sale.id}`).envio_cobrado_cliente, 25, "Editar flete no cambia el cobro al cliente.");
 assert.equal(remote.data.get(`ventas/${sale.id}`).total, 375, "Editar flete no modifica el total de venta.");
 assert.equal((await remote.service.getFletesVentas()).length, 1, "El mismo flete no se duplica.");
@@ -96,6 +96,11 @@ await remote.service.actualizarFleteVenta(flete, { estadoPago: "pendiente" });
 flete = (await remote.service.getFletesVentas())[0];
 assert.equal(flete.estadoPago, "pendiente");
 assert.equal(flete.pagadoAt, null);
+assert.equal((await remote.service.getBalanceGeneral()).costosVentas, 0, "Volver a pendiente revierte el egreso.");
+assert.equal((await remote.service.getBalanceGeneral()).balance, initialBalance.balance);
+assert.equal(remote.data.get(`ventas/${sale.id}`).estado_pago_flete, "pendiente", "El maestro también debe quedar pendiente.");
+assert.ok(movs.every(([key]) => remote.data.get(key).estado_pago_flete === "pendiente"), "Todas las partidas deben quedar pendientes.");
+assert.ok(movs.every(([key]) => !("flete_pagado_at" in remote.data.get(key))), "Ninguna partida conserva fecha de pago.");
 assert.ok(!("flete_pagado_at" in remote.data.get(`ventas/${sale.id}`)), "Cambiar a pendiente borra la fecha de pago.");
 await assert.rejects(remote.service.actualizarFleteVenta(flete, { costo: 0 }), /costo del flete/i);
 assert.equal((await remote.service.getFletesVentas())[0].costo, 135.5);
@@ -107,7 +112,7 @@ const old = (await historical.service.getFletesVentas())[0];
 assert.equal(old.costo, 60);
 await historical.service.actualizarFleteVenta(old, { costo: 65.5 });
 assert.equal((await historical.service.getFletesVentas())[0].costo, 65.5);
-assert.equal((await historical.service.getBalanceGeneral()).costosVentas, 75.5, "Costo de flete nuevo + otros costos históricos.");
+assert.equal((await historical.service.getBalanceGeneral()).costosVentas, 10, "Solo los otros costos históricos se reflejan mientras el flete está pendiente.");
 assert.equal(historical.data.get("movimientos/partida-2").costo_envio_venta, 0);
 
 const view = readFileSync("src/components/finanzas/Fletes.tsx", "utf8");

@@ -1,6 +1,7 @@
 import type { Compra, Gasto, Movimiento, MovimientoFinancieroManual } from "../types";
 import { allocateRecognizedSaleIncome } from "./ventasCore";
 import { fechaRegistro } from "./lecturasVentas";
+import { costoVentaEfectivamentePagado } from "./fletesVentas";
 
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 const cents = (value: number) => Math.round(value * 100);
@@ -53,7 +54,7 @@ export function calcularBalanceGeneral(sales: Movimiento[], purchases: Compra[],
     if (income !== 0) add({ ...base, id: `venta-${sale.id || movimientos.length}`, tipo, descripcion: [productos || sale.referencia || "Cobro de venta", sale.cliente_nombre].filter(Boolean).join(" · "), ingreso: income, egreso: 0, origen: { tipo: "venta", registro: sale, partidas: movimientosVenta } });
     // Abonos y reembolsos no vuelven a reconocer costos de envío.
     if (!sale.subtipo) {
-      const cost = Math.max(0, typeof sale.total_costos_venta === "number" ? number(sale.total_costos_venta) : number(sale.costo_envio_venta) + number(sale.otros_costos_venta));
+      const cost = costoVentaEfectivamentePagado(sale);
       saleCosts += cents(cost);
       if (cents(cost) !== 0) add({ ...base, id: `costo-${sale.id || movimientos.length}`, tipo: "Costo de venta", descripcion: ["Envíos y otros costos", productos, sale.concepto_otros_costos].filter(Boolean).join(" · "), ingreso: 0, egreso: cost, origen: { tipo: "venta", registro: sale, partidas: movimientosVenta } });
     }
