@@ -103,7 +103,8 @@ export default function Fletes() {
   };
 
   const actualizarEstado = async (flete: FleteVenta, estadoPago: "pagado" | "pendiente") => {
-    if (busyId) return;
+    // No efectuar escrituras innecesarias si el estado ya coincide.
+    if (busyId || flete.estadoPago === estadoPago) return;
     setBusyId(flete.id);
     setActionError("");
     try {
@@ -246,8 +247,10 @@ export default function Fletes() {
           <p className="text-xs text-zinc-500">El estado de pago al repartidor no afecta lo cobrado al cliente.</p>
           <div className="flex flex-wrap gap-2">
             <button type="button" className="btn-secondary" disabled={Boolean(busyId)}
-              onClick={() => void actualizarEstado(detalle, "pendiente")}>Marcar pendiente</button>
-            <button type="button" className="btn-primary" disabled={Boolean(busyId)}
+              onClick={() => void actualizarEstado(detalle, "pendiente")}
+              disabled={Boolean(busyId) || detalle.estadoPago === "pendiente"}>Marcar pendiente</button>
+            <button type="button" className="btn-primary"
+              disabled={Boolean(busyId) || detalle.estadoPago === "pagado"}
               onClick={() => void actualizarEstado(detalle, "pagado")}>Marcar pagado</button>
           </div>
         </div>
