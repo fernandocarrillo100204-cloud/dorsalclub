@@ -126,3 +126,42 @@ export function repartirCostoFlete(
   const totalVenta = Math.round(updates.reduce((sum, item) => sum + item.total_costos_venta, 0) * 100) / 100;
   return updates.map(item => ({ ...item, venta_total_costos: totalVenta }));
 }
+
+/** Mes del registro de entrega, en horario local. */
+export function mesFlete(fecha: Date): string {
+  if (!(fecha instanceof Date) || !Number.isFinite(fecha.getTime()) || fecha.getTime() === 0) return "";
+  return `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function mesesConFletes(fletes: FleteVenta[]): string[] {
+  return [...new Set(fletes.map(item => mesFlete(item.fecha)).filter(Boolean))].sort().reverse();
+}
+
+export interface AdeudoRepartidor {
+  repartidor: string;
+  entregasPendientes: number;
+  totalPendiente: number;
+}
+
+/** Resumen sobre todos los fletes del mes (independiente del buscador y paginación).
+ * Un flete sin estado confirmado se trata como no pagado, nunca como pagado.
+ */
+export function adeudosPorRepartidor(fletes: FleteVenta[]): AdeudoRepartidor[] {
+  const grouped = new Map<string, { repartidor: string; cantidad: number; centavos: number }>();
+  for (const flete of fletes) {
+    if (flete.estadoPago === "pagado") continue;
+    const repartidor = flete.quienEntrega?.trim() || "Sin repartidor asignado";
+    const key = repartidor.toLocaleLowerCase("es-MX");
+    const previous = grouped.get(key) || { repartidor, cantidad: 0, centavos: 0 };
+    previous.cantidad++;
+    previous.centavos += Math.round(flete.costo * 100);
+    grouped.set(key, previous);
+  }
+  return [...grouped.values()]
+    .map(item => ({
+      repartidor: item.repartidor,
+      entregasPendientes: item.cantidad,
+      totalPendiente: item.centavos / 100
+    }))
+    .sort((a, b) => b.totalPendiente - a.totalPendiente || a.repartidor.localeCompare(b.repartidor, "es-MX"));
+}
