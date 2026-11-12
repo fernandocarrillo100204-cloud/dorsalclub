@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, CircleDollarSign, RefreshCw, Search, Settings2 } from "lucide-react";
+import { ArrowUpRight, CircleDollarSign, MapPin, Package, RefreshCw, Search, Settings2 } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
 import type { OpcionListaConfigurable, PedidoVenta } from "../types";
 import { pedidosPendientesPago, saldoPendientePedidos } from "../lib/pedidosPendientes";
@@ -12,11 +12,12 @@ import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 
 const OrderManager: React.FC<{
   order: PedidoVenta;
+  productNames: ReadonlyMap<string, string>;
   methods: OpcionListaConfigurable[];
   methodsError: string;
   onClose: () => void;
   onSaved: () => Promise<void>;
-}> = ({ order, methods, methodsError, onClose, onSaved }) => {
+}> = ({ order, productNames, methods, methodsError, onClose, onSaved }) => {
   const { confirm, notify } = useWorkspace();
   const [method, setMethod] = useState("");
   const [busy, setBusy] = useState(false);
@@ -77,10 +78,11 @@ const OrderManager: React.FC<{
   };
 
   const validAmount = Number.isFinite(order.saldo) && order.saldo > 0;
+  const unidades = order.items.reduce((total, item) => total + item.cantidad, 0);
 
   return (
-    <Dialog open title={order.folio}
-      description={`${order.cliente_nombre} · ${order.canal_venta_nombre}`}
+    <Dialog open title={order.cliente_nombre || "Cliente sin nombre"}
+      description={`${order.folio} · ${order.canal_venta_nombre}`}
       onClose={onClose} busy={busy} className="order-dialog">
       <div className="space-y-5">
         <div className="grid grid-cols-3 gap-3 order-money">
@@ -88,14 +90,37 @@ const OrderManager: React.FC<{
           <div><small>Recibido</small><strong className="text-emerald-600 dark:text-emerald-400">{money.format(order.recibido)}</strong></div>
           <div><small>Por cobrar</small><strong className="text-amber-700 dark:text-amber-400">{money.format(order.saldo)}</strong></div>
         </div>
-        <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-          {order.items.map((item, index) => (
-            <div key={`${item.sku}-${index}`} className="flex justify-between gap-4 py-2 text-sm">
-              <span><span className="text-zinc-500">{item.cantidad} × </span>{item.sku}</span>
-              <strong className="font-medium tabular-nums">{money.format(item.total)}</strong>
+        <section className="rounded-xl border border-zinc-200 dark:border-zinc-700 p-3.5 space-y-1">
+          <div className="flex items-start gap-3">
+            <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" aria-hidden="true" />
+            <div className="min-w-0">
+              <h3 className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Entregar en</h3>
+              <p className="mt-1 text-base font-semibold break-words">{order.ubicacion_entrega_nombre?.trim() || "Ubicación no registrada"}</p>
+              {order.repartidor_nombre && <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Entrega: {order.repartidor_nombre}</p>}
             </div>
-          ))}
-        </div>
+          </div>
+        </section>
+        <section className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold flex items-center gap-2"><Package className="h-4 w-4 text-zinc-500" aria-hidden="true" />Artículos a entregar</h3>
+            <span className="text-xs text-zinc-500">{unidades} {unidades === 1 ? "pieza" : "piezas"}</span>
+          </div>
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 divide-y divide-zinc-100 dark:divide-zinc-800">
+            {order.items.map((item, index) => {
+              const sku = item.sku.trim();
+              const nombre = productNames.get(sku.toUpperCase())?.trim() || sku;
+              return <div key={`${sku}-${item.talla || "sin-talla"}-${index}`} className="flex items-start gap-3 p-3 text-sm">
+                <span className="shrink-0 rounded-lg bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 font-semibold tabular-nums">{item.cantidad} ×</span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium break-words">{nombre}</p>
+                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400 break-words">
+                    SKU: {sku}{item.talla ? ` · Talla: ${item.talla}` : ""}
+                  </p>
+                </div>
+              </div>;
+            })}
+          </div>
+        </section>
         {error && <ErrorState message={error} />}
         <form onSubmit={receive} className="rounded-xl p-4 border border-emerald-200 dark:border-emerald-900 bg-emerald-50/40 dark:bg-emerald-950/20 space-y-3">
           <h3 className="text-sm font-semibold">Liquidar pedido</h3>
@@ -150,6 +175,7 @@ export default function PedidosVenta() {
   const [channel, setChannel] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [productNames, setProductNames] = useState<ReadonlyMap<string, string> | null>(null);
   const requestRef = useRef(0);
 
   const load = useCallback(async (refresh = false) => {
@@ -182,6 +208,20 @@ export default function PedidosVenta() {
     void load();
     return () => { requestRef.current += 1; };
   }, [load]);
+
+  // El catálogo solo se consulta cuando se abre un detalle; no retrasa la bandeja.
+  useEffect(() => {
+    if (!selectedId || productNames !== null) return;
+    let cancelled = false;
+    void firestoreService.getProductos()
+      .then(items => {
+        if (!cancelled) setProductNames(new Map(items.map(item => [item.sku.trim().toUpperCase(), item.nombre])));
+      })
+      .catch(() => {
+        if (!cancelled) setProductNames(new Map());
+      });
+    return () => { cancelled = true; };
+  }, [selectedId, productNames]);
 
   // Los pedidos liquidados no se borran: dejan de pertenecer a esta bandeja.
   const pending = useMemo(() => pedidosPendientesPago(orders), [orders]);
@@ -279,7 +319,7 @@ export default function PedidosVenta() {
           </div>
         )}
       {selected && <OrderManager key={selected.venta_id} order={selected}
-        methods={methods} methodsError={methodsError}
+        productNames={productNames || new Map<string, string>()} methods={methods} methodsError={methodsError}
         onClose={() => setSelectedId("")} onSaved={() => load(true)} />}
       <ConfiguracionModuloModal isOpen={settingsOpen} module="ventas"
         onClose={() => setSettingsOpen(false)} onSaved={() => load(true)} />
