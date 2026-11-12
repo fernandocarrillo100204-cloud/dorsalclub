@@ -84,14 +84,15 @@ export default function MovimientosBalance({ data, loading, busy, productos = []
     </div>
     {!loading && !data?.movimientos.length && <p className="px-4 sm:px-5 pb-4 text-sm text-zinc-500 dark:text-zinc-400">Sin movimientos registrados</p>}
       <div className="overflow-x-auto focus-visible:outline-emerald-500" tabIndex={0} role="region" aria-label="Tabla de movimientos, desplazamiento horizontal">
-        <table className="w-full min-w-[800px] text-left text-sm">
+        <table className="w-full min-w-[940px] text-left text-sm">
           <caption className="sr-only">Historial acumulado de ingresos y egresos</caption>
           <thead className="bg-zinc-50 dark:bg-zinc-800 text-zinc-500"><tr>
-            {["Fecha", "Tipo", "Descripción", "Ingreso", "Egreso", "Comentario", "Acciones"].map(label => <th key={label} scope="col" className={`p-4 ${["Ingreso", "Egreso", "Acciones"].includes(label) ? "text-right" : ""}`}>{label}</th>)}
+            {["Fecha", "Folio", "Tipo", "Descripción", "Ingreso", "Egreso", "Comentario", "Acciones"].map(label => <th key={label} scope="col" className={`p-4 ${["Ingreso", "Egreso", "Acciones"].includes(label) ? "text-right" : ""}`}>{label}</th>)}
           </tr></thead>
           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {loading ? <tr><td colSpan={7} className="p-6 text-zinc-500" role="status">Cargando movimientos…</td></tr> : !data?.movimientos.length ? null : data.movimientos.slice(0, visible).map(row => <tr key={row.id} className="align-top hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
+            {loading ? <tr><td colSpan={8} className="p-6 text-zinc-500" role="status">Cargando movimientos…</td></tr> : !data?.movimientos.length ? null : data.movimientos.slice(0, visible).map(row => <tr key={row.id} className="align-top hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
             <td className="px-4 py-3 whitespace-nowrap text-zinc-600 dark:text-zinc-300">{row.fecha.getTime() ? date.format(row.fecha) : "Sin fecha"}</td>
+            <td className="px-4 py-3 whitespace-nowrap font-medium tabular-nums">{row.origen?.tipo === "venta" || row.origen?.tipo === "compra" ? row.origen.registro.folio || "—" : "—"}</td>
             <td className="px-4 py-3 whitespace-nowrap"><span className={`inline-block rounded-md px-2 py-1 text-xs font-medium ${row.ingreso > 0 ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" : row.ingreso < 0 || row.egreso > 0 ? "bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300" : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"}`}>{row.tipo}</span></td>
             <td className="px-4 py-3 min-w-52 max-w-sm"><div className="font-medium"><CellText text={row.descripcion} /></div>{row.referencia && <details className="mt-1 text-xs text-zinc-500 dark:text-zinc-400"><summary className="cursor-pointer w-fit focus-visible:outline-emerald-500">Referencia</summary><p className="break-all mt-1 select-all">{row.referencia}</p></details>}</td>
             <td className={`px-4 py-3 text-right whitespace-nowrap font-medium tabular-nums ${row.ingreso < 0 ? "text-rose-700 dark:text-rose-400" : row.ingreso > 0 ? "text-emerald-700 dark:text-emerald-400" : "text-zinc-400"}`}>{row.ingreso ? money.format(row.ingreso) : "—"}</td>
@@ -112,7 +113,7 @@ export default function MovimientosBalance({ data, loading, busy, productos = []
             </td>
           </tr>)}</tbody>
           {!loading && data && <tfoot className="bg-zinc-50 dark:bg-zinc-800 font-semibold"><tr>
-            <th scope="row" colSpan={3} className="p-4">Total acumulado</th>
+            <th scope="row" colSpan={4} className="p-4">Total acumulado</th>
             <td className="p-4 text-right whitespace-nowrap tabular-nums">{money.format(data.ingresos)}</td>
             <td className="p-4 text-right whitespace-nowrap tabular-nums">{money.format(data.egresos)}</td>
             <td colSpan={2} />
