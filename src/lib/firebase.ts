@@ -5130,6 +5130,7 @@ export const firestoreService = {
             en_papelera: data.en_papelera === true,
             desactivado_at: data.desactivado_at ? (data.desactivado_at.toDate ? data.desactivado_at.toDate() : data.desactivado_at) : undefined
           };
+          if (data.folio) item.folio = folioComercial(data.folio);
           if (data.metodo_pago) item.metodo_pago = data.metodo_pago;
           if (data.almacen_id) item.almacen_id = data.almacen_id;
           if (data.almacen_nombre) item.almacen_nombre = data.almacen_nombre;
@@ -5194,6 +5195,7 @@ export const firestoreService = {
             creado_at: data.creado_at ? (data.creado_at.toDate ? data.creado_at.toDate() : data.creado_at) : new Date(),
             actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date()
           };
+          if (data.folio) item.folio = folioComercial(data.folio);
           if (data.metodo_pago) item.metodo_pago = data.metodo_pago;
           if (data.almacen_id) item.almacen_id = data.almacen_id;
           if (data.almacen_nombre) item.almacen_nombre = data.almacen_nombre;
@@ -5291,12 +5293,20 @@ export const firestoreService = {
     if (isConfigured && realDb) {
       try {
         const docRef = doc(collection(realDb, "gastos"));
+        const counterRef = doc(realDb, "contadores", "gasto");
         const periodoKey = getPeriodoKey(gastoData.fecha);
         const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+        let generatedGastoFolio = "";
 
         await runTransaction(realDb, async (tx) => {
+          const counterSnap = await tx.get(counterRef);
           const periodSnap = periodRef ? await tx.get(periodRef) : null;
-          tx.set(docRef, payload);
+          const nextNumber = (Number(counterSnap.data()?.ultimo_consecutivo) || 0) + 1;
+          generatedGastoFolio = generarFolio("GTO", nextNumber);
+          tx.set(docRef, { ...payload, folio: generatedGastoFolio });
+          tx.set(counterRef, {
+            tipo: "gasto", ultimo_consecutivo: nextNumber, actualizado: Timestamp.now()
+          }, { merge: true });
 
           if (periodRef && periodoKey) {
             const updatedPeriod = computeNewPeriodIndexData(
@@ -5315,6 +5325,7 @@ export const firestoreService = {
 
         const createdGasto: Gasto = {
           id: docRef.id,
+          folio: generatedGastoFolio,
           concepto: cleanConcepto,
           categoria: cleanCategoria,
           monto,
@@ -5338,8 +5349,12 @@ export const firestoreService = {
     }
 
     const newId = "gas_" + Math.random().toString(36).substr(2, 9);
+    const gastoCounters = getLocalStorageItem<Record<string, number>>("contadores_movimientos", {});
+    gastoCounters.gasto = (gastoCounters.gasto || 0) + 1;
+    setLocalStorageItem("contadores_movimientos", gastoCounters);
     const createdLocal: Gasto = {
       id: newId,
+      folio: generarFolio("GTO", gastoCounters.gasto),
       concepto: cleanConcepto,
       categoria: cleanCategoria,
       monto,
@@ -5844,15 +5859,35 @@ export const firestoreService = {
       actualizado_at: now,
       estado: "activo" as const
     };
+    const esAjuste = input.tipo === "ajuste_entrada" || input.tipo === "ajuste_salida";
     let created: MovimientoFinancieroManual;
     if (isConfigured && realDb) {
       const ref = doc(collection(realDb, "movimientos_financieros"));
       const payload = { ...base, fecha: Timestamp.fromDate(input.fecha), creado_at: Timestamp.now(), actualizado_at: Timestamp.now() };
-      await setDoc(ref, payload);
-      created = { id: ref.id, ...base };
+      let folio: string | undefined;
+      if (esAjuste) {
+        const counterRef = doc(realDb, "contadores", "ajuste_financiero");
+        await runTransaction(realDb, async tx => {
+          const counter = await tx.get(counterRef);
+          const siguiente = (Number(counter.data()?.ultimo_consecutivo) || 0) + 1;
+          folio = generarFolio("AJU", siguiente);
+          tx.set(ref, { ...payload, folio });
+          tx.set(counterRef, { tipo: "ajuste_financiero", ultimo_consecutivo: siguiente, actualizado: Timestamp.now() }, { merge: true });
+        });
+      } else {
+        await setDoc(ref, payload);
+      }
+      created = { id: ref.id, ...base, ...(folio ? { folio } : {}) };
     } else {
       const list = getLocalStorageItem<MovimientoFinancieroManual[]>("movimientos_financieros", []);
-      created = { id: `MF-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ...base };
+      let folio: string | undefined;
+      if (esAjuste) {
+        const counters = getLocalStorageItem<Record<string, number>>("contadores_movimientos", {});
+        counters.ajuste_financiero = (counters.ajuste_financiero || 0) + 1;
+        folio = generarFolio("AJU", counters.ajuste_financiero);
+        setLocalStorageItem("contadores_movimientos", counters);
+      }
+      created = { id: `MF-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ...base, ...(folio ? { folio } : {}) };
       setLocalStorageItem("movimientos_financieros", [created, ...list]);
     }
     const periodo = getPeriodoKey(input.fecha);
@@ -6394,6 +6429,7 @@ export const firestoreService = {
             estado: data.estado || "activo",
             en_papelera: data.en_papelera === true
           };
+          if (data.folio) item.folio = folioComercial(data.folio);
           if (data.metodo_pago) item.metodo_pago = data.metodo_pago;
           if (data.almacen_id) item.almacen_id = data.almacen_id;
           if (data.almacen_nombre) item.almacen_nombre = data.almacen_nombre;
