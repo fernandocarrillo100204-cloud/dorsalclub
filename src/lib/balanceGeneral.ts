@@ -48,7 +48,7 @@ export function calcularBalanceGeneral(sales: Movimiento[], purchases: Compra[],
     const referencia = sale.venta_id || sale.venta_relacionada_id || sale.folio || sale.id || "";
     const movimientosVenta = partidas.get(sale.venta_id || sale.venta_relacionada_id || sale.id || "") || [];
     const productos = movimientosVenta.map(item => `${item.cantidad} × ${item.sku}`).join(", ");
-    const tipo = sale.subtipo === "reembolso_venta" ? "Reembolso" : sale.subtipo === "abono_venta" ? "Abono" : sale.estado_pago === "anticipo" ? "Anticipo" : "Venta";
+    const tipo = sale.subtipo === "reembolso_venta" ? "Reembolso" : sale.subtipo === "abono_venta" ? (sale.estado_pago === "pagado" && typeof sale.venta_saldo_pendiente === "number" && sale.venta_saldo_pendiente <= 0 ? "Liquidación" : "Abono") : sale.estado_pago === "anticipo" ? "Anticipo" : "Venta";
     const base = { referencia: sale.folio || referencia, fecha: fechaRegistro(sale.fecha), comentario: sale.comentarios_venta || "" };
     const income = (cents(allocation.merchandise) + cents(allocation.shipping + allocation.other)) / 100;
     if (income !== 0) add({ ...base, id: `venta-${sale.id || movimientos.length}`, tipo, descripcion: [productos || sale.referencia || "Cobro de venta", sale.cliente_nombre].filter(Boolean).join(" · "), ingreso: income, egreso: 0, origen: { tipo: "venta", registro: sale, partidas: movimientosVenta } });
