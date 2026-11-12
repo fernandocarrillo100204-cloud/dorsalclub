@@ -93,6 +93,7 @@ import { construirPedidos, fechaRegistro, leerMovimiento, leerVenta } from "./le
 import { calcularInventarioDrop, dropsDeVenta, validarDemandaDrops } from "./inventarioDrops";
 import { calcularBalanceGeneral, type BalanceGeneral } from "./balanceGeneral";
 import { validarLiquidacionPedido } from "./pedidosPendientes";
+import { folioComercial, generarFolio } from "./folios";
 import { ajustePeriodosRegistrosVenta, registrosIndiceVenta } from "./papeleraVentas";
 import { obtenerFletesDeMovimientos, repartirCostoFlete, type FleteVenta, costoVentaEfectivamentePagado } from "./fletesVentas";
 import type { DetalleInventarioDrop, InventarioDropFila } from "./inventarioDrops";
@@ -1754,7 +1755,7 @@ export const firestoreService = {
         const nextNumber = counterSnap.exists() && typeof counterSnap.data()?.ultimo_consecutivo === "number"
           ? counterSnap.data()!.ultimo_consecutivo + 1
           : 1;
-        generatedFolio = `Salida-${nextNumber}`;
+        generatedFolio = generarFolio("VTA", nextNumber);
 
         const periodSnap = periodRef ? await transaction.get(periodRef) : null;
         const operationTimestamp = Timestamp.now();
@@ -2165,7 +2166,7 @@ export const firestoreService = {
             actualizado_at: timestamp
           });
           transaction.set(paymentRef, {
-            folio: `Liquidación-${data.folio || ventaId}`,
+            folio: data.folio || ventaId,
             venta_relacionada_id: ventaId,
             subtipo: "abono_venta",
             sku: "ABONO",
@@ -2228,7 +2229,7 @@ export const firestoreService = {
         const timestamp = Timestamp.now();
 
         transaction.set(paymentRef, {
-          folio: `Liquidación-${data.folio || ventaId}`,
+          folio: data.folio || ventaId,
           venta_relacionada_id: ventaId,
           subtipo: "abono_venta",
           sku: "ABONO",
@@ -2273,7 +2274,7 @@ export const firestoreService = {
         const nuevoRecibido = Math.round((sale.recibido + cleanAmount + Number.EPSILON) * 100) / 100;
         const nuevoSaldo = Math.max(0, Math.round((sale.total - nuevoRecibido + Number.EPSILON) * 100) / 100);
         masterSales[masterIndex] = { ...sale, recibido: nuevoRecibido, saldo: nuevoSaldo, estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo", estado_pedido: nuevoSaldo === 0 ? "pagado" : "pedido", actualizado_at: now, pagos: [...sale.pagos, { id: paymentId, monto: cleanAmount, metodo_pago: cleanMethod, fecha: now, usuario: user?.email || "Sistema", estado: "activo" }] };
-        movimientos.push({ id: paymentId, folio: `Liquidación-${sale.folio}`, venta_relacionada_id: ventaId, subtipo: "abono_venta", sku: "ABONO", tipo: "salida", cantidad: 1, referencia: `Liquidación de ${sale.folio}`, usuario: user?.email || "Sistema", fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, venta_total_recibido: cleanAmount, venta_saldo_pendiente: nuevoSaldo, ingreso_reconocido: cleanAmount, venta_subtotal: sale.subtotal, venta_total_cobrado: sale.total, envio_cobrado_cliente: sale.envio_cobrado_cliente, otros_cargos_cliente: sale.otros_cargos_cliente, total_venta: 0, total_cobrado: cleanAmount, estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo" });
+        movimientos.push({ id: paymentId, folio: sale.folio, venta_relacionada_id: ventaId, subtipo: "abono_venta", sku: "ABONO", tipo: "salida", cantidad: 1, referencia: `Liquidación de ${sale.folio}`, usuario: user?.email || "Sistema", fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, venta_total_recibido: cleanAmount, venta_saldo_pendiente: nuevoSaldo, ingreso_reconocido: cleanAmount, venta_subtotal: sale.subtotal, venta_total_cobrado: sale.total, envio_cobrado_cliente: sale.envio_cobrado_cliente, otros_cargos_cliente: sale.otros_cargos_cliente, total_venta: 0, total_cobrado: cleanAmount, estado_pago: nuevoSaldo === 0 ? "pagado" : "anticipo" });
         setLocalStorageItem("ventas_maestras", masterSales);
         setLocalStorageItem("movimientos", movimientos);
         notifyListeners("movimientos", movimientos);
@@ -2292,7 +2293,7 @@ export const firestoreService = {
       const nuevoSaldo = Math.max(0, Math.round((saldoActual - cleanAmount + Number.EPSILON) * 100) / 100);
       movimientos.push({
         id: `abono_${Math.random().toString(36).slice(2, 11)}`,
-        folio: `Liquidación-${principal.folio}`,
+        folio: principal.folio,
         venta_relacionada_id: ventaId,
         subtipo: "abono_venta",
         sku: "ABONO",
@@ -2365,7 +2366,7 @@ export const firestoreService = {
       if (!order) throw new Error("El pedido está cancelado o ya no está disponible.");
       if (data.marcar_entregado && order.saldo > 0.009) throw new Error("Liquida el saldo antes de marcar el pedido como entregado.");
       await addDoc(collection(realDb, "movimientos"), {
-        folio: `Seguimiento-${principal.data().folio || ventaId}`,
+        folio: principal.data().folio || ventaId,
         venta_relacionada_id: ventaId,
         subtipo: "seguimiento_pedido",
         cliente_id: principal.data().cliente_id || "",
@@ -2409,7 +2410,7 @@ export const firestoreService = {
     if (data.marcar_entregado && order.saldo > 0.009) throw new Error("Liquida el saldo antes de marcar el pedido como entregado.");
     movimientos.push({
       id: `seguimiento_${Math.random().toString(36).slice(2, 11)}`,
-      folio: `Seguimiento-${principal.folio}`,
+      folio: principal.folio,
       venta_relacionada_id: ventaId,
       subtipo: "seguimiento_pedido",
       cliente_id: principal.cliente_id,
@@ -2466,7 +2467,7 @@ export const firestoreService = {
         });
         if (refundAmount > 0) {
           transaction.set(refundRef, {
-            folio: `Reembolso-${sale.folio || ventaId}`,
+            folio: sale.folio || ventaId,
             venta_relacionada_id: ventaId,
             subtipo: "reembolso_venta",
             sku: "REEMBOLSO",
@@ -2507,7 +2508,7 @@ export const firestoreService = {
     if (sale.estado === "anulado" || sale.estado === "devuelto") throw new Error("Esta venta no está disponible para devolución.");
     sales[index] = { ...sale, estado: "devuelto", monto_reembolsado: sale.recibido, motivo_devolucion: cleanReason, devuelto_at: now, devuelto_por: userEmail, saldo: 0, actualizado_at: now };
     const movements = getLocalStorageItem<Movimiento[]>("movimientos", []);
-    if (sale.recibido > 0) movements.push({ id: `refund_${Math.random().toString(36).slice(2, 11)}`, folio: `Reembolso-${sale.folio}`, venta_relacionada_id: ventaId, subtipo: "reembolso_venta", sku: "REEMBOLSO", tipo: "salida", cantidad: 1, unidades_devueltas: sale.total_unidades, referencia: `Devolución de ${sale.folio}: ${cleanReason}`, usuario: userEmail, fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, venta_total_recibido: -sale.recibido, ingreso_reconocido: -sale.recibido, venta_subtotal: sale.subtotal, venta_total_cobrado: sale.total, envio_cobrado_cliente: sale.envio_cobrado_cliente, otros_cargos_cliente: sale.otros_cargos_cliente, total_venta: -sale.recibido, total_cobrado: -sale.recibido, metodo_pago: sale.metodo_pago_inicial });
+    if (sale.recibido > 0) movements.push({ id: `refund_${Math.random().toString(36).slice(2, 11)}`, folio: sale.folio, venta_relacionada_id: ventaId, subtipo: "reembolso_venta", sku: "REEMBOLSO", tipo: "salida", cantidad: 1, unidades_devueltas: sale.total_unidades, referencia: `Devolución de ${sale.folio}: ${cleanReason}`, usuario: userEmail, fecha: now, estado: "activo", cliente_id: sale.cliente_id, cliente_nombre: sale.cliente_nombre, canal_venta: sale.canal_venta, canal_venta_nombre: sale.canal_venta_nombre, afecta_stock: false, venta_total_recibido: -sale.recibido, ingreso_reconocido: -sale.recibido, venta_subtotal: sale.subtotal, venta_total_cobrado: sale.total, envio_cobrado_cliente: sale.envio_cobrado_cliente, otros_cargos_cliente: sale.otros_cargos_cliente, total_venta: -sale.recibido, total_cobrado: -sale.recibido, metodo_pago: sale.metodo_pago_inicial });
     setLocalStorageItem("ventas_maestras", sales); setLocalStorageItem("movimientos", movements);
     notifyListeners("movimientos", movements); clearFinanzasCache(); clearPeriodosFinancierosCache();
   },
@@ -2536,11 +2537,11 @@ export const firestoreService = {
   getFolioPrefix: (tipo: Movimiento["tipo"]): string => {
     switch (tipo) {
       case "entrada":
-        return "Entrada-";
+        return "ENT-";
       case "salida":
-        return "Salida-";
+        return "VTA-";
       case "ajuste":
-        return "Ajuste-";
+        return "AJU-";
       default:
         return "Movimiento-";
     }
@@ -2560,7 +2561,7 @@ export const firestoreService = {
     counters[tipo] = nextNumber;
     setLocalStorageItem("contadores_movimientos", counters);
 
-    return `${prefix}${nextNumber}`;
+    return `${prefix}${String(nextNumber).padStart(5, "0")}`;
   },
 
   // --- REGISTRO ATÓMICO DE MOVIMIENTO VÍA RUNTRANSACTION ---
@@ -3143,7 +3144,7 @@ export const firestoreService = {
           const data = d.data();
           return {
             id: d.id,
-            folio: data.folio,
+            folio: folioComercial(data.folio),
             venta_id: data.venta_id,
             venta_relacionada_id: data.venta_relacionada_id || undefined,
             subtipo: data.subtipo || undefined,
@@ -3289,7 +3290,7 @@ export const firestoreService = {
         return {
           ...data,
           id: snapshot.id,
-          folio: String(data.folio || snapshot.id),
+          folio: folioComercial(String(data.folio || snapshot.id)),
           fecha: toDate(data.fecha),
           items: Array.isArray(data.items) ? data.items : [],
           estado: data.estado || "activo",
@@ -3337,7 +3338,7 @@ export const firestoreService = {
 
           list.push({
             id: d.id,
-            folio: data.folio,
+            folio: folioComercial(data.folio),
             venta_id: data.venta_id,
             venta_partida: typeof data.venta_partida === "number" ? data.venta_partida : undefined,
             venta_total_partidas: typeof data.venta_total_partidas === "number" ? data.venta_total_partidas : undefined,
@@ -3513,7 +3514,7 @@ export const firestoreService = {
             nextCompraNumber = data.ultimo_consecutivo + 1;
           }
         }
-        generatedCompraFolio = `COMP-${nextCompraNumber}`;
+        generatedCompraFolio = generarFolio("CMP", nextCompraNumber);
 
         // 2. Obtener consecutivo de entradas
         const entradaCounterSnap = await transaction.get(entradaCounterRef);
@@ -3547,7 +3548,7 @@ export const firestoreService = {
           }, { merge: true });
 
           // Registrar movimiento de auditoría interna
-          const movFolio = `Entrada-${nextEntradaNumber + i}`;
+          const movFolio = generarFolio("ENT", nextEntradaNumber + i);
           const movRef = doc(collection(realDb, "movimientos"));
           const refText = compraData.referencia 
             ? `${compraData.referencia} (Compra ${generatedCompraFolio})` 
@@ -3652,13 +3653,13 @@ export const firestoreService = {
 
     const nextCompraNum = (counters.compra || 0) + 1;
     counters.compra = nextCompraNum;
-    const generatedCompraFolio = `COMP-${nextCompraNum}`;
+    const generatedCompraFolio = generarFolio("CMP", nextCompraNum);
     const compraDocId = "comp_" + Math.random().toString(36).substr(2, 9);
 
     for (const item of validItems) {
       const nextEntradaNum = (counters.entrada || 0) + 1;
       counters.entrada = nextEntradaNum;
-      const movFolio = `Entrada-${nextEntradaNum}`;
+      const movFolio = generarFolio("ENT", nextEntradaNum);
       const refText = compraData.referencia 
         ? `${compraData.referencia} (Compra ${generatedCompraFolio})` 
         : `Compra ${generatedCompraFolio} - Proveedor: ${proveedorClean}`;
@@ -3877,7 +3878,7 @@ export const firestoreService = {
             if (data.en_papelera === true) return;
             list.push({
               id: d.id,
-              folio: data.folio,
+              folio: folioComercial(data.folio),
               proveedor: data.proveedor,
               fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
               fecha_str: data.fecha_str,
@@ -3934,7 +3935,7 @@ export const firestoreService = {
         if (data.en_papelera === true) return;
         list.push({
           id: d.id,
-          folio: data.folio,
+          folio: folioComercial(data.folio),
           proveedor: data.proveedor,
           fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
           fecha_str: data.fecha_str,
@@ -3961,6 +3962,7 @@ export const firestoreService = {
     const list = getLocalStorageItem<Compra[]>("compras", []);
     return list.filter(c => c.en_papelera !== true).map(c => ({
       ...c,
+      folio: folioComercial(c.folio),
       fecha: c.fecha instanceof Date ? c.fecha : new Date(typeof c.fecha === "string" ? c.fecha : (c.fecha as any).seconds * 1000),
       creado_at: c.creado_at instanceof Date ? c.creado_at : new Date(typeof c.creado_at === "string" ? c.creado_at : (c.creado_at as any).seconds * 1000)
     })).sort((a, b) => (b.fecha as Date).getTime() - (a.fecha as Date).getTime());
@@ -3998,7 +4000,7 @@ export const firestoreService = {
           const data = d.data();
           return {
             id: d.id,
-            folio: data.folio,
+            folio: folioComercial(data.folio),
             proveedor: data.proveedor,
             fecha: data.fecha ? (data.fecha as Timestamp).toDate() : new Date(),
             fecha_str: data.fecha_str,
@@ -4038,6 +4040,7 @@ export const firestoreService = {
     let list = getLocalStorageItem<Compra[]>("compras", []).filter(compra => compra.en_papelera !== true);
     let parsed = list.map(c => ({
       ...c,
+      folio: folioComercial(c.folio),
       fecha: c.fecha instanceof Date ? c.fecha : new Date(typeof c.fecha === "string" ? c.fecha : (c.fecha as any).seconds * 1000),
       creado_at: c.creado_at instanceof Date ? c.creado_at : new Date(typeof c.creado_at === "string" ? c.creado_at : (c.creado_at as any).seconds * 1000)
     }));
@@ -5127,6 +5130,7 @@ export const firestoreService = {
             en_papelera: data.en_papelera === true,
             desactivado_at: data.desactivado_at ? (data.desactivado_at.toDate ? data.desactivado_at.toDate() : data.desactivado_at) : undefined
           };
+          if (data.folio) item.folio = folioComercial(data.folio);
           if (data.metodo_pago) item.metodo_pago = data.metodo_pago;
           if (data.almacen_id) item.almacen_id = data.almacen_id;
           if (data.almacen_nombre) item.almacen_nombre = data.almacen_nombre;
@@ -5191,6 +5195,7 @@ export const firestoreService = {
             creado_at: data.creado_at ? (data.creado_at.toDate ? data.creado_at.toDate() : data.creado_at) : new Date(),
             actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date()
           };
+          if (data.folio) item.folio = folioComercial(data.folio);
           if (data.metodo_pago) item.metodo_pago = data.metodo_pago;
           if (data.almacen_id) item.almacen_id = data.almacen_id;
           if (data.almacen_nombre) item.almacen_nombre = data.almacen_nombre;
@@ -5288,12 +5293,20 @@ export const firestoreService = {
     if (isConfigured && realDb) {
       try {
         const docRef = doc(collection(realDb, "gastos"));
+        const counterRef = doc(realDb, "contadores", "gasto");
         const periodoKey = getPeriodoKey(gastoData.fecha);
         const periodRef = periodoKey ? doc(realDb, "periodos_financieros", periodoKey) : null;
+        let generatedGastoFolio = "";
 
         await runTransaction(realDb, async (tx) => {
+          const counterSnap = await tx.get(counterRef);
           const periodSnap = periodRef ? await tx.get(periodRef) : null;
-          tx.set(docRef, payload);
+          const nextNumber = (Number(counterSnap.data()?.ultimo_consecutivo) || 0) + 1;
+          generatedGastoFolio = generarFolio("GTO", nextNumber);
+          tx.set(docRef, { ...payload, folio: generatedGastoFolio });
+          tx.set(counterRef, {
+            tipo: "gasto", ultimo_consecutivo: nextNumber, actualizado: Timestamp.now()
+          }, { merge: true });
 
           if (periodRef && periodoKey) {
             const updatedPeriod = computeNewPeriodIndexData(
@@ -5312,6 +5325,7 @@ export const firestoreService = {
 
         const createdGasto: Gasto = {
           id: docRef.id,
+          folio: generatedGastoFolio,
           concepto: cleanConcepto,
           categoria: cleanCategoria,
           monto,
@@ -5335,8 +5349,12 @@ export const firestoreService = {
     }
 
     const newId = "gas_" + Math.random().toString(36).substr(2, 9);
+    const gastoCounters = getLocalStorageItem<Record<string, number>>("contadores_movimientos", {});
+    gastoCounters.gasto = (gastoCounters.gasto || 0) + 1;
+    setLocalStorageItem("contadores_movimientos", gastoCounters);
     const createdLocal: Gasto = {
       id: newId,
+      folio: generarFolio("GTO", gastoCounters.gasto),
       concepto: cleanConcepto,
       categoria: cleanCategoria,
       monto,
@@ -5841,15 +5859,35 @@ export const firestoreService = {
       actualizado_at: now,
       estado: "activo" as const
     };
+    const esAjuste = input.tipo === "ajuste_entrada" || input.tipo === "ajuste_salida";
     let created: MovimientoFinancieroManual;
     if (isConfigured && realDb) {
       const ref = doc(collection(realDb, "movimientos_financieros"));
       const payload = { ...base, fecha: Timestamp.fromDate(input.fecha), creado_at: Timestamp.now(), actualizado_at: Timestamp.now() };
-      await setDoc(ref, payload);
-      created = { id: ref.id, ...base };
+      let folio: string | undefined;
+      if (esAjuste) {
+        const counterRef = doc(realDb, "contadores", "ajuste_financiero");
+        await runTransaction(realDb, async tx => {
+          const counter = await tx.get(counterRef);
+          const siguiente = (Number(counter.data()?.ultimo_consecutivo) || 0) + 1;
+          folio = generarFolio("AJU", siguiente);
+          tx.set(ref, { ...payload, folio });
+          tx.set(counterRef, { tipo: "ajuste_financiero", ultimo_consecutivo: siguiente, actualizado: Timestamp.now() }, { merge: true });
+        });
+      } else {
+        await setDoc(ref, payload);
+      }
+      created = { id: ref.id, ...base, ...(folio ? { folio } : {}) };
     } else {
       const list = getLocalStorageItem<MovimientoFinancieroManual[]>("movimientos_financieros", []);
-      created = { id: `MF-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ...base };
+      let folio: string | undefined;
+      if (esAjuste) {
+        const counters = getLocalStorageItem<Record<string, number>>("contadores_movimientos", {});
+        counters.ajuste_financiero = (counters.ajuste_financiero || 0) + 1;
+        folio = generarFolio("AJU", counters.ajuste_financiero);
+        setLocalStorageItem("contadores_movimientos", counters);
+      }
+      created = { id: `MF-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ...base, ...(folio ? { folio } : {}) };
       setLocalStorageItem("movimientos_financieros", [created, ...list]);
     }
     const periodo = getPeriodoKey(input.fecha);
@@ -6268,7 +6306,7 @@ export const firestoreService = {
           const data = d.data();
           return {
             id: d.id,
-            folio: data.folio,
+            folio: folioComercial(data.folio),
             venta_id: data.venta_id,
             venta_relacionada_id: data.venta_relacionada_id || undefined,
             subtipo: data.subtipo || undefined,
@@ -6336,7 +6374,7 @@ export const firestoreService = {
           const data = d.data();
           return {
             id: d.id,
-            folio: data.folio,
+            folio: folioComercial(data.folio),
             proveedor: data.proveedor,
             fecha: data.fecha
               ? (data.fecha as Timestamp).toDate
@@ -6391,6 +6429,7 @@ export const firestoreService = {
             estado: data.estado || "activo",
             en_papelera: data.en_papelera === true
           };
+          if (data.folio) item.folio = folioComercial(data.folio);
           if (data.metodo_pago) item.metodo_pago = data.metodo_pago;
           if (data.almacen_id) item.almacen_id = data.almacen_id;
           if (data.almacen_nombre) item.almacen_nombre = data.almacen_nombre;

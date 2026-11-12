@@ -75,7 +75,7 @@ assert.equal(mixed.movimientos.find(row => row.tipo === "Gasto extra")?.gasto?.i
 const { default: MovimientosBalance } = await import("../src/components/finanzas/MovimientosBalance");
 const table = renderToStaticMarkup(React.createElement(MovimientosBalance, { data: mixed, loading: false, busy: false, onEdit: () => {}, onArchive: () => {} }));
 assert.match(table, />Folio<\/th>/, "El balance tiene una columna de folio.");
-assert.match(table, />COMP-1<\/td>/, "Los folios de compras aparecen en su propia columna.");
+assert.match(table, />CMP-00001<\/td>/, "Los folios históricos de compras se muestran con el formato nuevo.");
 for (const text of ["Movimientos", "Descripción", "Comentario", "Primer pedido", "Reembolso", "Entrega personal", "Total acumulado"]) assert.ok(table.includes(text));
 assert.ok(!table.includes("No necesitas capturarlos otra vez"));
 const emptyTable = renderToStaticMarkup(React.createElement(MovimientosBalance, { data: calcularBalanceGeneral([], [], [], []), loading: false, busy: false, onEdit: () => {}, onArchive: () => {} }));

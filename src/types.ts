@@ -35,7 +35,7 @@ export interface Producto {
 
 export interface Movimiento {
   id?: string;
-  folio?: string; // Folio consecutivo único: Entrada-1, Salida-1, Transferencia-1
+  folio?: string; // Folio comercial: VTA-00001, ENT-00001, AJU-00001
   sku: string;
   almacen_id?: string;
   tipo: "entrada" | "salida" | "ajuste" | "transferencia";
@@ -374,7 +374,7 @@ export interface CompraItem {
 
 export interface Compra {
   id?: string;
-  folio: string; // ej. COMP-1
+  folio: string; // ej. CMP-00001
   proveedor: string;
   fecha: {
     seconds: number;
@@ -547,6 +547,7 @@ export const METODOS_PAGO_GASTO: MetodoPagoGasto[] = [
 
 export interface Gasto {
   id?: string;
+  folio?: string; // GTO-00001 para nuevos gastos; los históricos no se alteran
   concepto: string;
   categoria: CategoriaGasto | string;
   monto: number;
@@ -585,6 +586,7 @@ export type TipoMovimientoFinanciero =
 
 export interface MovimientoFinancieroManual {
   id?: string;
+  folio?: string; // AJU-00001 en ajustes de caja
   tipo: TipoMovimientoFinanciero;
   concepto: string;
   monto: number;

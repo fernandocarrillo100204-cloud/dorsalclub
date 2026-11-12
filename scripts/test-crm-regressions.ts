@@ -3,6 +3,7 @@ import { calcularInventarioDrop } from "../src/lib/inventarioDrops";
 import { construirPedidos, fechaLocal, fechaRegistro, leerMovimiento, leerVenta } from "../src/lib/lecturasVentas";
 import { pedidosPendientesPago } from "../src/lib/pedidosPendientes";
 import { mensajeError } from "../src/lib/errores";
+import { folioComercial, generarFolio } from "../src/lib/folios";
 import type { Movimiento, VentaRegistroInput } from "../src/types";
 
 // Almacenamiento aislado en memoria. Estas pruebas no conectan con Firebase.
@@ -80,6 +81,18 @@ await assert.rejects(
 );
 const sale = await service.registerVentaTransaction(input);
 assert.equal(sale.id.length > 0, true);
+assert.match(sale.folio, /^VTA-\d{5,}$/, "Las ventas nuevas usan VTA con cinco cifras.");
+assert.match(purchase.folio, /^CMP-\d{5,}$/, "Las compras nuevas usan CMP con cinco cifras.");
+assert.equal(folioComercial("Salida-8"), "VTA-00008");
+assert.equal(folioComercial("COMP-15"), "CMP-00015");
+assert.equal(folioComercial("Liquidación-Salida-8"), "VTA-00008");
+assert.equal(folioComercial("Reembolso-Salida-8"), "VTA-00008");
+assert.equal(folioComercial("Seguimiento-Salida-8"), "VTA-00008");
+assert.equal(folioComercial("Ajuste-7"), "AJU-00007");
+assert.equal(folioComercial("Entrada-9"), "ENT-00009");
+assert.equal(folioComercial("otro folio"), "otro folio");
+assert.equal(generarFolio("VTA", 100000), "VTA-100000");
+assert.throws(() => generarFolio("VTA", 0), /Consecutivo/);
 const saleMaster = (await service.getVentasMaestrasPaginated()).items.find(item => item.id === sale.id);
 assert.equal(saleMaster?.ubicacion_entrega_nombre, "Entrega de prueba");
 assert.equal(saleMaster?.repartidor_nombre, "Responsable de prueba");
@@ -118,7 +131,7 @@ await assert.rejects(service.actualizarSeguimientoPedido(preorder.id, { marcar_e
 await service.registrarPagoPedido(preorder.id, 500, "Efectivo");
 const pagosFinales = get<Movimiento[]>("movimientos", []).filter(item => item.venta_relacionada_id === preorder.id && item.subtipo === "abono_venta");
 assert.equal(pagosFinales.length, 1, "Solo existe un cobro posterior al anticipo inicial.");
-assert.equal(pagosFinales[0].folio, `Liquidación-${preorder.folio}`);
+assert.equal(pagosFinales[0].folio, preorder.folio, "La liquidación usa el folio original de la venta.");
 assert.equal(pagosFinales[0].venta_saldo_pendiente, 0);
 assert.equal(pagosFinales[0].estado_pago, "pagado");
 await assert.rejects(service.registrarPagoPedido(preorder.id, 100, "Efectivo"), /ya está pagado|liquidar el saldo pendiente completo/);
@@ -176,5 +189,15 @@ assert.match(purchaseForm, /Drop de inventario/);
 assert.doesNotMatch(purchaseForm, /almac[eé]n|transferencias/i);
 assert.doesNotMatch(render(Ventas, { productos: [], canal: "stock" }), /almac[eé]n|transferencias/i);
 assert.doesNotMatch(render(Configuracion, {}), /almac[eé]n|transferencias/i);
+const gastoConFolio = await service.addGasto({ concepto: "Gasto con folio", categoria: "Otros", monto: 1, fecha: new Date() });
+assert.match(gastoConFolio.folio || "", /^GTO-\d{5,}$/, "Los gastos nuevos tienen folio.");
+const ajusteConFolio = await service.addMovimientoFinanciero({
+  tipo: "ajuste_entrada", concepto: "Ajuste de prueba", monto: 1, fecha: new Date(),
+  fecha_str: fechaLocal(new Date()), notas: "Comprobación de folios"
+});
+assert.match(ajusteConFolio.folio || "", /^AJU-\d{5,}$/, "Los ajustes nuevos tienen folio.");
+const balanceFolios = await service.getBalanceGeneral();
+assert.ok(balanceFolios.movimientos.some(row => row.origen?.tipo === "gasto" && row.referencia === gastoConFolio.folio));
+assert.ok(balanceFolios.movimientos.some(row => row.origen?.tipo === "manual" && row.referencia === ajusteConFolio.folio));
 clearFinanzasCache();
 console.log("Regresiones CRM: fechas, clientes, pedidos, compras, cobros, devolución y finanzas aprobadas (solo memoria local).");

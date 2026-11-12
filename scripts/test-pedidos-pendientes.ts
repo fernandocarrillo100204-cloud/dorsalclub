@@ -57,6 +57,8 @@ const pedidoViejo: Movimiento = {
   venta_total_cobrado: 200, venta_total_recibido: 100
 };
 const pedidosConTallas = construirPedidos([pedidoNuevo], [pedidoViejo]);
+assert.equal(pedidosConTallas.find(item => item.venta_id === "venta-nueva")?.folio, "VTA-00008");
+assert.equal(pedidosConTallas.find(item => item.venta_id === "venta-legada")?.folio, "VTA-00004");
 assert.equal(pedidosConTallas.find(item => item.venta_id === "venta-nueva")?.items[0].talla, "M");
 assert.equal(pedidosConTallas.find(item => item.venta_id === "venta-nueva")?.ubicacion_entrega_nombre, "San Pedro");
 assert.equal(pedidosConTallas.find(item => item.venta_id === "venta-legada")?.items[0].talla, "L");
