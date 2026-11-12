@@ -7,7 +7,6 @@ import { mensajeError } from "../lib/errores";
 import { money, searchText } from "../lib/presentation";
 import { useWorkspace } from "../context/WorkspaceContext";
 import { ErrorState, FilterSummary, LoadingState, PageHeader, StatCard } from "./ui/Page";
-import { MoneyInput } from "./ui/NumericInputs";
 import Dialog from "./ui/Dialog";
 import ConfiguracionModuloModal from "./ConfiguracionModuloModal";
 
@@ -19,7 +18,6 @@ const OrderManager: React.FC<{
   onSaved: () => Promise<void>;
 }> = ({ order, methods, methodsError, onClose, onSaved }) => {
   const { confirm, notify } = useWorkspace();
-  const [amount, setAmount] = useState(order.saldo.toFixed(2));
   const [method, setMethod] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -45,19 +43,18 @@ const OrderManager: React.FC<{
 
   const receive = async (event: React.FormEvent) => {
     event.preventDefault();
-    const value = Number(amount);
-    if (!Number.isFinite(value) || value <= 0 || value > order.saldo || !method) {
-      setError("Captura un importe válido que no supere el saldo y selecciona un método de pago.");
+    if (!Number.isFinite(order.saldo) || order.saldo <= 0 || !method) {
+      setError("Selecciona un método de pago para liquidar el saldo pendiente.");
       return;
     }
     if (!(await confirm({
-      title: "Confirmar pago recibido",
-      description: `Registrar ${money.format(value)} por ${method} en el pedido ${order.folio}. Si se liquida, desaparecerá de esta pantalla, pero continuará en Historial de ventas.`,
-      confirmLabel: "Sí, registrar pago"
+      title: "Confirmar liquidación",
+      description: `Recibir ${money.format(order.saldo)} por ${method} y liquidar completamente el pedido ${order.folio}. El pedido saldrá de Por pagar y continuará en Historial de ventas.`,
+      confirmLabel: "Sí, liquidar pedido"
     }))) return;
     await run(
-      () => firestoreService.registrarPagoPedido(order.venta_id, value, method),
-      `Pago registrado en ${order.folio}.`
+      () => firestoreService.registrarPagoPedido(order.venta_id, order.saldo, method),
+      `Pedido ${order.folio} liquidado.`
     );
   };
 
@@ -79,7 +76,7 @@ const OrderManager: React.FC<{
     );
   };
 
-  const validAmount = Number.isFinite(Number(amount)) && Number(amount) > 0 && Number(amount) <= order.saldo;
+  const validAmount = Number.isFinite(order.saldo) && order.saldo > 0;
 
   return (
     <Dialog open title={order.folio}
@@ -101,8 +98,8 @@ const OrderManager: React.FC<{
         </div>
         {error && <ErrorState message={error} />}
         <form onSubmit={receive} className="rounded-xl p-4 border border-emerald-200 dark:border-emerald-900 bg-emerald-50/40 dark:bg-emerald-950/20 space-y-3">
-          <h3 className="text-sm font-semibold">Registrar un pago</h3>
-          <p className="text-xs text-zinc-500">Registra únicamente pagos ya recibidos. El pedido se retira de esta vista al liquidarse.</p>
+          <h3 className="text-sm font-semibold">Liquidar pedido</h3>
+          <p className="text-xs text-zinc-500">Únicamente se permite cobrar el saldo completo. No se aceptan abonos adicionales después del anticipo inicial.</p>
           {methodsError && <ErrorState message={methodsError} />}
           {!methodsError && !methods.length && (
             <p className="text-xs text-amber-700 dark:text-amber-400">
@@ -110,11 +107,11 @@ const OrderManager: React.FC<{
             </p>
           )}
           <div className="grid sm:grid-cols-2 gap-3">
-            <label className="text-xs font-medium">Importe · MXN
-              <MoneyInput required min="0.01" max={order.saldo} value={amount}
-                onChange={event => setAmount(event.target.value)} disabled={busy}
-                className="mt-1 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2" />
-            </label>
+            <div className="text-xs font-medium">Importe a liquidar · MXN
+              <div className="mt-1 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-semibold tabular-nums" aria-label="Importe total a liquidar">
+                {money.format(order.saldo)}
+              </div>
+            </div>
             <label className="text-xs font-medium">Método de pago
               <select required value={method} onChange={event => setMethod(event.target.value)}
                 disabled={busy || Boolean(methodsError)}
@@ -126,7 +123,7 @@ const OrderManager: React.FC<{
           </div>
           <button type="submit" disabled={busy || !method || !validAmount || Boolean(methodsError)}
             className="btn-primary w-full">
-            <CircleDollarSign className="h-4 w-4" />{busy ? "Guardando…" : "Registrar pago"}
+            <CircleDollarSign className="h-4 w-4" />{busy ? "Guardando…" : "Liquidar pedido"}
           </button>
         </form>
         {(order.recibido <= .009 || order.es_consolidado !== false) && (
@@ -200,7 +197,7 @@ export default function PedidosVenta() {
   return (
     <section className="page-shell space-y-6">
       <PageHeader eyebrow="Ventas" title="Pedidos por pagar"
-        description="Consulta los saldos pendientes y registra cobros. Los pedidos liquidados permanecen en Historial de ventas."
+        description="Consulta los saldos pendientes y liquida los pedidos. Los liquidados permanecen en Historial de ventas."
         actions={<>
           <button type="button" className="btn-secondary" onClick={() => setSettingsOpen(true)}>
             <Settings2 className="h-4 w-4" />Configurar
@@ -246,7 +243,7 @@ export default function PedidosVenta() {
                   <h2>Por pagar</h2>
                   <span className="column-count">{filtered.length}</span>
                 </div>
-                <p>Pedidos sin liquidar, incluidos anticipos y pagos parciales</p>
+                <p>Pedidos sin liquidar, con o sin anticipo inicial</p>
               </header>
               <div className="space-y-3">
                 {!filtered.length ? (
