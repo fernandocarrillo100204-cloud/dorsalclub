@@ -2,6 +2,7 @@ import type { Compra, Gasto, Movimiento, MovimientoFinancieroManual } from "../t
 import { allocateRecognizedSaleIncome } from "./ventasCore";
 import { fechaRegistro } from "./lecturasVentas";
 import { costoVentaEfectivamentePagado } from "./fletesVentas";
+import { folioComercial } from "./folios";
 
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 const cents = (value: number) => Math.round(value * 100);
@@ -49,7 +50,7 @@ export function calcularBalanceGeneral(sales: Movimiento[], purchases: Compra[],
     const movimientosVenta = partidas.get(sale.venta_id || sale.venta_relacionada_id || sale.id || "") || [];
     const productos = movimientosVenta.map(item => `${item.cantidad} × ${item.sku}`).join(", ");
     const tipo = sale.subtipo === "reembolso_venta" ? "Reembolso" : sale.subtipo === "abono_venta" ? (sale.estado_pago === "pagado" && typeof sale.venta_saldo_pendiente === "number" && sale.venta_saldo_pendiente <= 0 ? "Liquidación" : "Abono") : sale.estado_pago === "anticipo" ? "Anticipo" : "Venta";
-    const base = { referencia: sale.folio || referencia, fecha: fechaRegistro(sale.fecha), comentario: sale.comentarios_venta || "" };
+    const base = { referencia: folioComercial(sale.folio || referencia), fecha: fechaRegistro(sale.fecha), comentario: sale.comentarios_venta || "" };
     const income = (cents(allocation.merchandise) + cents(allocation.shipping + allocation.other)) / 100;
     if (income !== 0) add({ ...base, id: `venta-${sale.id || movimientos.length}`, tipo, descripcion: [productos || sale.referencia || "Cobro de venta", sale.cliente_nombre].filter(Boolean).join(" · "), ingreso: income, egreso: 0, origen: { tipo: "venta", registro: sale, partidas: movimientosVenta } });
     // Abonos y reembolsos no vuelven a reconocer costos de envío.
@@ -67,19 +68,19 @@ export function calcularBalanceGeneral(sales: Movimiento[], purchases: Compra[],
     const costs = Math.min(total, associated);
     purchaseGoods += cents(total - costs);
     purchaseCosts += cents(costs);
-    add({ id: `compra-${purchase.id || movimientos.length}`, referencia: purchase.folio || purchase.id || "", fecha: fechaRegistro(purchase.fecha), tipo: "Compra", descripcion: [purchase.drop_nombre, purchase.proveedor, (purchase.items || []).map(item => `${item.cantidad} × ${item.nombre_producto || item.sku}`).join(", ")].filter(Boolean).join(" · ") || "Compra de mercancía", comentario: purchase.notas || "", ingreso: 0, egreso: (cents(total - costs) + cents(costs)) / 100, origen: { tipo: "compra", registro: purchase } });
+    add({ id: `compra-${purchase.id || movimientos.length}`, referencia: folioComercial(purchase.folio || purchase.id), fecha: fechaRegistro(purchase.fecha), tipo: "Compra", descripcion: [purchase.drop_nombre, purchase.proveedor, (purchase.items || []).map(item => `${item.cantidad} × ${item.nombre_producto || item.sku}`).join(", ")].filter(Boolean).join(" · ") || "Compra de mercancía", comentario: purchase.notas || "", ingreso: 0, egreso: (cents(total - costs) + cents(costs)) / 100, origen: { tipo: "compra", registro: purchase } });
   }
   const gastos = expenses.filter(active).map(item => ({ ...item, fecha: fechaRegistro(item.fecha) })).sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
   gastos.forEach(item => {
     extraCosts += cents(number(item.monto));
-    add({ id: `gasto-${item.id || movimientos.length}`, referencia: item.id || "", fecha: item.fecha, tipo: "Gasto extra", descripcion: item.concepto, comentario: item.notas || "", ingreso: 0, egreso: number(item.monto), gasto: item, origen: { tipo: "gasto", registro: item } });
+    add({ id: `gasto-${item.id || movimientos.length}`, referencia: folioComercial(item.folio || item.id), fecha: item.fecha, tipo: "Gasto extra", descripcion: item.concepto, comentario: item.notas || "", ingreso: 0, egreso: number(item.monto), gasto: item, origen: { tipo: "gasto", registro: item } });
   });
   manual.filter(active).forEach(item => {
     const entrada = ["otro_ingreso", "aportacion_capital", "ajuste_entrada"].includes(item.tipo);
     const salida = ["retiro_propietario", "ajuste_salida"].includes(item.tipo);
     if (entrada) historicIn += cents(number(item.monto));
     if (salida) historicOut += cents(number(item.monto));
-    if (entrada || salida) add({ id: `manual-${item.id || movimientos.length}`, referencia: item.id || "", fecha: fechaRegistro(item.fecha), tipo: entrada ? "Ingreso anterior" : "Salida anterior", descripcion: item.concepto, comentario: item.notas || "", ingreso: entrada ? number(item.monto) : 0, egreso: salida ? number(item.monto) : 0, origen: { tipo: "manual", registro: item } });
+    if (entrada || salida) add({ id: `manual-${item.id || movimientos.length}`, referencia: folioComercial(item.folio || item.id), fecha: fechaRegistro(item.fecha), tipo: entrada ? "Ingreso anterior" : "Salida anterior", descripcion: item.concepto, comentario: item.notas || "", ingreso: entrada ? number(item.monto) : 0, egreso: salida ? number(item.monto) : 0, origen: { tipo: "manual", registro: item } });
   });
   movimientos.sort((a, b) => b.fecha.getTime() - a.fecha.getTime() || a.id.localeCompare(b.id));
   const ingresos = merchandise + extras + historicIn;
