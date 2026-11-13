@@ -29,10 +29,8 @@ function Importe({ label, value, strong = false }: { label: string; value: numbe
 function PagoRepartidor({ estado }: { estado: FleteVenta["estadoPago"] }) {
   return <span className={`inline-flex rounded-md px-2 py-1 text-xs font-medium ${estado === "pagado"
     ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-    : estado === "pendiente"
-      ? "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
-      : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"}`}>
-    {estado === "pagado" ? "Pagado" : estado === "pendiente" ? "Pendiente" : "Sin confirmar"}
+    : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"}`}>
+    {estado === "pagado" ? "Pagado" : "Pendiente"}
   </span>;
 }
 
@@ -283,7 +281,7 @@ export default function Fletes() {
           </tfoot>
         </table>
       </div>
-      <p className="px-4 py-3 text-xs text-zinc-500 border-t border-zinc-200 dark:border-zinc-800">Los fletes sin confirmar cuentan como pendientes. Los importes corresponden al mes de registro del flete, independientemente de la fecha de pago. El resumen incluye todo el periodo, aunque haya filtros de búsqueda o paginación.</p>
+      <p className="px-4 py-3 text-xs text-zinc-500 border-t border-zinc-200 dark:border-zinc-800">Los fletes sin estado registrado se muestran como pendientes. Los importes corresponden al mes de registro del flete, independientemente de la fecha de pago. El resumen incluye todo el periodo, aunque haya filtros de búsqueda o paginación.</p>
     </section>
     <p className="text-xs text-zinc-500 dark:text-zinc-400">
       Los fletes pendientes se muestran aquí sin descontarse del balance. Solo al marcarlos como pagados
