@@ -26,7 +26,7 @@ export interface FleteVenta {
   cliente: string | null;
   canal: string | null;
   cubiertoCliente: number;
-  estadoPago: "pagado" | "pendiente" | null;
+  estadoPago: "pagado" | "pendiente";
   pagadoAt: Date | null;
 }
 
@@ -52,8 +52,8 @@ export function obtenerFletesDeMovimientos(movimientos: Movimiento[]): FleteVent
     const cliente = (item.cliente_nombre || "").trim() || null;
     const canal = (item.canal_venta_nombre || "").trim() || null;
     const cubiertoCliente = Math.max(0, Number(item.envio_cobrado_cliente) || 0);
-    const estadoPago = item.estado_pago_flete === "pagado" || item.estado_pago_flete === "pendiente"
-      ? item.estado_pago_flete : null;
+    // Los fletes sin estado explícito se consideran pendientes.
+    const estadoPago = item.estado_pago_flete === "pagado" ? "pagado" : "pendiente";
     const pagadoAt = item.flete_pagado_at ? fechaRegistro(item.flete_pagado_at) : null;
     const previous = grouped.get(key);
     if (previous) {
@@ -64,7 +64,8 @@ export function obtenerFletesDeMovimientos(movimientos: Movimiento[]): FleteVent
       if (!previous.cliente && cliente) previous.cliente = cliente;
       if (!previous.canal && canal) previous.canal = canal;
       previous.cubiertoCliente += cubiertoCliente;
-      if (!previous.estadoPago && estadoPago) previous.estadoPago = estadoPago;
+      // Si hay varias partidas, todas deben estar pagadas.
+      if (previous.estadoPago !== "pagado" || estadoPago !== "pagado") previous.estadoPago = "pendiente";
       if (!previous.pagadoAt && pagadoAt) previous.pagadoAt = pagadoAt;
       continue;
     }

@@ -73,7 +73,8 @@ assert.equal(initialList[0].costo, 80);
 assert.equal(initialList[0].cubiertoCliente, 25);
 assert.equal(initialList[0].quienEntrega, "Fernando");
 assert.equal(initialList[0].ubicacionEntrega, "Galerías Monterrey");
-assert.equal(initialList[0].estadoPago, null, "No inventar un estado de pago para ventas antiguas.");
+assert.equal(initialList[0].estadoPago, "pendiente", "Un flete nuevo inicia pendiente.");
+assert.equal(remote.data.get(`ventas/${sale.id}`).estado_pago_flete, "pendiente", "El estado inicial se persiste en la venta.");
 const initialBalance = await remote.service.getBalanceGeneral();
 assert.equal(initialBalance.costosVentas, 0, "Los fletes sin confirmar no son egresos.");
 
@@ -122,12 +123,14 @@ historical.put("movimientos/partida-1", move("partida-1", 40, { venta_total_cost
 historical.put("movimientos/partida-2", move("partida-2", 20, { venta_partida: 2, total_costos_venta: 20 }));
 const old = (await historical.service.getFletesVentas())[0];
 assert.equal(old.costo, 60);
+assert.equal(old.estadoPago, "pendiente", "Los fletes históricos sin estado se muestran pendientes.");
 await historical.service.actualizarFleteVenta(old, { costo: 65.5 });
 assert.equal((await historical.service.getFletesVentas())[0].costo, 65.5);
 assert.equal((await historical.service.getBalanceGeneral()).costosVentas, 10, "Solo los otros costos históricos se reflejan mientras el flete está pendiente.");
 assert.equal(historical.data.get("movimientos/partida-2").costo_envio_venta, 0);
 
 const view = readFileSync("src/components/finanzas/Fletes.tsx", "utf8");
+assert.doesNotMatch(view, /Sin confirmar/i, "Solo existen Pendiente y Pagado en Fletes.");
 for (const label of ["Detalle", "Editar", "Marcar pagado", "Marcar pendiente", "Costo absorbido por el negocio"]) {
   assert.ok(view.includes(label), `Acción o campo disponible: ${label}`);
 }
