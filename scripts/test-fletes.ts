@@ -32,6 +32,7 @@ assert.equal(rows[0].quienEntrega, "Daniel");
 assert.equal(rows[0].ubicacionEntrega, "San Nicolás");
 assert.equal(rows[1].quienEntrega, null, "Las ventas históricas pueden carecer de responsable.");
 assert.equal(rows[1].ubicacionEntrega, null, "Las ventas históricas pueden carecer de destino.");
+assert.ok(rows.every(row => row.estadoPago === "pendiente"), "Sin estado histórico se muestra pendiente.");
 assert.equal(totalFletes(rows), 190.5);
 assert.equal(totalFletes([]), 0);
 assert.equal(events[0].costo_envio_venta, 120, "La vista no modifica el costo original.");
