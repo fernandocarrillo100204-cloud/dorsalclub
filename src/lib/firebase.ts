@@ -3894,6 +3894,7 @@ export const firestoreService = {
               comisiones: Number(data.comisiones) || 0,
               descuentos: Number(data.descuentos) || 0,
               total: Number(data.total) || 0,
+              clasificacion_financiera: data.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion",
               referencia: data.referencia || "",
               notas: data.notas || "",
               creado_por: data.creado_por || "",
@@ -3953,6 +3954,7 @@ export const firestoreService = {
           comisiones: Number(data.comisiones) || 0,
           descuentos: Number(data.descuentos) || 0,
           total: Number(data.total) || 0,
+              clasificacion_financiera: data.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion",
           referencia: data.referencia || "",
           notas: data.notas || "",
           creado_por: data.creado_por || "",
@@ -4018,6 +4020,7 @@ export const firestoreService = {
             comisiones: Number(data.comisiones) || 0,
             descuentos: Number(data.descuentos) || 0,
             total: Number(data.total) || 0,
+              clasificacion_financiera: data.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion",
             referencia: data.referencia || "",
             notas: data.notas || "",
             creado_por: data.creado_por || "",
@@ -5135,6 +5138,7 @@ export const firestoreService = {
             desactivado_at: data.desactivado_at ? (data.desactivado_at.toDate ? data.desactivado_at.toDate() : data.desactivado_at) : undefined
           };
           if (data.folio) item.folio = folioComercial(data.folio);
+          item.clasificacion_financiera = data.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion";
           if (data.metodo_pago) item.metodo_pago = data.metodo_pago;
           if (data.almacen_id) item.almacen_id = data.almacen_id;
           if (data.almacen_nombre) item.almacen_nombre = data.almacen_nombre;
@@ -5200,6 +5204,7 @@ export const firestoreService = {
             actualizado_at: data.actualizado_at ? (data.actualizado_at.toDate ? data.actualizado_at.toDate() : data.actualizado_at) : new Date()
           };
           if (data.folio) item.folio = folioComercial(data.folio);
+          item.clasificacion_financiera = data.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion";
           if (data.metodo_pago) item.metodo_pago = data.metodo_pago;
           if (data.almacen_id) item.almacen_id = data.almacen_id;
           if (data.almacen_nombre) item.almacen_nombre = data.almacen_nombre;
@@ -5934,15 +5939,25 @@ export const firestoreService = {
     if (!(["operacion", "inversion_inicial"] as string[]).includes(clasificacion)) throw new Error("Clasificación financiera no válida.");
     const collectionName = origen === "compra" ? "compras" : "gastos";
     if (isConfigured && realDb) {
-      await setDoc(doc(realDb, collectionName, id), { clasificacion_financiera: clasificacion, actualizado_at: Timestamp.now() }, { merge: true });
+      const ref = doc(realDb, collectionName, id);
+      await runTransaction(realDb, async transaction => {
+        const snapshot = await transaction.get(ref);
+        if (!snapshot.exists() || snapshot.data().en_papelera === true ||
+          ["anulada", "anulado", "inactivo"].includes(snapshot.data().estado || "")) {
+          throw new Error("El registro ya no está disponible para clasificarlo.");
+        }
+        transaction.set(ref, { clasificacion_financiera: clasificacion, actualizado_at: Timestamp.now() }, { merge: true });
+      });
     } else {
       const list = getLocalStorageItem<any[]>(collectionName, []);
-      const index = list.findIndex(item => item.id === id);
-      if (index < 0) throw new Error("El registro ya no existe.");
+      const index = list.findIndex(item => item.id === id && item.en_papelera !== true &&
+        !["anulada", "anulado", "inactivo"].includes(item.estado || ""));
+      if (index < 0) throw new Error("El registro ya no está disponible para clasificarlo.");
       list[index] = { ...list[index], clasificacion_financiera: clasificacion, actualizado_at: new Date() };
       setLocalStorageItem(collectionName, list);
     }
     clearFinanzasCache();
+    clearPeriodosFinancierosCache();
   },
 
   getCuentasPorCobrar: async (): Promise<CuentaPorCobrar[]> => {
@@ -6394,6 +6409,7 @@ export const firestoreService = {
             comisiones: Number(data.comisiones) || 0,
             descuentos: Number(data.descuentos) || 0,
             total: Number(data.total) || 0,
+              clasificacion_financiera: data.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion",
             referencia: data.referencia || "",
             notas: data.notas || "",
             creado_por: data.creado_por || "",
@@ -6434,6 +6450,7 @@ export const firestoreService = {
             en_papelera: data.en_papelera === true
           };
           if (data.folio) item.folio = folioComercial(data.folio);
+          item.clasificacion_financiera = data.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion";
           if (data.metodo_pago) item.metodo_pago = data.metodo_pago;
           if (data.almacen_id) item.almacen_id = data.almacen_id;
           if (data.almacen_nombre) item.almacen_nombre = data.almacen_nombre;
