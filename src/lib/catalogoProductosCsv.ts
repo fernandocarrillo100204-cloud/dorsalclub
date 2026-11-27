@@ -15,7 +15,7 @@ const OBLIGATORIAS = ["sku", "nombre", "marca", "tipo_talla"];
 function costoCsv(valor: string, linea: number): number | undefined {
   if (!valor.trim()) return undefined;
   const limpio = valor.trim();
-  if (!/^\\d+(?:[.,]\\d{1,2})?$/.test(limpio)) {
+  if (!/^[0-9]+(?:[.,][0-9]{1,2})?$/.test(limpio)) {
     throw new Error(`Línea ${linea}: costo inválido. Usa un importe mayor o igual a cero, hasta dos decimales.`);
   }
   const costo = Number(limpio.replace(",", "."));
