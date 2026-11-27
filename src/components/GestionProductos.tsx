@@ -7,7 +7,8 @@ import { Download, Edit2, FileUp, Plus, Search, Settings, Trash2, X } from "luci
 import { firestoreService } from "../lib/firebase";
 import { etiquetaTipoTalla, filtrarProductosCatalogo } from "../lib/catalogoProductos";
 import { COLUMNAS_PLANTILLA_PRODUCTOS, MAX_PRODUCTOS_CSV, datosExportacionProductosCsv, importarProductosCsv } from "../lib/catalogoProductosCsv";
-import { downloadCsv } from "../lib/presentation";
+import { downloadCsv, money } from "../lib/presentation";
+import { MoneyInput } from "./ui/NumericInputs";
 import { useWorkspace } from "../context/WorkspaceContext";
 import type { MarcaCatalogo, Producto } from "../types";
 import ModalCatalogos from "./ModalCatalogos";
@@ -48,6 +49,7 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
   const [formMarca, setFormMarca] = useState("");
   const [formTipoTalla, setFormTipoTalla] = useState<TipoTalla | "">("");
   const [formSku, setFormSku] = useState("");
+  const [formCosto, setFormCosto] = useState("");
 
   useEffect(() => {
     const unsubMarcas = firestoreService.getMarcasRealtime(setMarcas);
@@ -81,6 +83,7 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
     setFormMarca("");
     setFormTipoTalla("");
     setFormSku("");
+    setFormCosto("");
     setGeneralError(null);
   };
 
@@ -95,6 +98,7 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
     setFormMarca(producto.marca || "");
     setFormTipoTalla(producto.tipo_talla || "personalizada");
     setFormSku(producto.sku);
+    setFormCosto(typeof producto.precio_costo === "number" && Number.isFinite(producto.precio_costo) ? String(producto.precio_costo) : "");
     setGeneralError(null);
     setIsFormOpen(true);
   };
@@ -111,8 +115,14 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
     const nombre = formNombre.trim();
     const marca = formMarca.trim();
     const sku = formSku.trim().toUpperCase();
+    const costoTexto = formCosto.trim();
+    const costo = costoTexto ? Number(costoTexto) : undefined;
     if (!nombre || nombre.length > 120 || !marca || !formTipoTalla || !sku || sku.length > 128 || sku.includes("/")) {
       setGeneralError("Completa nombre, marca, tipo de talla y un SKU válido (máximo 128 caracteres, sin /).");
+      return;
+    }
+    if (costoTexto && (!/^[0-9]+(?:[.][0-9]{1,2})?$/.test(costoTexto) || !Number.isFinite(costo) || costo! < 0)) {
+      setGeneralError("El costo debe ser un importe en MXN mayor o igual a cero, con máximo dos decimales.");
       return;
     }
     if (!editingProduct && productos.some(p => p.sku.trim().toUpperCase() === sku)) {
@@ -125,7 +135,11 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
     try {
       if (editingProduct) {
         // El SKU es la identidad de Firestore y los movimientos. No se modifica al editar.
-        await firestoreService.updateProducto(editingProduct.sku, { nombre, marca, tipo_talla: formTipoTalla });
+        await firestoreService.updateProducto(editingProduct.sku, {
+          nombre, marca, tipo_talla: formTipoTalla,
+          ...(costo !== undefined ? { precio_costo: costo } :
+            typeof editingProduct.precio_costo === "number" ? { precio_costo: 0 } : {})
+        });
         notify("Producto actualizado.");
       } else {
         const producto: Producto = {
@@ -138,7 +152,7 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
           unidad: "pieza",
           stock_minimo: 0,
           activo: true,
-          precio_costo: 0
+          ...(costo !== undefined ? { precio_costo: costo } : {})
         };
         await firestoreService.addProductsBatch([producto]);
         notify("Producto registrado correctamente.");
@@ -263,7 +277,7 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
       </p>}
 
       <p className="text-xs text-zinc-500 dark:text-zinc-400">
-        El CSV utiliza únicamente SKU, nombre, marca y tipo de talla. Los costos, las tallas específicas y las existencias se registran en Compras e Inventario.
+        El CSV incluye SKU, nombre, marca, tipo de talla y costo unitario opcional. Las tallas específicas y las existencias se registran en Compras e Inventario.
       </p>
 
       <div id="gestion-productos-filters" className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800">
@@ -291,12 +305,13 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
                 <th className="px-4 py-3">Marca</th>
                 <th className="px-4 py-3">Tipo de talla</th>
                 <th className="px-4 py-3">SKU</th>
+                <th className="px-4 py-3 text-right">Costo</th>
                 <th className="px-4 py-3 text-right">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
               {visibles.length === 0 ? (
-                <tr><td colSpan={5} className="px-5 py-12 text-center text-zinc-500">
+                <tr><td colSpan={6} className="px-5 py-12 text-center text-zinc-500">
                   {searchQuery || filterMarca !== "all" ? "No hay productos que coincidan con los filtros." : "Aún no hay productos. Utiliza Nuevo producto para crear el primero."}
                 </td></tr>
               ) : visibles.map(producto => (
@@ -305,6 +320,7 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
                   <td className="px-4 py-3 text-zinc-700 dark:text-zinc-300">{producto.marca || "—"}</td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{etiquetaTipoTalla(producto.tipo_talla)}</td>
                   <td className="px-4 py-3 font-mono font-semibold text-zinc-900 dark:text-white">{producto.sku}</td>
+                  <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap text-zinc-700 dark:text-zinc-300">{typeof producto.precio_costo === "number" && Number.isFinite(producto.precio_costo) ? money.format(producto.precio_costo) : "—"}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
                       <button type="button" onClick={() => handleOpenEdit(producto)}
@@ -347,7 +363,7 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
               <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-700">
                 <table className="w-full min-w-[520px] text-left text-xs">
                   <thead className="bg-zinc-50 dark:bg-zinc-800 text-zinc-500">
-                    <tr><th className="p-3">SKU</th><th className="p-3">Nombre</th><th className="p-3">Marca</th><th className="p-3">Tipo de talla</th></tr>
+                    <tr><th className="p-3">SKU</th><th className="p-3">Nombre</th><th className="p-3">Marca</th><th className="p-3">Tipo de talla</th><th className="p-3 text-right">Costo</th></tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
                     {csvPreview.productos.slice(0, 8).map(producto => (
@@ -356,6 +372,7 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
                         <td className="p-3">{producto.nombre}</td>
                         <td className="p-3">{producto.marca}</td>
                         <td className="p-3">{etiquetaTipoTalla(producto.tipo_talla)}</td>
+                        <td className="p-3 text-right tabular-nums">{typeof producto.precio_costo === "number" ? money.format(producto.precio_costo) : "—"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -380,7 +397,7 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
             <div className="px-6 py-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-bold text-zinc-900 dark:text-white">{editingProduct ? "Editar producto" : "Crear nuevo producto"}</h2>
-                <p className="mt-1 text-xs text-zinc-500">Las tallas específicas y el costo se registran durante la compra.</p>
+                <p className="mt-1 text-xs text-zinc-500">El costo del catálogo es una referencia editable. El costo real de cada compra se registra por separado.</p>
               </div>
               <button type="button" onClick={handleCloseForm} disabled={loading} aria-label="Cerrar" className="p-2 text-zinc-400 hover:text-white">
                 <X className="w-5 h-5" />
@@ -417,6 +434,13 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
                   onChange={event => setFormSku(event.target.value.toUpperCase())} placeholder="Ej. BA-211"
                   className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-2.5 font-mono uppercase text-zinc-900 dark:text-white read-only:opacity-60" />
                 <p className="mt-1 text-[11px] text-zinc-500">{editingProduct ? "El SKU no puede cambiarse porque identifica compras, ventas e inventario." : "Identificador único asignado por ti."}</p>
+              </div>
+              <div>
+                <label htmlFor="producto-costo" className="block mb-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">Costo unitario · MXN <span className="font-normal text-zinc-500">(opcional)</span></label>
+                <MoneyInput id="producto-costo" value={formCosto} onChange={event => setFormCosto(event.target.value)}
+                  placeholder="Ej. 450.00" disabled={loading}
+                  className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-2.5 text-zinc-900 dark:text-white" />
+                <p className="mt-1 text-[11px] text-zinc-500">Precio de referencia por pieza; no modifica costos registrados en compras anteriores.</p>
               </div>
               <div className="flex justify-between gap-3 border-t border-zinc-200 dark:border-zinc-800 pt-5">
                 <button type="button" onClick={handleCloseForm} disabled={loading} className="btn-secondary">Cancelar</button>
