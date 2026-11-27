@@ -3,7 +3,7 @@ import type { BalanceGeneral } from "../../lib/balanceGeneral";
 
 const money = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
 
-export default function ResumenBalance({ data, loading }: { data: BalanceGeneral | null; loading: boolean }) {
+export default function ResumenBalance({ data, loading, excluyendoInversion = false }: { data: BalanceGeneral | null; loading: boolean; excluyendoInversion?: boolean }) {
   const amount = (value?: number, prominent = false) => loading
     ? <span aria-label="Cargando importe" className={`inline-block rounded bg-zinc-200 dark:bg-zinc-800 animate-pulse ${prominent ? "h-7 w-28" : "h-4 w-20"}`} />
     : <span className="tabular-nums whitespace-nowrap">{money.format(value ?? 0)}</span>;
@@ -36,7 +36,7 @@ export default function ResumenBalance({ data, loading }: { data: BalanceGeneral
       </div>
     </div>
     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/40 px-4 sm:px-5 py-4">
-      <h2 className="font-semibold" title="Ingresos menos egresos. Flujo registrado, no utilidad.">Balance general</h2>
+      <h2 className="font-semibold" title="Ingresos menos egresos. Flujo registrado, no utilidad.">{excluyendoInversion ? "Balance sin inversión inicial" : "Balance general"}</h2>
       <strong className={`text-2xl ${(data?.balance || 0) > 0 ? "text-emerald-700 dark:text-emerald-400" : (data?.balance || 0) < 0 ? "text-rose-700 dark:text-rose-400" : "text-zinc-600 dark:text-zinc-300"}`}>{amount(data?.balance, true)}</strong>
     </div>
   </section>;
