@@ -341,7 +341,7 @@ export default function Compras({
           nombre_producto: prod.nombre,
           variante_label: tipoTallaDeProducto(prod) === "unica" ? "Talla única" : prod.talla ? `Talla ${prod.talla}` : "",
           talla: tipoTallaDeProducto(prod) === "unica" ? "Única" : (prod.talla || ""),
-          costo_unitario: prod.precio_costo || 0
+          costo_unitario: typeof prod.precio_costo === "number" && Number.isFinite(prod.precio_costo) ? prod.precio_costo : ""
         };
       } else {
         copy[index] = {
@@ -409,8 +409,14 @@ export default function Compras({
         return;
       }
       const qty = typeof item.cantidad === "number" ? item.cantidad : 0;
-      if (qty <= 0) {
-        setFormError(`La cantidad para el producto "${item.nombre_producto || item.sku}" debe ser mayor a 0.`);
+      if (!Number.isSafeInteger(qty) || qty <= 0) {
+        setFormError(`La cantidad para el producto "${item.nombre_producto || item.sku}" debe ser un entero mayor a 0.`);
+        return;
+      }
+      if (typeof item.costo_unitario !== "number" ||
+          !Number.isFinite(item.costo_unitario) || item.costo_unitario < 0 ||
+          Math.round(item.costo_unitario * 100) / 100 !== item.costo_unitario) {
+        setFormError(`Ingresa un costo unitario válido para "${item.nombre_producto || item.sku}" (hasta dos decimales). Usa 0 solo cuando el costo sea realmente cero.`);
         return;
       }
     }
@@ -419,7 +425,7 @@ export default function Compras({
     try {
       const formattedItems: CompraItem[] = items.map((it) => {
         const qty = typeof it.cantidad === "number" ? it.cantidad : 1;
-        const unitCost = typeof it.costo_unitario === "number" ? it.costo_unitario : 0;
+        const unitCost = it.costo_unitario as number;
         const producto = getProductBySku(it.sku);
         const tipo = tipoTallaDeProducto(producto);
         const talla = tallaNormalizadaCompra(tipo, it.talla);
