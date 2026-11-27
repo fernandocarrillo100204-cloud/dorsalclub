@@ -154,6 +154,11 @@ await assert.rejects(firestoreService.addProductsBatch([
 ]), /costo/, "No permitir costos negativos.");
 await assert.rejects(firestoreService.updateProducto("A-001", { precio_costo: -50 }), /costo/);
 await assert.rejects(firestoreService.updateProducto("A-001", { precio_costo: 12.345 }), /costo/);
+await firestoreService.updateProducto("A-001", { precio_costo: null });
+assert.equal((await firestoreService.getProductos()).find(p => p.sku === "A-001")?.precio_costo, undefined,
+  "Dejar el costo vacío lo elimina, no lo reemplaza por cero.");
+await firestoreService.updateProducto("A-001", { precio_costo: 230.5 });
+assert.equal((await firestoreService.getProductos()).find(p => p.sku === "A-001")?.precio_costo, 230.5);
 await assert.rejects(firestoreService.updateProducto("SKU-FANTASMA", {
   nombre: "No puede crearse desde una edición"
 }), /ya no está disponible/, "No crear un producto fantasma desde una edición atrasada.");
@@ -190,6 +195,10 @@ await assert.rejects(remoto.updateProducto("SKU-FANTASMA", { nombre: "No existe"
 assert.equal(remote.data.has("productos/SKU-FANTASMA"), false);
 await remoto.updateProducto("RX-01", { precio_costo: 600 });
 assert.equal(remote.data.get("productos/RX-01")?.precio_costo, 600);
+await remoto.updateProducto("RX-01", { precio_costo: null });
+assert.equal(remote.data.get("productos/RX-01")?.precio_costo, undefined,
+  "En Firestore un costo borrado debe desaparecer de los campos del producto.");
+await remoto.updateProducto("RX-01", { precio_costo: 600 });
 await assert.rejects(remoto.updateProducto("RX-01", { precio_costo: Number.POSITIVE_INFINITY }), /costo/);
 assert.equal(remote.data.get("productos/RX-01")?.precio_costo, 600);
 
