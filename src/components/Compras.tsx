@@ -127,6 +127,7 @@ export default function Compras({
   const [tallasRopa, setTallasRopa] = useState<TallaRopaCatalogo[]>([]);
   const [tallasCalzado, setTallasCalzado] = useState<TallaCalzadoCatalogo[]>([]);
   const [updatingCompraDropId, setUpdatingCompraDropId] = useState<string | null>(null);
+  const [updatingCompraClasificacionId, setUpdatingCompraClasificacionId] = useState<string | null>(null);
 
   const isPurchaseDirty = useMemo(() => {
     if (!isNewView) return false;
@@ -170,6 +171,22 @@ export default function Compras({
   };
 
   useEffect(() => { loadDrops(); }, []);
+
+  const updateCompraClasificacion = async (compra: Compra, clasificacion: "operacion" | "inversion_inicial") => {
+    if (!compra.id || updatingCompraClasificacionId || (compra.clasificacion_financiera || "operacion") === clasificacion) return;
+    setUpdatingCompraClasificacionId(compra.id);
+    setFetchError(null);
+    try {
+      await firestoreService.setClasificacionFinanciera("compra", compra.id, clasificacion);
+      setCompras(current => current.map(item => item.id === compra.id ? { ...item, clasificacion_financiera: clasificacion } : item));
+      setSelectedCompraDetail(current => current?.id === compra.id ? { ...current, clasificacion_financiera: clasificacion } : current);
+      notify(`Compra ${compra.folio} clasificada como ${clasificacion === "inversion_inicial" ? "inversión inicial" : "operación normal"}.`);
+    } catch (cause) {
+      setFetchError(mensajeError(cause, "No se pudo cambiar la clasificación financiera de la compra."));
+    } finally {
+      setUpdatingCompraClasificacionId(null);
+    }
+  };
 
   const updateCompraDrop = async (compra: Compra, nextDropId: string) => {
     if (!compra.id) return;
@@ -611,7 +628,7 @@ export default function Compras({
                   <option value="operacion">Operación normal</option>
                   <option value="inversion_inicial">Inversión inicial</option>
                 </select>
-                <p className="text-[10px] text-zinc-400 mt-1">La inversión inicial se separa del flujo operativo, pero sí afecta la caja total.</p>
+                <p className="text-[10px] text-zinc-400 mt-1">En Balance general puedes excluir la inversión inicial de los cálculos sin borrar la compra.</p>
               </div>
             </div>
           </div>
@@ -1060,6 +1077,7 @@ export default function Compras({
                   <th className="py-3 px-3 text-center">Partidas / Uds</th>
                   <th className="py-3 px-3 text-right">Total Compra</th>
                   <th className="py-3 px-3">Drop</th>
+                  <th className="py-3 px-3">Clasificación</th>
                   <th className="py-3 px-3">Referencia</th>
                   <th className="py-3 px-3 text-right">Acción</th>
                 </tr>
@@ -1141,6 +1159,20 @@ export default function Compras({
                         {!compra.drop_id && <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">Pendiente de asignar a inventario</p>}
                       </td>
 
+                      {/* Clasificación editable para cualquier compra */}
+                      <td className="py-3 px-3 min-w-44">
+                        <select
+                          value={compra.clasificacion_financiera === "inversion_inicial" ? "inversion_inicial" : "operacion"}
+                          onChange={event => void updateCompraClasificacion(compra, event.target.value as "operacion" | "inversion_inicial")}
+                          disabled={Boolean(updatingCompraClasificacionId)}
+                          aria-label={`Clasificación financiera de ${compra.folio}`}
+                          className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-[11px] disabled:opacity-60"
+                        >
+                          <option value="operacion">Operación normal</option>
+                          <option value="inversion_inicial">Inversión inicial</option>
+                        </select>
+                      </td>
+
                       {/* Referencia */}
                       <td className="py-3 px-3">
                         <span className="text-zinc-600 dark:text-zinc-400 font-mono text-[11px]">
@@ -1220,6 +1252,12 @@ export default function Compras({
                       const d = selectedCompraDetail.fecha instanceof Date ? selectedCompraDetail.fecha : f?.toDate ? f.toDate() : new Date(f?.seconds ? f.seconds * 1000 : f);
                       return d.toLocaleDateString("es-MX");
                     })() : "—"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Clasificación financiera</span>
+                  <span className="font-medium text-zinc-800 dark:text-zinc-200 text-xs">
+                    {selectedCompraDetail.clasificacion_financiera === "inversion_inicial" ? "Inversión inicial" : "Operación normal"}
                   </span>
                 </div>
                 {selectedCompraDetail.referencia && (

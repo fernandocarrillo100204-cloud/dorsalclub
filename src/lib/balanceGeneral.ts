@@ -25,6 +25,57 @@ export interface BalanceMovimiento {
     | { tipo: "manual"; registro: MovimientoFinancieroManual };
 }
 
+function desgloseCompra(purchase: Compra) {
+  const associated = Math.max(0, number(purchase.costo_envio)) + Math.max(0, number(purchase.comisiones));
+  const subtotal = typeof purchase.subtotal === "number" ? number(purchase.subtotal) :
+    (purchase.items || []).reduce((sum, item) => sum + number(item.cantidad) * number(item.costo_unitario), 0);
+  const total = Math.max(0, typeof purchase.total === "number" ? number(purchase.total) : subtotal + associated - number(purchase.descuentos));
+  const costos = Math.min(total, associated);
+  return { mercanciaCentavos: cents(total - costos), costosCentavos: cents(costos) };
+}
+
+function esInversionInicial(row: BalanceMovimiento): boolean {
+  return (row.origen?.tipo === "compra" || row.origen?.tipo === "gasto") &&
+    row.origen.registro.clasificacion_financiera === "inversion_inicial";
+}
+
+/** Monto identificado como inversión inicial, sin alterar el registro de caja real. */
+export function totalInversionInicial(data: BalanceGeneral): number {
+  return data.movimientos.filter(esInversionInicial)
+    .reduce((suma, movimiento) => suma + cents(movimiento.egreso), 0) / 100;
+}
+
+/**
+ * Vista alternativa del mismo balance. No cambia el registro ni los cobros:
+ * únicamente elimina de los totales y del listado las compras y gastos
+ * clasificados como inversión inicial.
+ */
+export function balanceSinInversionInicial(data: BalanceGeneral): BalanceGeneral {
+  let mercanciaExcluida = 0, costosCompraExcluidos = 0, gastosExcluidos = 0;
+  const movimientos = data.movimientos.filter(movimiento => {
+    if (!esInversionInicial(movimiento)) return true;
+    if (movimiento.origen?.tipo === "compra") {
+      const desglose = desgloseCompra(movimiento.origen.registro);
+      mercanciaExcluida += desglose.mercanciaCentavos;
+      costosCompraExcluidos += desglose.costosCentavos;
+    } else if (movimiento.origen?.tipo === "gasto") {
+      gastosExcluidos += cents(movimiento.egreso);
+    }
+    return false;
+  });
+  const excluido = mercanciaExcluida + costosCompraExcluidos + gastosExcluidos;
+  return {
+    ...data,
+    mercanciaComprada: (cents(data.mercanciaComprada) - mercanciaExcluida) / 100,
+    costosCompras: (cents(data.costosCompras) - costosCompraExcluidos) / 100,
+    gastosExtra: (cents(data.gastosExtra) - gastosExcluidos) / 100,
+    egresos: (cents(data.egresos) - excluido) / 100,
+    balance: (cents(data.balance) + excluido) / 100,
+    movimientos,
+    gastos: data.gastos.filter(gasto => gasto.clasificacion_financiera !== "inversion_inicial")
+  };
+}
+
 /** Flujo acumulado. El costo de mercancía vendida nunca se vuelve a restar. */
 export function calcularBalanceGeneral(sales: Movimiento[], purchases: Compra[], expenses: Gasto[], manual: MovimientoFinancieroManual[]) {
   const movimientos: BalanceMovimiento[] = [];
@@ -61,14 +112,11 @@ export function calcularBalanceGeneral(sales: Movimiento[], purchases: Compra[],
     }
   }
   for (const purchase of purchases.filter(active)) {
-    const associated = Math.max(0, number(purchase.costo_envio)) + Math.max(0, number(purchase.comisiones));
-    const subtotal = typeof purchase.subtotal === "number" ? number(purchase.subtotal) : (purchase.items || []).reduce((sum, item) => sum + number(item.cantidad) * number(item.costo_unitario), 0);
-    const total = Math.max(0, typeof purchase.total === "number" ? number(purchase.total) : subtotal + associated - number(purchase.descuentos));
     // El descuento reduce mercancía primero; si excede su valor, reduce los cargos.
-    const costs = Math.min(total, associated);
-    purchaseGoods += cents(total - costs);
-    purchaseCosts += cents(costs);
-    add({ id: `compra-${purchase.id || movimientos.length}`, referencia: folioComercial(purchase.folio || purchase.id), fecha: fechaRegistro(purchase.fecha), tipo: "Compra", descripcion: [purchase.drop_nombre, purchase.proveedor, (purchase.items || []).map(item => `${item.cantidad} × ${item.nombre_producto || item.sku}`).join(", ")].filter(Boolean).join(" · ") || "Compra de mercancía", comentario: purchase.notas || "", ingreso: 0, egreso: (cents(total - costs) + cents(costs)) / 100, origen: { tipo: "compra", registro: purchase } });
+    const { mercanciaCentavos, costosCentavos } = desgloseCompra(purchase);
+    purchaseGoods += mercanciaCentavos;
+    purchaseCosts += costosCentavos;
+    add({ id: `compra-${purchase.id || movimientos.length}`, referencia: folioComercial(purchase.folio || purchase.id), fecha: fechaRegistro(purchase.fecha), tipo: "Compra", descripcion: [purchase.drop_nombre, purchase.proveedor, (purchase.items || []).map(item => `${item.cantidad} × ${item.nombre_producto || item.sku}`).join(", ")].filter(Boolean).join(" · ") || "Compra de mercancía", comentario: purchase.notas || "", ingreso: 0, egreso: (mercanciaCentavos + costosCentavos) / 100, origen: { tipo: "compra", registro: purchase } });
   }
   const gastos = expenses.filter(active).map(item => ({ ...item, fecha: fechaRegistro(item.fecha) })).sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
   gastos.forEach(item => {
