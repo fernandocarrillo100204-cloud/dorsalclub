@@ -95,6 +95,7 @@ export default function DetalleMovimientoBalance({ movimiento, marcasPorSku, pro
       <Seccion title="Datos de la compra">
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
           <Dato label="Proveedor" value={source.registro.proveedor} />
+          <Dato label="Clasificación financiera" value={source.registro.clasificacion_financiera === "inversion_inicial" ? "Inversión inicial" : "Operación normal"} />
           <Dato label="Drop" value={source.registro.drop_nombre || source.registro.drop_id} />
           <Dato label="Referencia de proveedor" value={source.registro.referencia} />
         </dl>
@@ -152,6 +153,7 @@ export default function DetalleMovimientoBalance({ movimiento, marcasPorSku, pro
     {source?.tipo === "gasto" && <Seccion title="Datos del gasto">
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
         <Dato label="Categoría" value={source.registro.categoria} />
+        <Dato label="Clasificación financiera" value={source.registro.clasificacion_financiera === "inversion_inicial" ? "Inversión inicial" : "Operación normal"} />
         <Dato label="Proveedor" value={source.registro.proveedor} />
         <Dato label="Método de pago" value={source.registro.metodo_pago} />
         <Dato label="Referencia" value={source.registro.referencia} />
