@@ -45,6 +45,18 @@ assert.equal(construirPedidos([], [legacy, { ...cancelledPayment, estado: "activ
 
 put("productos", ["SKU-A", "SKU-B"].map(sku => ({ sku, nombre: sku, categoria: "Prueba", unidad: "pieza", stock_minimo: 0, activo: true })));
 const testDrop = await service.addDrop({ nombre: "Drop de prueba local", estado: "en_venta" });
+// Una referencia de costo no registrada nunca debe convertirse en una compra de $0.
+for (const costo of [undefined, "" as unknown as number, Number.NaN, Number.POSITIVE_INFINITY, -1, 2.999]) {
+  await assert.rejects(service.registerCompraTransaction({
+    proveedor: "Proveedor de prueba", drop_id: testDrop.id,
+    items: [{ sku: "SKU-A", cantidad: 1, costo_unitario: costo as number, subtotal: 0 }]
+  }), /costo unitario/, "Un costo faltante o inválido debe rechazarse, incluso fuera del formulario.");
+}
+await assert.rejects(service.registerCompraTransaction({
+  proveedor: "Proveedor de prueba", drop_id: testDrop.id,
+  items: [{ sku: "SKU-A", cantidad: 1.5, costo_unitario: 100, subtotal: 150 }]
+}), /cantidad/, "Las prendas se compran en cantidades enteras.");
+
 const purchase = await service.registerCompraTransaction({
   proveedor: "Proveedor de prueba", drop_id: testDrop.id,
   items: [{ sku: "SKU-A", cantidad: 2, costo_unitario: 100, subtotal: 200 }, { sku: "SKU-B", cantidad: 2, costo_unitario: 100, subtotal: 200 }],

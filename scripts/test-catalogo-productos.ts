@@ -106,6 +106,16 @@ assert.equal(reimportado[0].precio_venta, undefined);
 const sinCosto = datosExportacionProductosCsv([{ ...nuevos[1] }]);
 assert.equal(sinCosto.filas[0][4], "", "Un costo no registrado se exporta como celda vacía.");
 
+const comprasUI = readFileSync("src/components/Compras.tsx", "utf8");
+assert.doesNotMatch(comprasUI, /costo_unitario: prod\.precio_costo \|\| 0/,
+  "Una compra no debe rellenar costo 0 si el producto carece de costo.");
+assert.match(comprasUI, /costo_unitario: typeof prod\.precio_costo/,
+  "Una compra debe conservar costo vacío hasta que el usuario lo indique.");
+assert.match(comprasUI, /Ingresa un costo unitario válido/,
+  "Una compra sin costo explícito debe generar una validación.");
+assert.match(comprasUI, /nombre_producto: ""[\s\S]{0,100}costo_unitario: ""/,
+  "Cambiar o quitar el SKU debe limpiar el costo que pertenecía al producto anterior.");
+
 const view = readFileSync("src/components/GestionProductos.tsx", "utf8");
 for (const title of ["Importar CSV", "Exportar catálogo", "Plantilla CSV", "Vista previa de importación CSV", "Costo unitario"]) {
   assert.ok(view.includes(title), "Falta la opción en Productos: " + title);
