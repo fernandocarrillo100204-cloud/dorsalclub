@@ -1,15 +1,27 @@
 import type { Producto } from "../types";
 
-/** Los CSV reflejan únicamente los campos visibles al registrar un producto. */
+/** Campos del formulario comercial, con "costo" como alias de precio_costo. */
 export const COLUMNAS_CSV_PRODUCTOS = [
-  "sku", "nombre", "marca", "tipo_talla"
-] as const satisfies readonly (keyof Producto)[];
+  "sku", "nombre", "marca", "tipo_talla", "costo"
+] as const;
 
 export const COLUMNAS_PLANTILLA_PRODUCTOS = COLUMNAS_CSV_PRODUCTOS;
 export const MAX_PRODUCTOS_CSV = 400;
 
 type FilaCsv = { celdas: string[]; linea: number };
 const OBLIGATORIAS = ["sku", "nombre", "marca", "tipo_talla"];
+
+/** El costo es opcional, en pesos MXN, sin comisiones ni inventario. */
+function costoCsv(valor: string, linea: number): number | undefined {
+  if (!valor.trim()) return undefined;
+  const limpio = valor.trim();
+  if (!/^\\d+(?:[.,]\\d{1,2})?$/.test(limpio)) {
+    throw new Error(`Línea ${linea}: costo inválido. Usa un importe mayor o igual a cero, hasta dos decimales.`);
+  }
+  const costo = Number(limpio.replace(",", "."));
+  if (!Number.isFinite(costo)) throw new Error(`Línea ${linea}: costo inválido.`);
+  return costo;
+}
 
 function detectarSeparador(texto: string): "," | ";" {
   let comas = 0, puntosYComas = 0, enComillas = false;
@@ -114,14 +126,15 @@ export function importarProductosCsv(texto: string, existentes: Producto[] = [])
     if (vistos.has(sku)) throw new Error(`Línea ${linea}: el SKU ${sku} está repetido en el archivo.`);
     if (skusExistentes.has(sku)) throw new Error(`Línea ${linea}: el SKU ${sku} ya existe. La importación solo da de alta productos nuevos.`);
     vistos.add(sku);
-    // Las demás propiedades son técnicas; se conservan internamente para
-    // compatibilidad con el modelo actual, pero no aparecen en CSV.
+    const costo = costoCsv(valores.costo || "", linea);
+    // Las demás propiedades técnicas siguen disponibles sin ofrecerse en el CSV.
     return {
       sku,
       producto_base_id: sku,
       nombre,
       marca,
       tipo_talla: tipoTalla(valores.tipo_talla, linea),
+      ...(costo !== undefined ? { precio_costo: costo } : {}),
       categoria: "General",
       unidad: "pieza",
       stock_minimo: 0,
@@ -135,6 +148,10 @@ export function datosExportacionProductosCsv(productos: Producto[]): { columnas:
   const filas = productos
     .filter(producto => producto.en_papelera !== true)
     .sort((a, b) => a.sku.localeCompare(b.sku, "es-MX", { sensitivity: "base" }))
-    .map(producto => [producto.sku, producto.nombre, producto.marca || "", producto.tipo_talla || ""]);
+    .map(producto => [
+      producto.sku, producto.nombre, producto.marca || "", producto.tipo_talla || "",
+      typeof producto.precio_costo === "number" && Number.isFinite(producto.precio_costo)
+        ? producto.precio_costo : ""
+    ]);
   return { columnas, filas };
 }
