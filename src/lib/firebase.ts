@@ -3454,11 +3454,13 @@ export const firestoreService = {
       if (!cleanSku) {
         throw new Error("Cada partida debe tener un SKU válido.");
       }
-      if (isNaN(qty) || qty <= 0) {
-        throw new Error(`La cantidad para el SKU ${cleanSku} debe ser mayor a cero.`);
+      if (!Number.isSafeInteger(qty) || qty <= 0) {
+        throw new Error(`La cantidad para el SKU ${cleanSku} debe ser un entero mayor a cero.`);
       }
-      if (isNaN(unitCost) || unitCost < 0) {
-        throw new Error(`El costo unitario para el SKU ${cleanSku} no puede ser negativo.`);
+      if (item.costo_unitario === undefined || item.costo_unitario === null ||
+          (item.costo_unitario as unknown) === "" || !Number.isFinite(unitCost) ||
+          unitCost < 0 || Math.round(unitCost * 100) / 100 !== unitCost) {
+        throw new Error(`El costo unitario para el SKU ${cleanSku} debe registrarse explícitamente, con máximo dos decimales.`);
       }
       const talla = (item.talla || "").trim();
       const purchaseKey = JSON.stringify([cleanSku, talla.toLowerCase()]);
