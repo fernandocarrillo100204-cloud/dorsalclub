@@ -1430,7 +1430,6 @@ export const firestoreService = {
 
     // 1. Normalización y validaciones previas de la lista
     const seenSkus = new Set<string>();
-    const seenCombos = new Set<string>();
 
     const normalizedList: Producto[] = productosList.map((p, idx) => {
       const cleanSku = (p.sku || "").trim().toUpperCase();
@@ -1452,14 +1451,13 @@ export const firestoreService = {
       if (cleanName.length > 120) {
         throw new Error("El nombre del producto no puede superar 120 caracteres.");
       }
-      const baseName = cleanName.toLowerCase();
-      const color = (p.color || "sin-color").trim().toLowerCase();
-      const talla = (p.talla || "sin-talla").trim().toLowerCase();
-      const comboKey = `${baseName}|${color}|${talla}`;
-      if (seenCombos.has(comboKey)) {
-        throw new Error(`Existe una variante repetida con la misma combinación: Color "${p.color || 'Sin color'}" y Talla "${p.talla || 'Sin talla'}".`);
+      // Un SKU identifica al producto. Los nombres pueden repetirse entre modelos,
+      // marcas o drops; las tallas ya se registran al comprar, no en el catálogo.
+      if (p.precio_costo !== undefined &&
+          (!Number.isFinite(p.precio_costo) || p.precio_costo < 0 ||
+            Math.round(p.precio_costo * 100) / 100 !== p.precio_costo)) {
+        throw new Error(`El costo del producto "${cleanSku}" debe ser un importe válido con máximo dos decimales.`);
       }
-      seenCombos.add(comboKey);
 
       return {
         ...p,
@@ -1482,40 +1480,20 @@ export const firestoreService = {
       };
     });
 
-    // 2. Validación atómica contra base de datos
+    // 2. La comprobación y la creación de SKU ocurren en la misma transacción.
+    // Un batch precedido de getDoc() permitiría sobrescribir un SKU creado en paralelo.
     if (isConfigured && realDb) {
-      // Validar que ningún SKU exista previamente
-      for (const item of normalizedList) {
-        const docRef = doc(realDb, "productos", item.sku);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          throw new Error(`El SKU "${item.sku}" ya existe en el catálogo.`);
+      const referencias = normalizedList.map(item => doc(realDb, "productos", item.sku));
+      await runTransaction(realDb, async transaction => {
+        // Firestore requiere completar todas las lecturas antes de escribir.
+        const existentes = await Promise.all(referencias.map(ref => transaction.get(ref)));
+        for (let index = 0; index < existentes.length; index++) {
+          if (existentes[index].exists()) {
+            throw new Error(`El SKU "${normalizedList[index].sku}" ya existe en el catálogo.`);
+          }
         }
-      }
-
-      // Validar combinaciones repetidas con productos existentes del mismo producto base
-      const existingProds = await firestoreService.getProductos();
-      for (const item of normalizedList) {
-        const duplicate = existingProds.find(ep => {
-          const sameBase = (item.producto_base_id && ep.producto_base_id === item.producto_base_id) ||
-                           (ep.nombre.toLowerCase().trim() === item.nombre.toLowerCase().trim());
-          if (!sameBase) return false;
-          const epColor = (ep.color || "").trim().toLowerCase();
-          const itemColor = (item.color || "").trim().toLowerCase();
-          const epTalla = (ep.talla || "").trim().toLowerCase();
-          const itemTalla = (item.talla || "").trim().toLowerCase();
-          return epColor === itemColor && epTalla === itemTalla;
-        });
-        if (duplicate) {
-          throw new Error(`Ya existe en el catálogo una variante para "${item.nombre}" con Color "${item.color || 'Sin color'}" y Talla "${item.talla || 'Sin talla'}" (SKU existente: ${duplicate.sku}).`);
-        }
-      }
-
-      // Escritura en batch atómico
-      const batch = writeBatch(realDb);
-      for (const item of normalizedList) {
-        const docRef = doc(realDb, "productos", item.sku);
-        batch.set(docRef, {
+        normalizedList.forEach((item, index) => {
+        transaction.set(referencias[index], {
           producto_base_id: item.producto_base_id || item.sku,
           nombre: item.nombre,
           ...(item.marca ? { marca: item.marca } : {}),
@@ -1532,31 +1510,17 @@ export const firestoreService = {
           unidad: item.unidad,
           activo: item.activo !== false,
           creado_at: Timestamp.now()
+        })
         });
-      }
-
-      await batch.commit();
+      });
       return;
     }
 
     // Modo emulador LocalStorage atómico
     const list = getLocalStorageItem<Producto[]>("productos", []);
     for (const item of normalizedList) {
-      if (list.some(p => p.sku === item.sku)) {
+      if (list.some(p => p.sku?.trim().toUpperCase() === item.sku)) {
         throw new Error(`El SKU "${item.sku}" ya existe en el catálogo.`);
-      }
-      const duplicate = list.find(ep => {
-        const sameBase = (item.producto_base_id && ep.producto_base_id === item.producto_base_id) ||
-                         (ep.nombre.toLowerCase().trim() === item.nombre.toLowerCase().trim());
-        if (!sameBase) return false;
-        const epColor = (ep.color || "").trim().toLowerCase();
-        const itemColor = (item.color || "").trim().toLowerCase();
-        const epTalla = (ep.talla || "").trim().toLowerCase();
-        const itemTalla = (item.talla || "").trim().toLowerCase();
-        return epColor === itemColor && epTalla === itemTalla;
-      });
-      if (duplicate) {
-        throw new Error(`Ya existe en el catálogo una variante para "${item.nombre}" con Color "${item.color || 'Sin color'}" y Talla "${item.talla || 'Sin talla'}" (SKU existente: ${duplicate.sku}).`);
       }
     }
 
@@ -1570,6 +1534,11 @@ export const firestoreService = {
     if (!cleanSku || cleanSku.length > 128) {
       throw new Error("El SKU es obligatorio y no puede superar 128 caracteres.");
     }
+    if (data.precio_costo !== undefined &&
+        (!Number.isFinite(data.precio_costo) || data.precio_costo < 0 ||
+          Math.round(data.precio_costo * 100) / 100 !== data.precio_costo)) {
+      throw new Error("El costo del producto debe ser un importe válido con máximo dos decimales.");
+    }
     const normalizedData = { ...data };
     if (data.nombre !== undefined) {
       const cleanName = data.nombre.trim();
@@ -1580,19 +1549,26 @@ export const firestoreService = {
     }
     if (isConfigured && realDb) {
       const docRef = doc(realDb, "productos", cleanSku);
-      await setDoc(docRef, {
-        ...normalizedData,
-        actualizado_at: Timestamp.now()
-      }, { merge: true });
+      await runTransaction(realDb, async transaction => {
+        const actual = await transaction.get(docRef);
+        if (!actual.exists() || actual.data()?.en_papelera === true) {
+          throw new Error(`El producto "${cleanSku}" ya no está disponible.`);
+        }
+        transaction.set(docRef, {
+          ...normalizedData,
+          actualizado_at: Timestamp.now()
+        }, { merge: true });
+      });
       return;
     }
     const list = getLocalStorageItem<Producto[]>("productos", []);
     const index = list.findIndex(p => p.sku === cleanSku);
-    if (index !== -1) {
-      list[index] = { ...list[index], ...normalizedData, actualizado_at: new Date() };
-      setLocalStorageItem("productos", list);
-      notifyListeners("productos", list);
+    if (index === -1 || list[index].en_papelera === true) {
+      throw new Error(`El producto "${cleanSku}" ya no está disponible.`);
     }
+    list[index] = { ...list[index], ...normalizedData, actualizado_at: new Date() };
+    setLocalStorageItem("productos", list);
+    notifyListeners("productos", list);
   },
 
   updateProducto: async (sku: string, data: Partial<Omit<Producto, "sku">>): Promise<void> => {
