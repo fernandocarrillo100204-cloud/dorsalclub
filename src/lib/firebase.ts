@@ -1423,6 +1423,10 @@ export const firestoreService = {
     if (!productosList || productosList.length === 0) {
       throw new Error("No hay productos o variantes para guardar.");
     }
+    // Una sola escritura atómica: nunca guardar parte de un CSV demasiado grande.
+    if (productosList.length > 400) {
+      throw new Error("Se permiten hasta 400 productos por carga. Divide el CSV en archivos más pequeños.");
+    }
 
     // 1. Normalización y validaciones previas de la lista
     const seenSkus = new Set<string>();
@@ -1430,7 +1434,7 @@ export const firestoreService = {
 
     const normalizedList: Producto[] = productosList.map((p, idx) => {
       const cleanSku = (p.sku || "").trim().toUpperCase();
-      if (!cleanSku) {
+      if (!cleanSku || cleanSku.includes("/")) {
         throw new Error(`La variante #${idx + 1} no tiene un SKU válido.`);
       }
       if (cleanSku.length > 128) {
@@ -1467,7 +1471,10 @@ export const firestoreService = {
         talla: (p.talla || "").trim() || undefined,
         tipo_talla: p.tipo_talla || "ropa",
         codigo_barras: (p.codigo_barras || "").trim() || undefined,
+        precio_costo: p.precio_costo !== undefined ? Math.max(0, Number(p.precio_costo) || 0) : undefined,
+        precio_venta: p.precio_venta !== undefined ? Math.max(0, Number(p.precio_venta) || 0) : undefined,
         precio_venta_sugerido: p.precio_venta_sugerido !== undefined ? Math.max(0, Number(p.precio_venta_sugerido) || 0) : undefined,
+        stock_minimo_almacenes: p.stock_minimo_almacenes,
         stock_minimo: Math.max(0, Number(p.stock_minimo) || 0),
         unidad: (p.unidad || "pieza").trim(),
         activo: p.activo !== false,
@@ -1517,7 +1524,10 @@ export const firestoreService = {
           ...(item.talla ? { talla: item.talla } : {}),
           ...(item.tipo_talla ? { tipo_talla: item.tipo_talla } : {}),
           ...(item.codigo_barras ? { codigo_barras: item.codigo_barras } : {}),
+          ...(item.precio_costo !== undefined ? { precio_costo: item.precio_costo } : {}),
+          ...(item.precio_venta !== undefined ? { precio_venta: item.precio_venta } : {}),
           ...(item.precio_venta_sugerido !== undefined ? { precio_venta_sugerido: item.precio_venta_sugerido } : {}),
+          ...(item.stock_minimo_almacenes ? { stock_minimo_almacenes: item.stock_minimo_almacenes } : {}),
           stock_minimo: item.stock_minimo,
           unidad: item.unidad,
           activo: item.activo !== false,
