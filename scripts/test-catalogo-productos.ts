@@ -113,7 +113,7 @@ assert.match(comprasUI, /costo_unitario: typeof prod\.precio_costo/,
   "Una compra debe conservar costo vacío hasta que el usuario lo indique.");
 assert.match(comprasUI, /Ingresa un costo unitario válido/,
   "Una compra sin costo explícito debe generar una validación.");
-assert.match(comprasUI, /nombre_producto: ""[\\s\\S]{0,100}costo_unitario: ""/,
+assert.match(comprasUI, /nombre_producto: ""[\s\S]{0,100}costo_unitario: ""/,
   "Cambiar o quitar el SKU debe limpiar el costo que pertenecía al producto anterior.");
 
 const view = readFileSync("src/components/GestionProductos.tsx", "utf8");
