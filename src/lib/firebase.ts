@@ -1493,24 +1493,24 @@ export const firestoreService = {
           }
         }
         normalizedList.forEach((item, index) => {
-        transaction.set(referencias[index], {
-          producto_base_id: item.producto_base_id || item.sku,
-          nombre: item.nombre,
-          ...(item.marca ? { marca: item.marca } : {}),
-          categoria: item.categoria,
-          ...(item.color ? { color: item.color } : {}),
-          ...(item.talla ? { talla: item.talla } : {}),
-          ...(item.tipo_talla ? { tipo_talla: item.tipo_talla } : {}),
-          ...(item.codigo_barras ? { codigo_barras: item.codigo_barras } : {}),
-          ...(item.precio_costo !== undefined ? { precio_costo: item.precio_costo } : {}),
-          ...(item.precio_venta !== undefined ? { precio_venta: item.precio_venta } : {}),
-          ...(item.precio_venta_sugerido !== undefined ? { precio_venta_sugerido: item.precio_venta_sugerido } : {}),
-          ...(item.stock_minimo_almacenes ? { stock_minimo_almacenes: item.stock_minimo_almacenes } : {}),
-          stock_minimo: item.stock_minimo,
-          unidad: item.unidad,
-          activo: item.activo !== false,
-          creado_at: Timestamp.now()
-        })
+          transaction.set(referencias[index], {
+            producto_base_id: item.producto_base_id || item.sku,
+            nombre: item.nombre,
+            ...(item.marca ? { marca: item.marca } : {}),
+            categoria: item.categoria,
+            ...(item.color ? { color: item.color } : {}),
+            ...(item.talla ? { talla: item.talla } : {}),
+            ...(item.tipo_talla ? { tipo_talla: item.tipo_talla } : {}),
+            ...(item.codigo_barras ? { codigo_barras: item.codigo_barras } : {}),
+            ...(item.precio_costo !== undefined ? { precio_costo: item.precio_costo } : {}),
+            ...(item.precio_venta !== undefined ? { precio_venta: item.precio_venta } : {}),
+            ...(item.precio_venta_sugerido !== undefined ? { precio_venta_sugerido: item.precio_venta_sugerido } : {}),
+            ...(item.stock_minimo_almacenes ? { stock_minimo_almacenes: item.stock_minimo_almacenes } : {}),
+            stock_minimo: item.stock_minimo,
+            unidad: item.unidad,
+            activo: item.activo !== false,
+            creado_at: Timestamp.now()
+          });
         });
       });
       return;
