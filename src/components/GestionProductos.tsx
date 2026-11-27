@@ -137,8 +137,7 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
         // El SKU es la identidad de Firestore y los movimientos. No se modifica al editar.
         await firestoreService.updateProducto(editingProduct.sku, {
           nombre, marca, tipo_talla: formTipoTalla,
-          ...(costo !== undefined ? { precio_costo: costo } :
-            typeof editingProduct.precio_costo === "number" ? { precio_costo: 0 } : {})
+          precio_costo: costo ?? null
         });
         notify("Producto actualizado.");
       } else {
@@ -397,7 +396,7 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
             <div className="px-6 py-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-bold text-zinc-900 dark:text-white">{editingProduct ? "Editar producto" : "Crear nuevo producto"}</h2>
-                <p className="mt-1 text-xs text-zinc-500">El costo del catálogo es una referencia editable. El costo real de cada compra se registra por separado.</p>
+                <p className="mt-1 text-xs text-zinc-500">El costo del catálogo toma como referencia la compra más reciente. Puedes editarlo sin modificar compras anteriores.</p>
               </div>
               <button type="button" onClick={handleCloseForm} disabled={loading} aria-label="Cerrar" className="p-2 text-zinc-400 hover:text-white">
                 <X className="w-5 h-5" />
@@ -440,7 +439,7 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
                 <MoneyInput id="producto-costo" value={formCosto} onChange={event => setFormCosto(event.target.value)}
                   placeholder="Ej. 450.00" disabled={loading}
                   className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-2.5 text-zinc-900 dark:text-white" />
-                <p className="mt-1 text-[11px] text-zinc-500">Precio de referencia por pieza; no modifica costos registrados en compras anteriores.</p>
+                <p className="mt-1 text-[11px] text-zinc-500">Costo de referencia por unidad. Se actualiza al comprar y no modifica compras anteriores. Déjalo vacío para quitarlo.</p>
               </div>
               <div className="flex justify-between gap-3 border-t border-zinc-200 dark:border-zinc-800 pt-5">
                 <button type="button" onClick={handleCloseForm} disabled={loading} className="btn-secondary">Cancelar</button>
