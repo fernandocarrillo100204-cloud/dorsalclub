@@ -12,7 +12,6 @@ export const COLUMNAS_PLANTILLA_PRODUCTOS = COLUMNAS_CSV_PRODUCTOS.slice(0, 16);
 export const MAX_PRODUCTOS_CSV = 400;
 
 type FilaCsv = { celdas: string[]; linea: number };
-const EDITABLES = new Set<string>(COLUMNAS_PLANTILLA_PRODUCTOS);
 const OBLIGATORIAS = ["sku", "nombre", "marca", "tipo_talla"];
 
 function detectarSeparador(texto: string): "," | ";" {
@@ -172,7 +171,6 @@ export function importarProductosCsv(texto: string, existentes: Producto[] = [])
     const stock = diccionarioStock(valores.stock_minimo_almacenes || "", linea);
     if (stock) producto.stock_minimo_almacenes = stock;
     // Campos de solo lectura (id, marcas de tiempo) nunca se escriben desde CSV.
-    void EDITABLES;
     return producto;
   });
 }
@@ -180,10 +178,7 @@ export function importarProductosCsv(texto: string, existentes: Producto[] = [])
 function fechaCsv(valor: Producto["creado_at"]): string {
   if (!valor) return "";
   const fecha = valor instanceof Date ? valor :
-    typeof (valor as { toDate?: () => Date }).toDate === "function"
-      ? (valor as { toDate: () => Date }).toDate()
-      : new Date((valor as { seconds: number; nanoseconds: number }).seconds * 1000 +
-        (valor as { seconds: number; nanoseconds: number }).nanoseconds / 1000000);
+    new Date(valor.seconds * 1000 + valor.nanoseconds / 1000000);
   return Number.isFinite(fecha.getTime()) ? fecha.toISOString() : "";
 }
 
