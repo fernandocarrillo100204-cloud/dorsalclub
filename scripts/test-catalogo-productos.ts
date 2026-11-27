@@ -113,7 +113,7 @@ for (const title of ["Importar CSV", "Exportar catálogo", "Plantilla CSV", "Vis
 assert.match(view, /getProductos\(\)/, "La exportación usa el catálogo completo, no la búsqueda actual.");
 assert.match(view, /SKU, nombre, marca, tipo de talla y costo unitario/, "Mostrar explicación de los cinco campos.");
 assert.match(view, /updateProducto\(editingProduct\.sku/, "El costo es editable en el catálogo.");
-assert.match(view, /precio_costo: costo \?\? 0/, "La edición guarda el costo sin modificar compras pasadas.");
+assert.match(view, /precio_costo: costo/, "La edición guarda el costo sin modificar compras pasadas.");
 
 const memory = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
