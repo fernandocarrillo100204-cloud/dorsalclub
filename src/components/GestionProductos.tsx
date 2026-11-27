@@ -135,7 +135,11 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
     try {
       if (editingProduct) {
         // El SKU es la identidad de Firestore y los movimientos. No se modifica al editar.
-        await firestoreService.updateProducto(editingProduct.sku, { nombre, marca, tipo_talla: formTipoTalla, precio_costo: costo ?? 0 });
+        await firestoreService.updateProducto(editingProduct.sku, {
+          nombre, marca, tipo_talla: formTipoTalla,
+          ...(costo !== undefined ? { precio_costo: costo } :
+            typeof editingProduct.precio_costo === "number" ? { precio_costo: 0 } : {})
+        });
         notify("Producto actualizado.");
       } else {
         const producto: Producto = {
