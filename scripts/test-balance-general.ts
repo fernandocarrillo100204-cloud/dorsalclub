@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
-import { calcularBalanceGeneral } from "../src/lib/balanceGeneral";
+import { calcularBalanceGeneral, balanceSinInversionInicial, totalInversionInicial } from "../src/lib/balanceGeneral";
 import { firebaseInMemory } from "./helpers/firestoreMemory";
 
 const sale: any = { id: "sale", tipo: "salida", cantidad: 1, precio_unitario_venta: 1000 };
@@ -28,7 +28,30 @@ assert.equal(calcularBalanceGeneral([{ ...fletePendiente, estado_pago_flete: "pa
 
 assert.equal(calcularBalanceGeneral([{ ...sale, estado: "anulado" }], [{ ...purchase, estado: "anulada" }], [{ ...expense, en_papelera: true }], []).balance, 0);
 value = calcularBalanceGeneral([sale], [{ ...purchase, clasificacion_financiera: "inversion_inicial" }], [{ ...expense, clasificacion_financiera: "inversion_inicial" }], []);
-assert.equal(value.balance, 460, "La inversión inicial no queda oculta por la antigua clasificación.");
+assert.equal(value.balance, 460, "La vista completa sigue mostrando la salida real de caja.");
+assert.equal(totalInversionInicial(value), 540, "Compra y gasto iniciales se reconocen una sola vez.");
+const sinInversion = balanceSinInversionInicial(value);
+assert.equal(sinInversion.ingresos, 1000);
+assert.equal(sinInversion.egresos, 0);
+assert.equal(sinInversion.balance, 1000);
+assert.equal(sinInversion.mercanciaComprada, 0);
+assert.equal(sinInversion.costosCompras, 0);
+assert.equal(sinInversion.gastosExtra, 0);
+assert.deepEqual(sinInversion.movimientos.map(row => row.tipo), ["Venta"]);
+assert.equal(value.movimientos.length, 3, "La vista alternativa no borra ni muta movimientos originales.");
+
+const compraInversionConGastoNormal = calcularBalanceGeneral([sale],
+  [{ ...purchase, clasificacion_financiera: "inversion_inicial" }],
+  [{ ...expense, clasificacion_financiera: "operacion" }], []);
+assert.equal(totalInversionInicial(compraInversionConGastoNormal), 440);
+assert.equal(balanceSinInversionInicial(compraInversionConGastoNormal).balance, 900);
+assert.equal(balanceSinInversionInicial(compraInversionConGastoNormal).gastosExtra, 100);
+assert.equal(balanceSinInversionInicial(compraInversionConGastoNormal).movimientos.length, 2);
+assert.equal(balanceSinInversionInicial(calcularBalanceGeneral([fletePendiente], [], [], [])).costosVentas, 10,
+  "Un costo de venta no se excluye al filtrar inversión inicial.");
+const conDescuento = calcularBalanceGeneral([], [{ ...purchase, total: 10, descuentos: 450, clasificacion_financiera: "inversion_inicial" }], [], []);
+assert.equal(balanceSinInversionInicial(conDescuento).egresos, 0,
+  "La inversión inicial incluye los envíos y comisiones de compra incluso con descuentos.");
 const first: any = { ...sale, venta_id: "one", venta_total_recibido: 550, ingreso_reconocido: 550, venta_subtotal: 1000, envio_cobrado_cliente: 100, total_costos_venta: 60 };
 const second: any = { ...first, id: "second", ingreso_reconocido: undefined, envio_cobrado_cliente: undefined, total_costos_venta: undefined };
 value = calcularBalanceGeneral([first, second], [], [], []);
@@ -86,6 +109,10 @@ const summary = renderToStaticMarkup(React.createElement(ResumenBalance, { data:
 for (const label of ["Ventas de mercancía cobradas", "Envíos y otros cargos cobrados", "Compras de mercancía", "Envíos y comisiones de compra", "Fletes y otros costos de venta", "Gastos operativos extra", "Otros ingresos anteriores"]) assert.ok(summary.includes(label));
 assert.ok(summary.includes("<dl"));
 assert.doesNotMatch(summary, /Ver detalle|Ocultar detalle/, "No debe aparecer un botón global en el resumen.");
+const resumenExcluido = renderToStaticMarkup(React.createElement(ResumenBalance, {
+  data: sinInversion, loading: false, excluyendoInversion: true
+}));
+assert.match(resumenExcluido, /Balance sin inversión inicial/);
 
 const many = calcularBalanceGeneral([], [], Array.from({ length: 25 }, (_, i) => ({ ...expense, id: `expense-${i}`, concepto: `Gasto ${i}`, fecha: new Date(2026, 0, i + 1) })), []);
 const paged = renderToStaticMarkup(React.createElement(MovimientosBalance, { data: many, loading: false, busy: false, onEdit: () => {}, onArchive: () => {} }));
@@ -153,6 +180,15 @@ value = await service.getBalanceGeneral();
 assert.equal(value.balance, -80);
 assert.equal(value.gastos[0].proveedor, "Conservar");
 assert.ok(!value.gastos[0].notas);
+await service.setClasificacionFinanciera("gasto", created.id!, "inversion_inicial");
+value = await service.getBalanceGeneral();
+assert.equal(value.balance, -80, "Reclasificar no altera el movimiento de caja.");
+assert.equal(totalInversionInicial(value), 80);
+assert.equal(balanceSinInversionInicial(value).balance, 0);
+assert.equal(value.gastos[0].clasificacion_financiera, "inversion_inicial");
+await service.setClasificacionFinanciera("gasto", created.id!, "operacion");
+assert.equal(totalInversionInicial(await service.getBalanceGeneral()), 0);
+await assert.rejects(service.setClasificacionFinanciera("compra", "no-existe", "inversion_inicial"), /no está disponible/);
 await service.deleteGasto(created.id!);
 assert.equal((await service.getBalanceGeneral()).balance, 0);
 await service.restaurarGastoPapelera(created.id!);
@@ -163,6 +199,12 @@ const markup = renderToStaticMarkup(React.createElement(WorkspaceProvider, { chi
 for (const title of ["Balance general", "Ingresos totales", "Egresos totales", "Registrar gasto extra", "Envíos y comisiones de compra", "Gastos operativos extra"]) assert.ok(markup.includes(title));
 assert.doesNotMatch(markup, /<select|Por mes|Cuentas por cobrar|Caja total|Operación<|recharts/);
 assert.match(markup, /Historial acumulado de ingresos y egresos/, "La tabla vuelve a estar siempre visible.");
+assert.match(markup, /Excluir inversión inicial del balance/);
+const comprasView = readFileSync("src/components/Compras.tsx", "utf8");
+assert.match(comprasView, /Clasificación financiera de/);
+assert.match(comprasView, /updateCompraClasificacion/);
+const gastoView = readFileSync("src/components/finanzas/BalanceGeneral.tsx", "utf8");
+assert.match(gastoView, /Clasificación financiera del gasto/);
 assert.match(table, /Ver detalle/, "Cada fila de movimientos cargada muestra su propio botón de detalle.");
 
 
@@ -172,6 +214,15 @@ remote.put("compras/1", { ...purchase, fecha: new Date() });
 remote.put("gastos/1", expense);
 value = await remote.service.getBalanceGeneral();
 assert.equal(value.balance, -50);
+await remote.service.setClasificacionFinanciera("compra", "1", "inversion_inicial");
+await remote.service.setClasificacionFinanciera("gasto", "1", "inversion_inicial");
+value = await remote.service.getBalanceGeneral();
+assert.equal(value.balance, -50, "Las operaciones históricas conservan su importe original.");
+assert.equal(totalInversionInicial(value), 540);
+assert.equal(balanceSinInversionInicial(value).balance, 490);
+assert.equal((await remote.service.getComprasPaginated()).items[0]?.clasificacion_financiera, "inversion_inicial");
+assert.equal((await remote.service.getGastosPaginated()).items[0]?.clasificacion_financiera, "inversion_inicial");
+await assert.rejects(remote.service.setClasificacionFinanciera("compra", "ausente", "inversion_inicial"), /no está disponible/);
 assert.deepEqual(remote.queries.map(query => query.path).sort(), ["compras", "gastos", "movimientos", "movimientos_financieros"]);
 const before = JSON.stringify([...memory]);
 remote.reject("gastos");
