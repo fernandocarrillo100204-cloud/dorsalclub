@@ -136,4 +136,67 @@ await assert.rejects(firestoreService.addProductsBatch(Array.from({ length: 401 
   ({ ...nuevos[0], sku: "MAX-" + i, nombre: "Artículo " + i }))), /hasta 400/);
 assert.equal((await firestoreService.getProductos()).length, 3);
 
+
+// Integridad del catálogo: el SKU es la identidad, no el nombre del modelo.
+const mismoNombre = [
+  { ...nuevos[0], sku: "D-004", precio_costo: 200 },
+  { ...nuevos[0], sku: "E-005", marca: "Otra marca", precio_costo: 250 }
+];
+await firestoreService.addProductsBatch(mismoNombre);
+assert.equal((await firestoreService.getProductos()).length, 5,
+  "Permitir nombres comerciales iguales con SKU distintos; las tallas no crean SKU nuevos.");
+
+await assert.rejects(firestoreService.addProductsBatch([
+  { ...nuevos[0], sku: "INVALIDO-1", precio_costo: Number.NaN }
+]), /costo/, "No convertir silenciosamente costos inválidos a cero.");
+await assert.rejects(firestoreService.addProductsBatch([
+  { ...nuevos[0], sku: "INVALIDO-2", precio_costo: -1 }
+]), /costo/, "No permitir costos negativos.");
+await assert.rejects(firestoreService.updateProducto("A-001", { precio_costo: -50 }), /costo/);
+await assert.rejects(firestoreService.updateProducto("A-001", { precio_costo: 12.345 }), /costo/);
+await assert.rejects(firestoreService.updateProducto("SKU-FANTASMA", {
+  nombre: "No puede crearse desde una edición"
+}), /ya no está disponible/, "No crear un producto fantasma desde una edición atrasada.");
+assert.equal((await firestoreService.getProductos()).length, 5);
+
+// Transporte Firestore simulado: verifica transacciones reales y concurrencia sin red.
+const { firebaseInMemory } = await import("./helpers/firestoreMemory");
+const remote = await firebaseInMemory();
+const remoto = remote.service;
+assert.equal(remoto.isConfigured(), true);
+await remoto.addProductsBatch([
+  { ...nuevos[0], sku: "RX-01", precio_costo: 550 },
+  { ...nuevos[0], sku: "RX-02", marca: "Marca distinta", precio_costo: 750 }
+]);
+assert.equal(remote.data.get("productos/RX-01")?.precio_costo, 550);
+assert.equal(remote.data.get("productos/RX-02")?.precio_costo, 750);
+await assert.rejects(remoto.addProductsBatch([
+  { ...nuevos[0], sku: "RX-03" },
+  { ...nuevos[0], sku: "RX-01", precio_costo: 1 }
+]), /ya existe/, "El lote debe ser atómico incluso con un SKU existente.");
+assert.equal(remote.data.has("productos/RX-03"), false);
+
+const concurrentes = await Promise.allSettled([
+  remoto.addProductsBatch([{ ...nuevos[0], sku: "RX-RACE", nombre: "Primera", precio_costo: 111 }]),
+  remoto.addProductsBatch([{ ...nuevos[0], sku: "RX-RACE", nombre: "Segunda", precio_costo: 222 }])
+]);
+assert.equal(concurrentes.filter(result => result.status === "fulfilled").length, 1,
+  "Dos importaciones concurrentes no pueden sobrescribir el mismo SKU.");
+assert.equal(concurrentes.filter(result => result.status === "rejected").length, 1);
+assert.ok([111, 222].includes(remote.data.get("productos/RX-RACE")?.precio_costo));
+
+await assert.rejects(remoto.updateProducto("SKU-FANTASMA", { nombre: "No existe" }),
+  /ya no está disponible/);
+assert.equal(remote.data.has("productos/SKU-FANTASMA"), false);
+await remoto.updateProducto("RX-01", { precio_costo: 600 });
+assert.equal(remote.data.get("productos/RX-01")?.precio_costo, 600);
+await assert.rejects(remoto.updateProducto("RX-01", { precio_costo: Number.POSITIVE_INFINITY }), /costo/);
+assert.equal(remote.data.get("productos/RX-01")?.precio_costo, 600);
+
+const loteCompleto = Array.from({ length: 400 }, (_, i) => ({
+  ...nuevos[0], sku: "L-" + String(i).padStart(3, "0"), nombre: "Producto " + i
+}));
+await remoto.addProductsBatch(loteCompleto);
+assert.equal(remote.data.has("productos/L-399"), true, "El límite permitido de 400 es compatible con transacciones.");
+
 console.log("Catálogo plano: búsqueda, filtros, tipos de talla y registros históricos aprobados.");
