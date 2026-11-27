@@ -1,14 +1,11 @@
 import type { Producto } from "../types";
 
-/** Todos los atributos del modelo Producto, incluidos campos de compatibilidad histórica. */
+/** Los CSV reflejan únicamente los campos visibles al registrar un producto. */
 export const COLUMNAS_CSV_PRODUCTOS = [
-  "sku", "nombre", "marca", "tipo_talla", "producto_base_id", "categoria",
-  "color", "talla", "codigo_barras", "precio_costo", "precio_venta",
-  "precio_venta_sugerido", "stock_minimo", "stock_minimo_almacenes",
-  "unidad", "activo", "id", "en_papelera", "creado_at", "actualizado_at", "desactivado_at"
+  "sku", "nombre", "marca", "tipo_talla"
 ] as const satisfies readonly (keyof Producto)[];
 
-export const COLUMNAS_PLANTILLA_PRODUCTOS = COLUMNAS_CSV_PRODUCTOS.slice(0, 16);
+export const COLUMNAS_PLANTILLA_PRODUCTOS = COLUMNAS_CSV_PRODUCTOS;
 export const MAX_PRODUCTOS_CSV = 400;
 
 type FilaCsv = { celdas: string[]; linea: number };
@@ -77,39 +74,6 @@ function filasCsv(texto: string, separador: "," | ";"): FilaCsv[] {
   return filas;
 }
 
-function numero(valor: string, columna: string, linea: number): number | undefined {
-  if (!valor.trim()) return undefined;
-  const texto = valor.trim().replace(",", ".");
-  if (!/^\d+(?:\.\d+)?$/.test(texto)) {
-    throw new Error(`Línea ${linea}: "${columna}" debe ser un número positivo o cero.`);
-  }
-  const resultado = Number(texto);
-  if (!Number.isFinite(resultado)) throw new Error(`Línea ${linea}: importe inválido en "${columna}".`);
-  return resultado;
-}
-
-function booleano(valor: string, columna: string, linea: number): boolean | undefined {
-  if (!valor.trim()) return undefined;
-  const clave = valor.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  if (["true", "1", "si", "yes", "activo"].includes(clave)) return true;
-  if (["false", "0", "no", "inactivo"].includes(clave)) return false;
-  throw new Error(`Línea ${linea}: "${columna}" debe ser true/false o sí/no.`);
-}
-
-function diccionarioStock(valor: string, linea: number): Record<string, number> | undefined {
-  if (!valor.trim()) return undefined;
-  try {
-    const dato: unknown = JSON.parse(valor);
-    if (!dato || typeof dato !== "object" || Array.isArray(dato) ||
-      Object.entries(dato).some(([clave, n]) => !clave || typeof n !== "number" || !Number.isFinite(n) || n < 0)) {
-      throw new Error();
-    }
-    return dato as Record<string, number>;
-  } catch {
-    throw new Error(`Línea ${linea}: stock_minimo_almacenes debe contener un objeto JSON válido.`);
-  }
-}
-
 function tipoTalla(valor: string, linea: number): NonNullable<Producto["tipo_talla"]> {
   const clave = valor.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   if (clave === "ropa" || clave === "calzado" || clave === "personalizada") return clave;
@@ -150,50 +114,27 @@ export function importarProductosCsv(texto: string, existentes: Producto[] = [])
     if (vistos.has(sku)) throw new Error(`Línea ${linea}: el SKU ${sku} está repetido en el archivo.`);
     if (skusExistentes.has(sku)) throw new Error(`Línea ${linea}: el SKU ${sku} ya existe. La importación solo da de alta productos nuevos.`);
     vistos.add(sku);
-    if (valores.en_papelera && booleano(valores.en_papelera, "en_papelera", linea)) {
-      throw new Error(`Línea ${linea}: no se pueden importar productos marcados como Papelera.`);
-    }
-    const producto: Producto = {
-      sku, producto_base_id: valores.producto_base_id || sku, nombre, marca,
+    // Las demás propiedades son técnicas; se conservan internamente para
+    // compatibilidad con el modelo actual, pero no aparecen en CSV.
+    return {
+      sku,
+      producto_base_id: sku,
+      nombre,
+      marca,
       tipo_talla: tipoTalla(valores.tipo_talla, linea),
-      categoria: valores.categoria || "General",
-      unidad: valores.unidad || "pieza",
-      stock_minimo: numero(valores.stock_minimo || "", "stock_minimo", linea) ?? 0,
-      activo: booleano(valores.activo || "", "activo", linea) ?? true
-    };
-    for (const campo of ["color", "talla", "codigo_barras"] as const) {
-      if (valores[campo]) producto[campo] = valores[campo];
-    }
-    for (const campo of ["precio_costo", "precio_venta", "precio_venta_sugerido"] as const) {
-      const valor = numero(valores[campo] || "", campo, linea);
-      if (valor !== undefined) producto[campo] = valor;
-    }
-    const stock = diccionarioStock(valores.stock_minimo_almacenes || "", linea);
-    if (stock) producto.stock_minimo_almacenes = stock;
-    // Campos de solo lectura (id, marcas de tiempo) nunca se escriben desde CSV.
-    return producto;
+      categoria: "General",
+      unidad: "pieza",
+      stock_minimo: 0,
+      activo: true
+    } satisfies Producto;
   });
-}
-
-function fechaCsv(valor: Producto["creado_at"]): string {
-  if (!valor) return "";
-  const fecha = valor instanceof Date ? valor :
-    new Date(valor.seconds * 1000 + valor.nanoseconds / 1000000);
-  return Number.isFinite(fecha.getTime()) ? fecha.toISOString() : "";
 }
 
 export function datosExportacionProductosCsv(productos: Producto[]): { columnas: string[]; filas: unknown[][] } {
   const columnas: string[] = [...COLUMNAS_CSV_PRODUCTOS];
-  const filas = productos.filter(producto => producto.en_papelera !== true)
+  const filas = productos
+    .filter(producto => producto.en_papelera !== true)
     .sort((a, b) => a.sku.localeCompare(b.sku, "es-MX", { sensitivity: "base" }))
-    .map(producto => COLUMNAS_CSV_PRODUCTOS.map(campo => {
-      const valor = producto[campo];
-      if (valor === undefined || valor === null) return "";
-      if (campo === "stock_minimo_almacenes") return JSON.stringify(valor);
-      if (campo === "creado_at" || campo === "actualizado_at" || campo === "desactivado_at") {
-        return fechaCsv(valor as Producto["creado_at"]);
-      }
-      return valor;
-    }));
+    .map(producto => [producto.sku, producto.nombre, producto.marca || "", producto.tipo_talla || ""]);
   return { columnas, filas };
 }
