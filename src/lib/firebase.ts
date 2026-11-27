@@ -666,6 +666,11 @@ const normalizeConfiguracionVentas = (data?: Partial<ConfiguracionVentas> | null
   return { canales };
 };
 
+/** En edición, null borra el costo; undefined significa que no se modifica. */
+type CambioProducto = Omit<Partial<Omit<Producto, "sku">>, "precio_costo"> & {
+  precio_costo?: number | null;
+};
+
 // --- SERVICIO DE FIRESTORE / INVENTARIO ---
 export const firestoreService = {
   isConfigured: () => isConfigured,
@@ -1529,12 +1534,12 @@ export const firestoreService = {
     notifyListeners("productos", updatedList);
   },
 
-  updateProduct: async (sku: string, data: Partial<Omit<Producto, "sku">>): Promise<void> => {
+  updateProduct: async (sku: string, data: CambioProducto): Promise<void> => {
     const cleanSku = sku.trim().toUpperCase();
     if (!cleanSku || cleanSku.length > 128) {
       throw new Error("El SKU es obligatorio y no puede superar 128 caracteres.");
     }
-    if (data.precio_costo !== undefined &&
+    if (data.precio_costo !== undefined && data.precio_costo !== null &&
         (!Number.isFinite(data.precio_costo) || data.precio_costo < 0 ||
           Math.round(data.precio_costo * 100) / 100 !== data.precio_costo)) {
       throw new Error("El costo del producto debe ser un importe válido con máximo dos decimales.");
@@ -1556,6 +1561,7 @@ export const firestoreService = {
         }
         transaction.set(docRef, {
           ...normalizedData,
+          ...(data.precio_costo === null ? { precio_costo: deleteField() } : {}),
           actualizado_at: Timestamp.now()
         }, { merge: true });
       });
@@ -1566,12 +1572,18 @@ export const firestoreService = {
     if (index === -1 || list[index].en_papelera === true) {
       throw new Error(`El producto "${cleanSku}" ya no está disponible.`);
     }
-    list[index] = { ...list[index], ...normalizedData, actualizado_at: new Date() };
+    const { precio_costo: nuevoCosto, ...otrosCambios } = normalizedData;
+    list[index] = {
+      ...list[index], ...otrosCambios,
+      ...(typeof nuevoCosto === "number" ? { precio_costo: nuevoCosto } : {}),
+      actualizado_at: new Date()
+    };
+    if (nuevoCosto === null) delete list[index].precio_costo;
     setLocalStorageItem("productos", list);
     notifyListeners("productos", list);
   },
 
-  updateProducto: async (sku: string, data: Partial<Omit<Producto, "sku">>): Promise<void> => {
+  updateProducto: async (sku: string, data: CambioProducto): Promise<void> => {
     return firestoreService.updateProduct(sku, data);
   },
 
