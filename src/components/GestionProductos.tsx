@@ -262,6 +262,10 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
         {csvError}
       </p>}
 
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        El CSV utiliza únicamente SKU, nombre, marca y tipo de talla. Los costos, las tallas específicas y las existencias se registran en Compras e Inventario.
+      </p>
+
       <div id="gestion-productos-filters" className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800">
         <div className="relative sm:col-span-2">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
