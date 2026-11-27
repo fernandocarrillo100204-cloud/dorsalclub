@@ -121,7 +121,7 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
       setGeneralError("Completa nombre, marca, tipo de talla y un SKU válido (máximo 128 caracteres, sin /).");
       return;
     }
-    if (costoTexto && (!/^[0-9]+(?:\\.[0-9]{1,2})?$/.test(costoTexto) || !Number.isFinite(costo) || costo! < 0)) {
+    if (costoTexto && (!/^[0-9]+(?:[.][0-9]{1,2})?$/.test(costoTexto) || !Number.isFinite(costo) || costo! < 0)) {
       setGeneralError("El costo debe ser un importe en MXN mayor o igual a cero, con máximo dos decimales.");
       return;
     }
