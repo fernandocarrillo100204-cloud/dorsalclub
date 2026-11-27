@@ -349,7 +349,8 @@ export default function Compras({
           sku,
           nombre_producto: "",
           variante_label: "",
-          talla: ""
+          talla: "",
+          costo_unitario: ""
         };
       }
       return copy;
