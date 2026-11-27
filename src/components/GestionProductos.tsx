@@ -2,10 +2,12 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
-import React, { useEffect, useMemo, useState } from "react";
-import { Edit2, Plus, Search, Settings, Trash2, X } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Download, Edit2, FileUp, Plus, Search, Settings, Trash2, X } from "lucide-react";
 import { firestoreService } from "../lib/firebase";
 import { etiquetaTipoTalla, filtrarProductosCatalogo } from "../lib/catalogoProductos";
+import { COLUMNAS_PLANTILLA_PRODUCTOS, MAX_PRODUCTOS_CSV, datosExportacionProductosCsv, importarProductosCsv } from "../lib/catalogoProductosCsv";
+import { downloadCsv } from "../lib/presentation";
 import { useWorkspace } from "../context/WorkspaceContext";
 import type { MarcaCatalogo, Producto } from "../types";
 import ModalCatalogos from "./ModalCatalogos";
@@ -36,6 +38,11 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
   const [productToDelete, setProductToDelete] = useState<Producto | null>(null);
   const [loading, setLoading] = useState(false);
   const [generalError, setGeneralError] = useState<string | null>(null);
+  const csvFileRef = useRef<HTMLInputElement>(null);
+  const [csvPreview, setCsvPreview] = useState<{ nombre: string; productos: Producto[] } | null>(null);
+  const [csvError, setCsvError] = useState("");
+  const [importandoCsv, setImportandoCsv] = useState(false);
+  const [exportandoCsv, setExportandoCsv] = useState(false);
 
   const [formNombre, setFormNombre] = useState("");
   const [formMarca, setFormMarca] = useState("");
@@ -159,6 +166,65 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
     }
   };
 
+  const handleDescargarPlantilla = () => {
+    downloadCsv("plantilla-productos-dorsalclub.csv", [...COLUMNAS_PLANTILLA_PRODUCTOS], []);
+  };
+
+  const handleExportarCatalogo = async () => {
+    if (exportandoCsv) return;
+    setExportandoCsv(true);
+    try {
+      // Consulta el catálogo completo, no solo la página ni el filtro visibles.
+      const catalogoActual = await firestoreService.getProductos();
+      const { columnas, filas } = datosExportacionProductosCsv(catalogoActual);
+      downloadCsv(`catalogo-productos-dorsalclub-${new Date().toISOString().slice(0, 10)}.csv`, columnas, filas);
+      notify(`Catálogo exportado: ${filas.length} productos.`);
+    } catch (error: any) {
+      notify(error?.message || "No se pudo exportar el catálogo.", "error");
+    } finally {
+      setExportandoCsv(false);
+    }
+  };
+
+  const handleSeleccionCsv = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const archivo = event.target.files?.[0];
+    event.target.value = "";
+    if (!archivo) return;
+    setCsvError("");
+    setCsvPreview(null);
+    if (!archivo.name.toLowerCase().endsWith(".csv")) {
+      setCsvError("Selecciona un archivo con extensión .csv.");
+      return;
+    }
+    if (archivo.size > 2 * 1024 * 1024) {
+      setCsvError("El CSV supera 2 MB. Divide el archivo en lotes más pequeños.");
+      return;
+    }
+    try {
+      const texto = await archivo.text();
+      const nuevos = importarProductosCsv(texto, productos);
+      setCsvPreview({ nombre: archivo.name, productos: nuevos });
+    } catch (error: any) {
+      setCsvError(error?.message || "No se pudo leer el archivo CSV.");
+    }
+  };
+
+  const handleImportarCsv = async () => {
+    if (!csvPreview || importandoCsv) return;
+    setImportandoCsv(true);
+    setCsvError("");
+    try {
+      // El servicio valida otra vez en Firebase los SKU y aplica un único batch.
+      await firestoreService.addProductsBatch(csvPreview.productos);
+      notify(`Se importaron ${csvPreview.productos.length} productos correctamente.`);
+      setCsvPreview(null);
+    } catch (error: any) {
+      setCsvError(error?.message || "No se pudieron registrar los productos del CSV.");
+    } finally {
+      setImportandoCsv(false);
+    }
+  };
+
   return (
     <div id="gestion-productos-root" className="page-shell space-y-6">
       <div id="gestion-productos-header" className="page-header">
@@ -170,6 +236,19 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
           </p>
         </div>
         <div className="page-actions">
+          <input
+            ref={csvFileRef} type="file" accept=".csv,text/csv" className="sr-only"
+            aria-label="Seleccionar archivo CSV de productos" onChange={event => void handleSeleccionCsv(event)}
+          />
+          <button type="button" className="btn-secondary" onClick={handleDescargarPlantilla} disabled={importandoCsv}>
+            <Download className="w-4 h-4" /> Plantilla CSV
+          </button>
+          <button type="button" className="btn-secondary" onClick={() => csvFileRef.current?.click()} disabled={importandoCsv}>
+            <FileUp className="w-4 h-4" /> Importar CSV
+          </button>
+          <button type="button" className="btn-secondary" onClick={() => void handleExportarCatalogo()} disabled={exportandoCsv || importandoCsv}>
+            <Download className="w-4 h-4" /> {exportandoCsv ? "Exportando…" : "Exportar catálogo"}
+          </button>
           <button id="btn-gestionar-catalogos" type="button" onClick={() => setIsCatalogosOpen(true)} className="btn-secondary">
             <Settings className="w-4 h-4" /> Configurar productos
           </button>
@@ -178,6 +257,10 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
           </button>
         </div>
       </div>
+
+      {csvError && !csvPreview && <p role="alert" className="rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30 p-3 text-sm text-rose-700 dark:text-rose-300">
+        {csvError}
+      </p>}
 
       <div id="gestion-productos-filters" className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800">
         <div className="relative sm:col-span-2">
@@ -238,6 +321,54 @@ export default function GestionProductos({ productos: propProductos }: GestionPr
           </table>
         </div>
       </section>
+
+      {csvPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div role="dialog" aria-modal="true" aria-label="Vista previa de importación CSV" className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 px-5 py-4">
+              <div>
+                <h2 className="text-base font-bold text-zinc-900 dark:text-white">Importar productos desde CSV</h2>
+                <p className="mt-1 text-xs text-zinc-500 break-all">{csvPreview.nombre}</p>
+              </div>
+              <button type="button" onClick={() => { setCsvPreview(null); setCsvError(""); }} aria-label="Cerrar importación" disabled={importandoCsv} className="p-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-white disabled:opacity-50">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-4 px-5 py-4">
+              <p className="text-sm font-semibold">{csvPreview.productos.length} productos nuevos listos para importar</p>
+              <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                Se crearán únicamente SKU nuevos. No se actualizarán los existentes ni se modificarán existencias, compras o ventas.
+                Se admiten hasta {MAX_PRODUCTOS_CSV} productos por archivo. La operación se guarda como un solo lote.
+              </p>
+              <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-700">
+                <table className="w-full min-w-[520px] text-left text-xs">
+                  <thead className="bg-zinc-50 dark:bg-zinc-800 text-zinc-500">
+                    <tr><th className="p-3">SKU</th><th className="p-3">Nombre</th><th className="p-3">Marca</th><th className="p-3">Tipo de talla</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                    {csvPreview.productos.slice(0, 8).map(producto => (
+                      <tr key={producto.sku}>
+                        <td className="p-3 font-mono">{producto.sku}</td>
+                        <td className="p-3">{producto.nombre}</td>
+                        <td className="p-3">{producto.marca}</td>
+                        <td className="p-3">{etiquetaTipoTalla(producto.tipo_talla)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {csvPreview.productos.length > 8 && <p className="text-xs text-zinc-500">Se muestran 8 de {csvPreview.productos.length} productos. Se validó el archivo completo.</p>}
+              {csvError && <p role="alert" className="text-xs text-rose-600">{csvError}</p>}
+            </div>
+            <div className="flex justify-end gap-3 border-t border-zinc-200 dark:border-zinc-800 px-5 py-4">
+              <button type="button" disabled={importandoCsv} onClick={() => { setCsvPreview(null); setCsvError(""); }} className="btn-secondary">Cancelar</button>
+              <button type="button" disabled={importandoCsv} onClick={() => void handleImportarCsv()} className="btn-primary disabled:opacity-50">
+                {importandoCsv ? "Importando…" : `Importar ${csvPreview.productos.length} productos`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isFormOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
